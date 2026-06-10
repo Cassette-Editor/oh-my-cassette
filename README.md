@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.jpg" width="100%" alt="Oh My Cassette banner" />
+  <img src="assets/banner.jpg" width="80%" alt="Oh My Cassette banner" />
 </p>
 
 <h1 align="center">
