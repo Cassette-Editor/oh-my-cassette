@@ -10,19 +10,19 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Mobile Video Editing A
   <a href="./README.zh-cn.md">简体中文</a> | <b>English</b>
 </p>
 
-<table width="100%">
+<table align="center" width="82%">
 <tr>
-<td width="9%"></td>
-<td width="82%">
+<td>
   <video src="https://github.com/user-attachments/assets/7050ac81-06a5-4581-bbd5-cf42e3773373" controls width="100%"></video>
 </td>
-<td width="9%"></td>
 </tr>
 </table>
 
 <h3 align="center">
+  <em>
   Arm your <a href="https://github.com/nousresearch/hermes-agent">Hermes</a> with <a href="https://trycassette.online/home">Cassette</a>'s video editing power.<br />
   Add a friend, chat your video into shape.
+  </em>
 </h3>
 
 ## 🎬 Case Videos
