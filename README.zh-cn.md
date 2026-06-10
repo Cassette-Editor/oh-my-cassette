@@ -12,9 +12,11 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 视频剪辑
 
 <table width="100%">
 <tr>
-<td align="center">
-  <video src="https://github.com/user-attachments/assets/7050ac81-06a5-4581-bbd5-cf42e3773373" controls width="82%"></video>
+<td width="9%"></td>
+<td width="82%">
+  <video src="https://github.com/user-attachments/assets/7050ac81-06a5-4581-bbd5-cf42e3773373" controls width="100%"></video>
 </td>
+<td width="9%"></td>
 </tr>
 </table>
 
