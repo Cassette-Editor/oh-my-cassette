@@ -13,7 +13,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Mobile Video Editing A
 <table align="center" width="82%">
 <tr>
 <td>
-  <video src="https://github.com/user-attachments/assets/7050ac81-06a5-4581-bbd5-cf42e3773373" poster="assets/video-posters/main-demo.jpg" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/7050ac81-06a5-4581-bbd5-cf42e3773373" controls width="100%"></video>
 </td>
 </tr>
 </table>
