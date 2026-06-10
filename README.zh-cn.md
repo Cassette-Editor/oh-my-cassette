@@ -10,9 +10,13 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 视频剪辑
   <b>简体中文</b> | <a href="./README.md">English</a>
 </p>
 
-<p align="center">
-  <video src="" controls width="82%"></video>
-</p>
+<table width="100%">
+<tr>
+<td align="center">
+  <video src="https://github.com/user-attachments/assets/7050ac81-06a5-4581-bbd5-cf42e3773373" controls width="82%"></video>
+</td>
+</tr>
+</table>
 
 <h3 align="center">
   让你的 <a href="https://github.com/nousresearch/hermes-agent">Hermes</a> 拥有 <a href="https://trycassette.online/home">Cassette</a> 强大的视频剪辑能力。<br />

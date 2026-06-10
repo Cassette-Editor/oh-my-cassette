@@ -10,9 +10,13 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Mobile Video Editing A
   <a href="./README.zh-cn.md">简体中文</a> | <b>English</b>
 </p>
 
-<p align="center">
+<table width="100%">
+<tr>
+<td align="center">
   <video src="https://github.com/user-attachments/assets/7050ac81-06a5-4581-bbd5-cf42e3773373" controls width="82%"></video>
-</p>
+</td>
+</tr>
+</table>
 
 <h3 align="center">
   Arm your <a href="https://github.com/nousresearch/hermes-agent">Hermes</a> with <a href="https://trycassette.online/home">Cassette</a>'s video editing power.<br />
