@@ -251,7 +251,7 @@ python3 scripts/install_plugin.py \
 ```
 </details>
 
-## 📼 开始使用
+## 开始使用 📼 
 
 **现在可以拿起手机给你的 Agent 发私信了。记得保持 Agent 在线，并确保网络可用。**
 
@@ -284,7 +284,7 @@ python3 scripts/install_plugin.py \
 
 * 默认情况下，QQ 使用中文，Telegram 使用英文。你也可以通过 `/cassette language zh/en` 手动切换语言。
 
-## 更新插件
+## 更新
 
 更新 Oh My Cassette 并重启 Hermes 网关：
 
@@ -304,7 +304,7 @@ hermes gateway restart
 # 🔨 开发与排障
 
 > [!TIP]
-> 💡 加入我们的Discord社区和`oh-my-cassette` 用户一起交流
+> 加入我们的Discord社区和`oh-my-cassette` 用户一起交流
 >
 > [![Discord](https://img.shields.io/discord/1514649803626250452?style=for-the-badge&logo=discord&logoColor=white&label=Discord&labelColor=black&color=5865F2)](https://discord.gg/qd9NY4k8d7)
 

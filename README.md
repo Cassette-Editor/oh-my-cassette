@@ -255,7 +255,7 @@ python3 scripts/install_plugin.py \
 ```
 </details>
 
-## 📼 Ready to Use
+## Ready to Use 📼
 **Now you can pick up your phone and DM your agent! Don't forget to keep your agent alive and network connected.**
 
 In QQ or Telegram:
@@ -287,7 +287,7 @@ In QQ or Telegram:
 
 * QQ is set to Chinese and Telegram is set to English by default, you can set language by command `/cassette language zh/en` manually.
 
-## Update Plugin
+## Update
 
 
 Update Oh My Cassette and restart the Hermes gateway:
@@ -307,7 +307,7 @@ hermes gateway restart
 # 🔨 Development & Troubleshooting
 
 > [!TIP]
-> 💡 Join our Discord community to connect with contributors and fellow `oh-my-cassette` users.
+> Join our Discord community to connect with contributors and fellow `oh-my-cassette` users.
 >
 > [![Discord](https://img.shields.io/discord/1514649803626250452?style=for-the-badge&logo=discord&logoColor=white&label=Discord&labelColor=black&color=5865F2)](https://discord.gg/qd9NY4k8d7)
 
