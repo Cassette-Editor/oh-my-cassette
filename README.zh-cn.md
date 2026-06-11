@@ -45,6 +45,45 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身视频剪辑师
   </em>
 </h3>
 
+# 🎥 项目概览
+
+**Oh My Cassette** 是一个面向 <a href="https://trycassette.online">Cassette</a> 视频剪辑工作流的 harness plugin 和视频剪辑 skill，专为 Agent 协作与调度设计，并尽可能减少token消耗。
+
+你随时可以在手机上发送视频或音频素材，并和 Agent 聊聊你的想法，Agent 就会与 Cassette 协作，理解你的创作意图，整理素材，规划剪辑流程，并通过强大的剪辑能力，帮你制作可以直接分享的成片。
+
+无需手动拉时间线，不用学剪辑，聊聊想法，**Oh My Cassette** 帮你记录灵感、直接成片。
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <h3>📱 随时记录</h3>
+      <p>看到什么、想到什么，随时把素材和想法发给你的 AI 剪辑师。</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>💬 聊天剪辑</h3>
+      <p>不用拉时间线，不用学复杂工具，用自然语言说出你想要的视频。</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>🎵 智能配乐</h3>
+      <p>根据素材氛围、视频节奏和故事情绪，音乐匹配到你心巴上。</p>
+    </td>
+    </tr>
+    <tr>
+    <td align="center" width="33%">
+      <h3>🌌 蒙太奇成片</h3>
+      <p>自动整理素材、编排故事，生成有节奏、有情绪、有记忆点的视频。</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>✨ 高级剪辑能力</h3>
+      <p>支持标题字幕、画中画、音乐卡点、硬切转场、动效和风格化处理。</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>✅ 分享即用</h3>
+      <p>支持预览、修改和导出，从零散片段快速变成可以发布的成片。</p>
+    </td>
+  </tr>
+</table>
+
 ## 🎬 案例视频
 
 <table width="100%">
@@ -123,45 +162,6 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身视频剪辑师
 <p align="center">
   <strong>★ 更多案例持续更新中，欢迎 Star 关注本项目。</strong>
 </p>
-
-# 🎥 项目概览
-
-**Oh My Cassette** 是一个面向 <a href="https://trycassette.online">Cassette</a> 视频剪辑工作流的 harness plugin 和视频剪辑 skill，专为 Agent 协作与调度设计，并尽可能减少token消耗。
-
-你随时可以在手机上发送视频或音频素材，并和 Agent 聊聊你的想法，Agent 就会与 Cassette 协作，理解你的创作意图，整理素材，规划剪辑流程，并通过强大的剪辑能力，帮你制作可以直接分享的成片。
-
-无需手动拉时间线，不用学剪辑，聊聊想法，**Oh My Cassette** 帮你记录灵感、直接成片。
-
-<table>
-  <tr>
-    <td align="center" width="33%">
-      <h3>📱 随时记录</h3>
-      <p>看到什么、想到什么，随时把素材和想法发给你的 AI 剪辑师。</p>
-    </td>
-    <td align="center" width="33%">
-      <h3>💬 聊天剪辑</h3>
-      <p>不用拉时间线，不用学复杂工具，用自然语言说出你想要的视频。</p>
-    </td>
-    <td align="center" width="33%">
-      <h3>🎵 智能配乐</h3>
-      <p>根据素材氛围、视频节奏和故事情绪，音乐匹配到你心巴上。</p>
-    </td>
-    </tr>
-    <tr>
-    <td align="center" width="33%">
-      <h3>🌌 蒙太奇成片</h3>
-      <p>自动整理素材、编排故事，生成有节奏、有情绪、有记忆点的视频。</p>
-    </td>
-    <td align="center" width="33%">
-      <h3>✨ 高级剪辑能力</h3>
-      <p>支持标题字幕、画中画、音乐卡点、硬切转场、动效和风格化处理。</p>
-    </td>
-    <td align="center" width="33%">
-      <h3>✅ 分享即用</h3>
-      <p>支持预览、修改和导出，从零散片段快速变成可以发布的成片。</p>
-    </td>
-  </tr>
-</table>
 
 # 🚀 快速开始
 
@@ -301,7 +301,12 @@ python3 scripts/install_plugin.py --copy --force
 hermes gateway restart
 ```
 
-# 🔨 排障与开发
+# 🔨 开发与排障
+
+> [!TIP]
+> 💡 加入我们的Discord社区和`oh-my-cassette` 用户一起交流
+>
+> [![Discord](https://img.shields.io/discord/1514649803626250452?style=for-the-badge&logo=discord&logoColor=white&label=Discord&labelColor=black&color=5865F2)](https://discord.gg/qd9NY4k8d7)
 
 ## 常见问答
 

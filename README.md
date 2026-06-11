@@ -45,6 +45,50 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket Video Co-editor
   </em>
 </h3>
 
+
+
+# 🎥 Overview
+
+**Oh My Cassette** is a harness plugin and video editing skill built for agent-supervised workflows on <a href="https://trycassette.online">Cassette</a>, with minimal token overhead.
+
+Just send your videos or audio files and chat with your agent from anywhere on your phone. Your agent will work with Cassette to understand your intent, organize your media, plan the edit, and turn your materials into a ready-to-share video with powerful montage capabilities.
+
+We believe everyone carries a film of their own. **Oh My Cassette** helps you capture sparks of inspiration, shape scattered moments into a story, and turn raw clips into montage videos without wrestling with timelines or editing tools.
+
+Be the director of your own story, effortlessly.
+
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <h3>📱 Capture Anywhere</h3>
+      <p>Send clips, audio, and ideas to your AI editing friend anytime, anywhere.</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>💬 Chat-to-Edit</h3>
+      <p>Describe the video you want in natural language instead of wrestling with timelines.</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>🎵 Smart Music Matching</h3>
+      <p>Automatically match music to the mood, rhythm, and story of your footage.</p>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <h3>🌌 Montage Storytelling</h3>
+      <p>Organize scattered moments into rhythmic, emotional, and memorable video stories.</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>✨ Advanced Editing Ability</h3>
+      <p>Support title captions, picture-in-picture, beat sync, hard cuts, transitions, motion graphics, and stylized edits.</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>✅ Ready to Share</h3>
+      <p>Preview, refine, and export polished videos ready to post on social platforms.</p>
+    </td>
+  </tr>
+</table>
+
 ## 🎬 Case Videos
 
 <table width="100%">
@@ -123,48 +167,6 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket Video Co-editor
 <p align="center">
   <strong>★ More cases are on the way. Star the project to follow along.</strong>
 </p>
-
-# 🎥 Overview
-
-**Oh My Cassette** is a harness plugin and video editing skill built for agent-supervised workflows on <a href="https://trycassette.online">Cassette</a>, with minimal token overhead.
-
-Just send your videos or audio files and chat with your agent from anywhere on your phone. Your agent will work with Cassette to understand your intent, organize your media, plan the edit, and turn your materials into a ready-to-share video with powerful montage capabilities.
-
-We believe everyone carries a film of their own. **Oh My Cassette** helps you capture sparks of inspiration, shape scattered moments into a story, and turn raw clips into montage videos without wrestling with timelines or editing tools.
-
-Be the director of your own story, effortlessly.
-
-
-<table>
-  <tr>
-    <td align="center" width="33%">
-      <h3>📱 Capture Anywhere</h3>
-      <p>Send clips, audio, and ideas to your AI editing friend anytime, anywhere.</p>
-    </td>
-    <td align="center" width="33%">
-      <h3>💬 Chat-to-Edit</h3>
-      <p>Describe the video you want in natural language instead of wrestling with timelines.</p>
-    </td>
-    <td align="center" width="33%">
-      <h3>🎵 Smart Music Matching</h3>
-      <p>Automatically match music to the mood, rhythm, and story of your footage.</p>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="33%">
-      <h3>🌌 Montage Storytelling</h3>
-      <p>Organize scattered moments into rhythmic, emotional, and memorable video stories.</p>
-    </td>
-    <td align="center" width="33%">
-      <h3>✨ Advanced Editing Ability</h3>
-      <p>Support title captions, picture-in-picture, beat sync, hard cuts, transitions, motion graphics, and stylized edits.</p>
-    </td>
-    <td align="center" width="33%">
-      <h3>✅ Ready to Share</h3>
-      <p>Preview, refine, and export polished videos ready to post on social platforms.</p>
-    </td>
-  </tr>
-</table>
 
 # 🚀 Quick Start
 
@@ -302,7 +304,12 @@ python3 scripts/install_plugin.py --copy --force
 hermes gateway restart
 ```
 
-# 🔨 Troubleshooting & Development
+# 🔨 Development & Troubleshooting
+
+> [!TIP]
+> 💡 Join our Discord community to connect with contributors and fellow `oh-my-cassette` users.
+>
+> [![Discord](https://img.shields.io/discord/1514649803626250452?style=for-the-badge&logo=discord&logoColor=white&label=Discord&labelColor=black&color=5865F2)](https://discord.gg/qd9NY4k8d7)
 
 ## Common Q&A
 
