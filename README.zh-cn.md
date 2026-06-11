@@ -61,7 +61,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身视频剪辑师
   <p><code>治愈</code> <code>日常</code> <code>轻松</code> <code>生活方式</code></p>
 </td>
 <td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/b351ff30-c485-4be8-be2d-7e03e431fbb2" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/b85285a9-30ed-4f9b-b314-538bfd9dbdd6" controls width="100%"></video>
   <h3>旅行Vlog</h3>
   <p>
     <sub>🎞️ 输入：13 段视频 · 1 段音频</sub><br />
@@ -85,7 +85,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身视频剪辑师
 </tr>
 <tr>
 <td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/f511ff16-7e99-422c-beec-8d013341af99" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/97fdfe3a-f420-4135-8c62-494bbb7ea436" controls width="100%"></video>
   <h3>美食教程</h3>
   <p>
     <sub>🎞️ 输入：12 段视频 · 1 段音频</sub><br />
