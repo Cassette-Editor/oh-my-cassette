@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">
-Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket Video Co-editor
+Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket AI Co-editor for Video Montage
 </h1>
 
 <p align="center">

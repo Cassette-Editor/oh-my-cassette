@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">
-Oh My <a href="https://trycassette.online/">Cassette</a>: 随身视频剪辑师
+Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 </h1>
 
 <p align="center">
