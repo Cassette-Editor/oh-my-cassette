@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">
-Oh My <a href="https://trycassette.online/">Cassette</a>: Mobile Video Editing AI Agent Skill
+Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket Video Co-editor
 </h1>
 
 <p align="center">
@@ -18,7 +18,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Mobile Video Editing A
     <img src="https://img.shields.io/github/forks/DAGroup-PKU/oh-my-cassette?style=flat-square&logo=github" alt="Forks">
   </a>
   <img src="https://img.shields.io/badge/Python-3.10+-purple.svg" alt="Python">
-  <a href="https://trycassette.online/home">
+  <a href="https://trycassette.online">
     <img src="https://img.shields.io/badge/Cassette-Compatible-1f6feb?style=flat-square&logo=data%3Aimage%2Fwebp%3Bbase64%2CUklGRhgHAABXRUJQVlA4WAoAAAAQAAAANwAANwAAQUxQSMkCAAABkIVt29lI75hr27Yx9tq2bdu2bdu2bdt23e4kfQ86TZN%2FeRgRE4DfcIX9Oyr%2BCuE7ZFJeX0a0oK0SE7SsKyNSmTU2KjQvKypKsTVWumhcVkSEIsuNVNG4KJ9WOabqqPK3yVm1yDnjCzX8OCWLWhknfabG7yZkUiPz5HcU8HWvVK5kGPuegj4blEqJV%2B9XFPhpZ09nmU0UWi7gLKteLHtRBTqx5CIKvotl%2B%2B%2F2tNfgd7%2FC6%2BHpgCwTv4r2YVQGJJhn2meRPo3PCoU5lhhE%2BT41F1wsssoswo%2FphaFiycVGrfQLC0Dl0ssNqugSMq0uAQ0LrbQlJLlkXVUSGgdttjnISr6T8TuCIGDQVom0FVa0PxSCRu2Ltwcp2pdOFLe2P1nKWX6LXnc7nRhR53mvuaezEpyU58d0AdwaRG1mX18oDOcQLH%2FqizEjUmpSZidHrXuarXmggmAOQ9IYb78HnK1BwVVm2%2BTUG%2BON31IryGgZCwBh8bzqBZ9EqhSNvkauB7Zwb2ko9Dh8PnFMfowmdVkDDjzq5eVS7lm25S1aSKuBHS%2Fdsk%2FP4QylDA%2BstxOfJO2xOWWZ892VpR3zlXvyIqO0Btj2bZnZmFMBYh9xS7YfJEcmM02rLVeFl7uTNPlXkFc8gBwOW8g1BaE4WViShiS5F4tf5ti%2FK%2FPpU9UdkvR4t7pZ45dn4GTV%2FvJwPebx7J3S67Sprjyr07oz7ewA78b3ebI8cO%2B8g7weSOUBNVO4YxS7HYq6%2BiBxNBvOMmYJ4svGALzvO%2BSUxkLDXN9HfRuX4vMMr9t7MusGhHFwxtLOAuL8tUDRwgPs01%2Fe8i6v31u%2FehTfG5c6XIKIAQvJo42XNbWuRhylDVkA7yfbhQBippUKY%2BVKrBbOCShbAx5VUgsCwHvvp1HSjDCumsnVEDvzKXJSOCmtyC4YfFpOyRhnnF8Mv2TaYviLBABWUDggKAQAAPAYAJ0BKjgAOAA%2BTSCLRCKiIRgN%2FgAoBMS0htgATIB%2FRvwg8Cf6r%2BM37Vdtj559kc4Z9Yvtn5Gfkzzg7Sf%2BC%2FKTgCePfx3%2FVfmBzAfTz%2B7epP%2BKf2X8wvYDuAPUA%2Flv9E%2F2P3O%2FDz%2FeeSD8v%2FuHsB%2Fxz%2Bef6r%2B7fu%2Fxm36xJmyyFkngkpmRPYsV6xmH5QF4lb%2Fl9hSgk5D3PqHNQLXrlv7NrItI%2FEHrxBF2jRuhKjEBVmBB10mJvHzkR2Q2arL3GqP10RyllNZGUghwhZxRilAA%2Fuw6mSpSUmz%2BC9%2BKh7D7qK39xAKDdKGxdWNME94DsfqLZMWOWeIeTypqgNWds0IPEbdim9%2FrYj%2BEd8AhWw%2F%2Bzi%2FwdIkNi7bJQyZ55GARC1%2FHJxJRDbUPxx7XEJNOqXwK2TTvcPfg%2FB1Sxtu3%2F%2BqXZV7Ea27hgAqAwjmpzYt%2FUnFY%2BC0oW45G3Loc8bVetEXzeXitUxCUpACSaawCSSfLqRe1eG3zUIXqEc82GnC78rFUxGMUSd%2FG9fuFsdPGi96Lm3KIZEKgeEYxznL%2BMFlhtO40ZN%2FW3ejoFZfedwy4KUpiGElmS9DdaNzh40f3qq2ox2aJonnJDtPET3GC8%2FxLitJKLpjNVH%2Fs2f5UmAx%2B5LKDbHdllFCDWoI3Pp%2FVHmOId6JL4jNCWVVHcq5vtCed3YAxjpLyN7Mu2NYOtVFR9IFyf7Vd5AztRBIGFD79z80kLXz%2F%2F%2BfO3t2lkek5ydWcB0weeaYMf%2Fwaie0%2Bighho%2Bx1LSEM4hwlpukY3yztN8wyYCF8fSe9AWia9TSnFp57nMo5YifIm9RF6TM%2Fvo6yBTI0Pi%2FGt%2F%2F6mnejWgvH1%2F%2F%2BhS5iYOwLt%2BHG5ouw5J01Fd%2F1WfcWXdBL9MEwe3fGBYZUYUOiM3FvKWH0ikirZAvG0xfpgf%2FgnXTZaTTeyzpnuvF289BWGVcYoRTe2gBbGUT00tzQ4XuCIo9OV7ysRBBK4PTfYTi%2FntO%2FGJkP7JHWEAf7RfyPpf2z%2F3gmxcwD3IXTbEB9aXF%2BVQYVzi8x%2FWj1eluYh3G6xEWj5aKxK09fn3AaJy6LKTQjgk8209Tv7brUzGKt26W4a5uQVRnc6cAzlXdvZB3nrAUJ4SsTWRbCM9m6TDQ7A0dctlIEQzv%2FUTvpPTnyuaOqiVP5PsHXhi9x0791xIp4e1U8sUVgkxVIgE2QYZjQXnY9Kuv0ciSsqTTzWZ6it0Z1Y9qOMi%2F%2BDwjsHCI%2FTwjcrXfrv2jVjya%2Fh3h%2FRzBb7Mszb6Pr54Dpg%2B6OQeVLDvWMOcd9P7x1uSSp%2FrzOS7zB9i5HJvNTeTjIi%2Be5Xf9eSzCoym6aKUC6i6Gkf7O96HwkdmR9TOx3ZuNOJY%2F%2BdF%2F%2F%2FnRxgu4Mj%2F29%2FT%2FJ34nP%2F6r9U3fQV%2BjAyqrfV23tQAAA&logoColor=white" alt="Cassette Compatible">
   </a>
   <a href="https://github.com/nousresearch/hermes-agent">
@@ -33,14 +33,14 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Mobile Video Editing A
 <table align="center" width="82%">
 <tr>
 <td>
-  <video src="https://github.com/user-attachments/assets/7050ac81-06a5-4581-bbd5-cf42e3773373" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/efcfda75-f09b-4bde-8a69-e84410f28e10" controls width="100%"></video>
 </td>
 </tr>
 </table>
 
 <h3 align="center">
   <em>
-  Arm your <a href="https://github.com/nousresearch/hermes-agent">Hermes</a> with <a href="https://trycassette.online/home">Cassette</a>'s video editing power.<br />
+  Arm your <a href="https://github.com/nousresearch/hermes-agent">Hermes</a> with <a href="https://trycassette.online">Cassette</a>'s amazing video editing power.<br />
   Add a friend, chat your video into shape.
   </em>
 </h3>
@@ -61,18 +61,18 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Mobile Video Editing A
   <p><code>Healing</code> <code>Daily</code> <code>Feel-good</code> <code>Lifestyle</code></p>
 </td>
 <td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/8da38e40-7876-4743-a32d-5fd95265f37e" controls width="100%"></video>
-  <h3>Commercial</h3>
+  <video src="https://github.com/user-attachments/assets/b351ff30-c485-4be8-be2d-7e03e431fbb2" controls width="100%"></video>
+  <h3>Travel Vlog</h3>
   <p>
-    <sub>🎞️ Input: 15 video clips · 15 sound effects · 1 audio track</sub><br />
-    <sub>⏱️ Processing Time: 13 mins</sub>
+    <sub>🎞️ Input: 13 video clips · 1 audio track</sub><br />
+    <sub>⏱️ Processing Time: 15 mins</sub>
   </p>
   <p><b>Prompt</b><br />
-  Use these materials to edit a 15-second product commercial. Start with opening the bottle cap, add bubbles, water splashes, ice cubes, and product details in the middle, and end with the full product and brand. Keep it refreshing, thirst-quenching, and ad-like.</p>
-  <p><code>Product</code> <code>Short</code> <code>Commercial</code></p>
+  Edit a 30-second travel vlog using all materials with a clear viewing flow. Add the title subtitle "KOTA KINABALU" at the beginning and end. Include the vlog shooting time, overlay the character video onto similar scenic shots as a picture-in-picture effect, keep the rhythm light and memorable, and use hard cuts plus music beat sync for a fresh vacation feeling.</p>
+  <p><code>Travel</code> <code>Vlog</code> <code>Beat Sync</code> <code>PiP</code></p>
 </td>
 <td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/60990781-c4ed-404d-8318-d61870ec56e3" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/73059786-246e-4808-b7cf-4deb35994ebc" controls width="100%"></video>
   <h3>Cinematic Mood Short</h3>
   <p>
     <sub>🎞️ Input: 15 video clips · 1 audio track</sub><br />
@@ -96,18 +96,18 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Mobile Video Editing A
   <p><code>Food</code> <code>Tutorial</code> <code>Explainer</code></p>
 </td>
 <td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/b351ff30-c485-4be8-be2d-7e03e431fbb2" controls width="100%"></video>
-  <h3>Travel Vlog</h3>
+  <video src="https://github.com/user-attachments/assets/8da38e40-7876-4743-a32d-5fd95265f37e" controls width="100%"></video>
+  <h3>Commercial</h3>
   <p>
-    <sub>🎞️ Input: 13 video clips · 1 audio track</sub><br />
-    <sub>⏱️ Processing Time: 15 mins</sub>
+    <sub>🎞️ Input: 15 video clips · 15 sound effects · 1 audio track</sub><br />
+    <sub>⏱️ Processing Time: 13 mins</sub>
   </p>
   <p><b>Prompt</b><br />
-  Edit a 30-second travel vlog using all materials with a clear viewing flow. Add the title subtitle "KOTA KINABALU" at the beginning and end. Include the vlog shooting time, overlay the character video onto similar scenic shots as a picture-in-picture effect, keep the rhythm light and memorable, and use hard cuts plus music beat sync for a fresh vacation feeling.</p>
-  <p><code>Travel</code> <code>Vlog</code> <code>Beat Sync</code> <code>PiP</code></p>
+  Use these materials to edit a 15-second product commercial. Start with opening the bottle cap, add bubbles, water splashes, ice cubes, and product details in the middle, and end with the full product and brand. Keep it refreshing, thirst-quenching, and ad-like.</p>
+  <p><code>Product</code> <code>Short</code> <code>Commercial</code></p>
 </td>
 <td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/608c6197-8dc2-49af-8005-21fc71a05223" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/9374de93-c0ff-4bf2-b1ed-fe393579f0c2" controls width="100%"></video>
   <h3>Game Highlight Video</h3>
   <p>
     <sub>🎞️ Input: 5 video clips · 1 audio track</sub><br />
@@ -126,15 +126,51 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Mobile Video Editing A
 
 # 🎥 Overview
 
-Oh My Cassette is a harness plugin and skill built for agent supervising video editing workflow on Cassette with minimal token overhead. You can simply send any videos or audio files and chat with agent anywhere on your phone, your agent will work with Cassette to finalize your ready-to-share video using impressive montage skill.
+**Oh My Cassette** is a harness plugin and video editing skill built for agent-supervised workflows on <a href="https://trycassette.online">Cassette</a>, with minimal token overhead.
 
-We believe stories live in the little traces of everyday life and those sudden flashes of inspiration. Sometimes, we just don’t know how to turn them into videos. *Oh My Cassette* is an open-source attempt to help you do just that. Just have fun being who you are!
+Just send your videos or audio files and chat with your agent from anywhere on your phone. Your agent will work with Cassette to understand your intent, organize your media, plan the edit, and turn your materials into a ready-to-share video with powerful montage capabilities.
+
+We believe everyone carries a film of their own. **Oh My Cassette** helps you capture sparks of inspiration, shape scattered moments into a story, and turn raw clips into montage videos without wrestling with timelines or editing tools.
+
+Be the director of your own story, effortlessly.
+
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <h3>📱 Capture Anywhere</h3>
+      <p>Send clips, audio, and ideas to your AI editing friend anytime, anywhere.</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>💬 Chat-to-Edit</h3>
+      <p>Describe the video you want in natural language instead of wrestling with timelines.</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>🎵 Smart Music Matching</h3>
+      <p>Automatically match music to the mood, rhythm, and story of your footage.</p>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="33%">
+      <h3>🌌 Montage Storytelling</h3>
+      <p>Organize scattered moments into rhythmic, emotional, and memorable video stories.</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>✨ Advanced Editing Ability</h3>
+      <p>Support title captions, picture-in-picture, beat sync, hard cuts, transitions, motion graphics, and stylized edits.</p>
+    </td>
+    <td align="center" width="33%">
+      <h3>✅ Ready to Share</h3>
+      <p>Preview, refine, and export polished videos ready to post on social platforms.</p>
+    </td>
+  </tr>
+</table>
 
 # 🚀 Quick Start
 
 ## Before You Start 🎬
 
-This plugin is built on top of the Cassette Agent page and is compatible with Hermes Agent. You need:
+This plugin is built on top of the <a href="https://trycassette.online/agent"> Cassette Agent </a>page and is compatible with Hermes Agent. You need:
 
 * A working Hermes Agent installation.
 * A Cassette account.
