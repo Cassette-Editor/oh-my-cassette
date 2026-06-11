@@ -61,7 +61,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket Video Co-editor
   <p><code>Healing</code> <code>Daily</code> <code>Feel-good</code> <code>Lifestyle</code></p>
 </td>
 <td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/b351ff30-c485-4be8-be2d-7e03e431fbb2" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/b85285a9-30ed-4f9b-b314-538bfd9dbdd6" controls width="100%"></video>
   <h3>Travel Vlog</h3>
   <p>
     <sub>🎞️ Input: 13 video clips · 1 audio track</sub><br />
@@ -85,7 +85,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket Video Co-editor
 </tr>
 <tr>
 <td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/f511ff16-7e99-422c-beec-8d013341af99" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/97fdfe3a-f420-4135-8c62-494bbb7ea436" controls width="100%"></video>
   <h3>Cooking Tutorial</h3>
   <p>
     <sub>🎞️ Input: 12 video clips · 1 audio track</sub><br />
