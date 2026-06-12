@@ -208,6 +208,31 @@ def test_install_script_installs_playwright_in_hermes_venv(tmp_path, monkeypatch
 
     assert install_plugin.install_hermes_playwright(tmp_path / ".hermes") is True
     assert observed == [
+        ([str(python), "-m", "pip", "--version"], False),
+        ([str(python), "-m", "pip", "install", "playwright"], False),
+        ([str(python), "-m", "playwright", "install", "chromium"], False),
+    ]
+
+
+def test_install_script_bootstraps_missing_pip_before_playwright(tmp_path, monkeypatch):
+    install_plugin = _load_install_script()
+    python = tmp_path / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    observed = []
+
+    def fake_run(cmd, *, dry_run=False):
+        observed.append((cmd, dry_run))
+        if cmd == [str(python), "-m", "pip", "--version"]:
+            return 1
+        return 0
+
+    monkeypatch.setattr(install_plugin, "_run_command", fake_run)
+
+    assert install_plugin.install_hermes_playwright(tmp_path / ".hermes") is True
+    assert observed == [
+        ([str(python), "-m", "pip", "--version"], False),
+        ([str(python), "-m", "ensurepip", "--upgrade"], False),
         ([str(python), "-m", "pip", "install", "playwright"], False),
         ([str(python), "-m", "playwright", "install", "chromium"], False),
     ]

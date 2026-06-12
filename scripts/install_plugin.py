@@ -212,10 +212,25 @@ def _run_command(cmd: list[str], *, dry_run: bool = False) -> int:
     return subprocess.run(cmd, check=False).returncode
 
 
+def _ensure_pip(python: Path, *, dry_run: bool = False) -> bool:
+    pip_check_code = _run_command([str(python), "-m", "pip", "--version"], dry_run=dry_run)
+    if pip_check_code == 0:
+        return True
+
+    print("pip was not found in the Hermes Python environment; bootstrapping it with ensurepip...")
+    ensurepip_code = _run_command([str(python), "-m", "ensurepip", "--upgrade"], dry_run=dry_run)
+    if ensurepip_code != 0:
+        print("pip bootstrap failed. Install pip in the Hermes Python environment, then rerun this installer.")
+        return False
+    return True
+
+
 def install_hermes_playwright(home: Path, *, dry_run: bool = False) -> bool:
     python = hermes_python(home)
     if not python.exists():
         print(f"skip Playwright setup; Hermes Python was not found: {python}")
+        return False
+    if not _ensure_pip(python, dry_run=dry_run):
         return False
     pip_code = _run_command([str(python), "-m", "pip", "install", "playwright"], dry_run=dry_run)
     if pip_code != 0:
