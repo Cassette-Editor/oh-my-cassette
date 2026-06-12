@@ -2327,7 +2327,7 @@ def _public_stage_timings(stage_timings: dict[str, dict[str, Any]], include_runn
 def _model_selection_for_job(job: dict) -> dict:
     selection = dict(job.get("model_selection") or {})
     return {
-        "model": str(selection.get("model") or os.getenv("CASSETTE_DEFAULT_MODEL", "DeepSeek V4 Flash")).strip(),
+        "model": str(selection.get("model") or "").strip(),
         "thinking_level": str(selection.get("thinking_level") or os.getenv("CASSETTE_DEFAULT_THINKING_LEVEL", "Low")).strip(),
     }
 
@@ -2695,6 +2695,8 @@ def _select_cassette_model(page: Any, job: dict) -> dict:
     selection = _model_selection_for_job(job)
     model = selection["model"]
     thinking = selection["thinking_level"]
+    if not model:
+        return {**selection, "status": "skipped", "reason": "model_not_selected"}
     if page.url.startswith("file:"):
         return {**selection, "status": "skipped", "reason": "fixture_page"}
     try:

@@ -1790,6 +1790,30 @@ def test_gateway_cassette_model_command_sets_preference_without_assets(cassette_
     assert prefs["cassette_thinking_level"] == "High"
 
 
+def test_gateway_model_choice_does_not_fallback_to_hardcoded_options(cassette_env, monkeypatch):
+    def fail_fetch(language="zh"):
+        raise RuntimeError("cassette_unreachable")
+
+    monkeypatch.setattr(tools.browser, "fetch_cassette_model_options", fail_fetch)
+    sent = []
+    source = SimpleNamespace(platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm")
+    gateway = SimpleNamespace(
+        _is_user_authorized=lambda _: True,
+        adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
+    )
+
+    result = tools.ingest_gateway_media(
+        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="/cassette_model", message_id="model_command"),
+        gateway=gateway,
+    )
+
+    assert result is not None
+    assert result["reason"] == "cassette_model_options_unavailable"
+    assert "无法从 Cassette 页面获取模型列表" in sent[-1][1]
+    assert "DeepSeek" not in sent[-1][1]
+    assert "Kimi" not in sent[-1][1]
+
+
 def test_gateway_cut_slash_command_requests_active_job_cancel(cassette_env):
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
@@ -2844,7 +2868,7 @@ def test_job_status_includes_user_report(cassette_env, monkeypatch):
     assert report["latest_progress"] == "Cassette chat says complete."
 
 
-def test_run_job_defaults_to_deepseek_low_model(cassette_env, monkeypatch):
+def test_run_job_does_not_hardcode_default_model(cassette_env, monkeypatch):
     observed = {}
 
     def fake_browser_run(job):
@@ -2855,9 +2879,9 @@ def test_run_job_defaults_to_deepseek_low_model(cassette_env, monkeypatch):
     payload = json.loads(tools.cassette_run_job({"prompt": "internal", "chat_message": "请剪成 10 秒", "session_id": "model-default"}))
     status = json.loads(tools.cassette_job_status({"job_id": payload["job_id"]}))
 
-    assert observed["model_selection"]["model"] == "DeepSeek V4 Flash"
+    assert observed["model_selection"]["model"] == ""
     assert observed["model_selection"]["thinking_level"] == "Low"
-    assert status["data"]["job"]["report"]["model_selection"]["model"] == "DeepSeek V4 Flash"
+    assert status["data"]["job"]["report"]["model_selection"]["model"] == ""
 
 
 def test_run_job_accepts_user_specified_cassette_model(cassette_env, monkeypatch):
@@ -2871,6 +2895,7 @@ def test_run_job_accepts_user_specified_cassette_model(cassette_env, monkeypatch
     json.loads(tools.cassette_run_job({
         "prompt": "internal",
         "chat_message": "请用 DeepSeek V4 Pro，高思考程度，剪成 10 秒",
+        "cassette_model": "DeepSeek V4 Pro",
         "session_id": "model-explicit",
     }))
 

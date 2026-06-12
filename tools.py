@@ -396,34 +396,8 @@ def _asset_paths_for_session(session_id: str | None, chat_id: str | None, task_i
     ], dict(session_manifest.get("delivery") or {})
 
 
-_CASSETTE_MODELS = (
-    ("kimi k2.6", "Kimi K2.6"),
-    ("kimi 2.6", "Kimi K2.6"),
-    ("kimi", "Kimi K2.6"),
-    ("deepseek v4 flash", "DeepSeek V4 Flash"),
-    ("deepseek flash", "DeepSeek V4 Flash"),
-    ("deepseek v4 pro", "DeepSeek V4 Pro"),
-    ("deepseek pro", "DeepSeek V4 Pro"),
-    ("gemini 3.5 flash", "Gemini 3.5 Flash"),
-    ("gemini", "Gemini 3.5 Flash"),
-    ("gpt-5.4 mini", "GPT-5.4 Mini"),
-    ("gpt 5.4 mini", "GPT-5.4 Mini"),
-    ("gpt-5.5", "GPT-5.5"),
-    ("gpt 5.5", "GPT-5.5"),
-    ("mimo v2.5 pro", "MiMo V2.5 Pro"),
-    ("mimo", "MiMo V2.5 Pro"),
-)
-
-
-def _normalize_cassette_model(value: str | None, text: str = "") -> str:
-    explicit = (value or "").strip()
-    haystack = f"{explicit}\n{text}".lower()
-    for token, label in _CASSETTE_MODELS:
-        if token in haystack:
-            return label
-    if explicit:
-        return explicit
-    return os.getenv("CASSETTE_DEFAULT_MODEL", "DeepSeek V4 Flash")
+def _normalize_cassette_model(value: str | None) -> str:
+    return (value or "").strip()
 
 
 def _normalize_thinking_level(value: str | None, text: str = "") -> str:
@@ -455,7 +429,7 @@ def _cassette_model_selection(args: dict, delivery: dict | None = None) -> dict:
         str(args.get(key) or "")
         for key in ("chat_message", "cassette_message", "instruction", "prompt")
     )
-    model = _normalize_cassette_model(args.get("cassette_model") or args.get("model"), text)
+    model = _normalize_cassette_model(args.get("cassette_model") or args.get("model"))
     thinking_level = _normalize_thinking_level(args.get("thinking_level"), text)
     return {
         "model": model,
@@ -1771,40 +1745,21 @@ def _save_cassette_model_preference(session_id: str, model: str, thinking_level:
     )
 
 
-def _fallback_cassette_model_options(language: str = "zh") -> dict[str, Any]:
-    labels: list[str] = []
-    for _, label in _CASSETTE_MODELS:
-        if label not in labels:
-            labels.append(label)
-    thinking = (
-        [
-            {"label": "低", "value": "Low", "title": "轻量推理"},
-            {"label": "中", "value": "Medium", "title": "平衡"},
-            {"label": "高", "value": "High", "title": "深度推理"},
-        ]
-        if _normalize_cassette_language(language) != "en"
-        else [
-            {"label": "Low", "value": "Low", "title": "Light reasoning"},
-            {"label": "Medium", "value": "Medium", "title": "Balanced"},
-            {"label": "High", "value": "High", "title": "Deep reasoning"},
-        ]
-    )
-    return {
-        "models": [{"label": label} for label in labels],
-        "thinking_levels": thinking,
-        "source": "fallback",
-        "language": _normalize_cassette_language(language) or "zh",
-    }
+def _cassette_model_options(language: str = "zh") -> dict[str, Any]:
+    options = browser.fetch_cassette_model_options(language=language)
+    if not options.get("models"):
+        raise CassetteError(
+            "cassette_model_options_empty",
+            "Cassette model options were not available from the Cassette page.",
+            {"source": options.get("source") or "cassette_agent_page"},
+        )
+    return options
 
 
-def _safe_cassette_model_options(language: str = "zh") -> dict[str, Any]:
-    try:
-        options = browser.fetch_cassette_model_options(language=language)
-        if options.get("models"):
-            return options
-    except Exception:
-        pass
-    return _fallback_cassette_model_options(language)
+def _cassette_model_options_unavailable_message(language: str = "zh") -> str:
+    if _normalize_cassette_language(language) == "en":
+        return "Cassette model options are unavailable because the Cassette page could not provide them. Please retry after Cassette is reachable and logged in."
+    return "暂时无法从 Cassette 页面获取模型列表。请确认 Cassette 可访问且已登录后重试。"
 
 
 def _numbered_choice(text: str, max_value: int) -> int | None:
@@ -1862,7 +1817,18 @@ def _request_cassette_model_choice(
     language: str = "zh",
     resume_after_model: str = "edit",
 ) -> dict:
-    options = _safe_cassette_model_options(language)
+    try:
+        options = _cassette_model_options(language)
+    except Exception as exc:
+        reply_sent = _send_gateway_fixed_reply(gateway, event, _cassette_model_options_unavailable_message(language))
+        return {
+            "action": "skip",
+            "reason": "cassette_model_options_unavailable",
+            "asset_count": asset_count,
+            "session_id": session_id,
+            "reply_sent": reply_sent,
+            "error": type(exc).__name__,
+        }
     _save_pending_edit(
         session_id,
         instruction,
