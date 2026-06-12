@@ -111,3 +111,26 @@ def test_diagnose_login_check_redacts_subprocess_output(tmp_path, monkeypatch):
     assert result["status"] == "fail"
     assert "operator@example.com" not in str(result)
     assert "secret" not in str(result)
+
+
+def test_diagnose_warns_when_auth_form_stays_visible_after_page_submit(tmp_path, monkeypatch):
+    diagnose = _load_diagnose_script()
+    python = tmp_path / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    class Proc:
+        returncode = 0
+        stdout = '{"status":"fail","code":"cassette_auth_form_still_visible","auth_selectors":["#agent-auth-password"]}'
+
+    monkeypatch.setattr(diagnose.subprocess, "run", lambda *args, **kwargs: Proc())
+
+    result = diagnose._check_cassette_login(
+        tmp_path / ".hermes",
+        "https://example.test/agent",
+        "operator@example.com",
+        "secret",
+    )
+
+    assert result["status"] == "warn"
+    assert result["details"]["code"] == "cassette_auth_form_still_visible"

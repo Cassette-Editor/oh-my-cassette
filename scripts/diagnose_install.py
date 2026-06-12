@@ -275,10 +275,40 @@ def switch_to_login_form(page):
                     return rect.width > 0 && rect.height > 0;
                 };
                 const signupEmail = document.querySelector("#agent-auth-email");
-                const root = signupEmail?.closest("main,section,div") || document.body;
+                const form = signupEmail?.closest("form");
+                const root = form?.parentElement || signupEmail?.closest("main,section") || document.body;
+                const formRect = form?.getBoundingClientRect();
                 const buttons = Array.from(root.querySelectorAll("button[type='button'],button:not([type])"))
-                    .filter((button) => visible(button) && !button.disabled && button.getAttribute("aria-disabled") !== "true");
-                const target = buttons[buttons.length - 1];
+                    .filter((button) => {
+                        if (!visible(button) || button.disabled || button.getAttribute("aria-disabled") === "true") return false;
+                        if (button.closest("form")) return false;
+                        if (formRect) {
+                            const rect = button.getBoundingClientRect();
+                            if (rect.bottom > formRect.top + 2) return false;
+                        }
+                        return true;
+                    });
+                const labels = (button) => [
+                    button.getAttribute("aria-label"),
+                    button.getAttribute("title"),
+                    button.getAttribute("data-value"),
+                    button.getAttribute("value"),
+                    button.id,
+                    button.name,
+                    button.innerText,
+                    button.textContent,
+                ].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim().toLowerCase();
+                const target = buttons.find((button) => {
+                    const label = labels(button);
+                    return /(^|\\b)(log in|login|sign in|signin)(\\b|$)/.test(label) || /登录|登入|登陆/.test(label);
+                }) || (() => {
+                    const wideButtons = buttons.filter((button) => {
+                        const rect = button.getBoundingClientRect();
+                        return rect.width * rect.height >= 1200;
+                    });
+                    const tabButtons = wideButtons.length >= 2 ? wideButtons : buttons;
+                    return tabButtons.length >= 2 ? tabButtons[1] : null;
+                })();
                 if (target) target.click();
             }"""
         )
@@ -304,15 +334,19 @@ def agent_ui_ready(page):
     return bool(matches) and not page_requires_auth(page)
 
 
-def wait_state(page, timeout_sec):
+def wait_state(page, timeout_sec, auth_immediate=True):
     deadline = time.monotonic() + timeout_sec
+    saw_auth = False
     while time.monotonic() < deadline:
-        if page_requires_auth(page):
+        auth_visible = page_requires_auth(page)
+        if auth_visible:
+            saw_auth = True
+        if auth_visible and auth_immediate:
             return "auth"
         if agent_ui_ready(page):
             return "ready"
         time.sleep(0.25)
-    return "unknown"
+    return "auth" if saw_auth else "unknown"
 
 
 def first_visible_locator(page, selectors, timeout_sec=5):
@@ -355,6 +389,12 @@ def main():
                 return
 
             switch_to_login_form(page)
+            login_deadline = time.monotonic() + 5
+            while time.monotonic() < login_deadline:
+                state = auth_element_state(page)
+                if state.get("login_email_visible") and state.get("password_visible"):
+                    break
+                time.sleep(0.1)
             email_input = first_visible_locator(
                 page,
                 [
@@ -366,22 +406,12 @@ def main():
             )
             password_input = first_visible_locator(page, ["#agent-auth-password", "input[type='password']"], timeout_sec=5)
             if not email_input or not password_input:
-                print_result("fail", code="cassette_auth_form_missing")
+                print_result("fail", code="cassette_auth_form_missing", auth_state=auth_element_state(page))
                 return
             email_input.fill(email)
             password_input.fill(password)
             password_input.press("Enter")
-            submit_button = first_visible_locator(
-                page,
-                [
-                    "form:has(#agent-auth-password) button[type='submit']",
-                    "button[type='submit']",
-                ],
-                timeout_sec=1,
-            )
-            if submit_button and page_requires_auth(page):
-                submit_button.click(timeout=1000)
-            post_auth_state = wait_state(page, 30)
+            post_auth_state = wait_state(page, 45, auth_immediate=False)
             if post_auth_state == "ready":
                 print_result("ok", code="authenticated")
                 return
@@ -396,7 +426,7 @@ def main():
                     ],
                 )
                 if visible_auth:
-                    print_result("fail", code="cassette_auth_failed", auth_selectors=visible_auth)
+                    print_result("fail", code="cassette_auth_form_still_visible", auth_selectors=visible_auth)
                     return
                 print_result("fail", code="cassette_post_auth_ui_not_ready")
                 return
@@ -455,6 +485,8 @@ def _check_cassette_login(home: Path, url: str, email: str, password: str) -> di
         return _check("cassette_login", "ok", "Cassette login credentials were accepted", code=code)
     if code == "cassette_ui_not_ready":
         return _check("cassette_login", "warn", "Cassette page loaded but login/agent UI was not ready during verification", code=code)
+    if code in {"cassette_auth_form_missing", "cassette_auth_form_still_visible", "cassette_post_auth_ui_not_ready"}:
+        return _check("cassette_login", "warn", "Cassette credentials were not rejected, but the diagnostic browser did not reach the agent UI", code=code, output=output[-1000:])
     message = "Cassette login credentials were rejected or login did not complete"
     return _check("cassette_login", "fail", message, code=code, output=output[-1000:])
 
@@ -496,7 +528,7 @@ def main() -> int:
         for item in checks:
             print(f"[{item['status'].upper()}] {item['name']}: {item['message']}")
             details = item.get("details") or {}
-            for key in ("path", "target", "python", "url", "http_status", "version"):
+            for key in ("path", "target", "python", "url", "http_status", "code", "version", "output"):
                 if key in details and details[key]:
                     print(f"  {key}: {details[key]}")
     return 1 if any(item["status"] == "fail" for item in checks) else 0

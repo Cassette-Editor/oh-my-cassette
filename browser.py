@@ -202,10 +202,40 @@ def _switch_to_cassette_login_form(page: Any) -> None:
                     return rect.width > 0 && rect.height > 0;
                 };
                 const signupEmail = document.querySelector("#agent-auth-email");
-                const root = signupEmail?.closest("main,section,div") || document.body;
+                const form = signupEmail?.closest("form");
+                const root = form?.parentElement || signupEmail?.closest("main,section") || document.body;
+                const formRect = form?.getBoundingClientRect();
                 const buttons = Array.from(root.querySelectorAll("button[type='button'],button:not([type])"))
-                    .filter((button) => visible(button) && !button.disabled && button.getAttribute("aria-disabled") !== "true");
-                const target = buttons[buttons.length - 1];
+                    .filter((button) => {
+                        if (!visible(button) || button.disabled || button.getAttribute("aria-disabled") === "true") return false;
+                        if (button.closest("form")) return false;
+                        if (formRect) {
+                            const rect = button.getBoundingClientRect();
+                            if (rect.bottom > formRect.top + 2) return false;
+                        }
+                        return true;
+                    });
+                const labels = (button) => [
+                    button.getAttribute("aria-label"),
+                    button.getAttribute("title"),
+                    button.getAttribute("data-value"),
+                    button.getAttribute("value"),
+                    button.id,
+                    button.name,
+                    button.innerText,
+                    button.textContent,
+                ].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim().toLowerCase();
+                const target = buttons.find((button) => {
+                    const label = labels(button);
+                    return /(^|\\b)(log in|login|sign in|signin)(\\b|$)/.test(label) || /登录|登入|登陆/.test(label);
+                }) || (() => {
+                    const wideButtons = buttons.filter((button) => {
+                        const rect = button.getBoundingClientRect();
+                        return rect.width * rect.height >= 1200;
+                    });
+                    const tabButtons = wideButtons.length >= 2 ? wideButtons : buttons;
+                    return tabButtons.length >= 2 ? tabButtons[1] : null;
+                })();
                 if (target) target.click();
             }"""
         )
@@ -227,6 +257,14 @@ def _ensure_cassette_authenticated(page: Any, timeout_ms: int = 30000) -> dict[s
             "Cassette authentication is required but CASSETTE_AUTH_EMAIL/CASSETTE_AUTH_PASSWORD are not configured.",
         )
     _switch_to_cassette_login_form(page)
+    login_deadline = time.monotonic() + 5
+    while time.monotonic() < login_deadline:
+        state = _cassette_auth_element_state(page)
+        if state.get("login_email_visible") and state.get("password_visible"):
+            break
+        if state.get("signup_email_visible"):
+            _switch_to_cassette_login_form(page)
+        time.sleep(0.1)
     email_input = _first_visible_locator(
         page,
         (
@@ -247,16 +285,6 @@ def _ensure_cassette_authenticated(page: Any, timeout_ms: int = 30000) -> dict[s
         email_input.fill(email)
         password_input.fill(password)
         password_input.press("Enter")
-        submit_button = _first_visible_locator(
-            page,
-            (
-                "form:has(#agent-auth-password) button[type='submit']",
-                "button[type='submit']",
-            ),
-            timeout_ms=1000,
-        )
-        if submit_button and _page_requires_auth(page):
-            submit_button.click(timeout=1000)
     except Exception as exc:
         raise BrowserAuthError("cassette_auth_input_failed", f"Cassette authentication input failed: {type(exc).__name__}") from exc
     deadline = time.monotonic() + max(5.0, timeout_ms / 1000)
@@ -2680,7 +2708,7 @@ def _model_dialog_options(dialog: Any) -> dict[str, Any]:
     return {"models": deduped_models, "thinking_levels": deduped_thinking}
 
 
-def fetch_cassette_model_options(url: str | None = None, language: str = "zh") -> dict[str, Any]:
+def _fetch_cassette_model_options_direct(url: str | None = None, language: str = "zh") -> dict[str, Any]:
     if not check_playwright():
         raise RuntimeError("playwright_not_installed")
     timeout_ms = int(float(os.getenv("CASSETTE_MODEL_OPTIONS_TIMEOUT_SEC", "30")) * 1000)
@@ -2720,6 +2748,12 @@ def fetch_cassette_model_options(url: str | None = None, language: str = "zh") -
         }
     finally:
         _close_browser_record(record)
+
+
+def fetch_cassette_model_options(url: str | None = None, language: str = "zh") -> dict[str, Any]:
+    if not _browser_worker_enabled() or _in_browser_worker():
+        return _fetch_cassette_model_options_direct(url=url, language=language)
+    return _browser_worker().submit(_fetch_cassette_model_options_direct, url, language).result()
 
 
 def _select_cassette_model(page: Any, job: dict) -> dict:

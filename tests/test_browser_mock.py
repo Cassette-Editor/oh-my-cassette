@@ -11,6 +11,28 @@ from cassette import browser, jobs
 from cassette import tools
 
 
+def test_fetch_cassette_model_options_uses_browser_worker(monkeypatch):
+    calls = []
+
+    def fake_fetch(url=None, language="zh"):
+        calls.append(browser._in_browser_worker())
+        return {
+            "models": [{"label": "Kimi K2.6"}],
+            "thinking_levels": [{"label": "高", "value": "High"}],
+            "source": "test",
+            "language": language,
+        }
+
+    monkeypatch.setenv("CASSETTE_BROWSER_WORKER_THREAD", "true")
+    monkeypatch.setattr(browser, "_fetch_cassette_model_options_direct", fake_fetch)
+
+    result = browser.fetch_cassette_model_options(language="zh")
+
+    assert result["models"][0]["label"] == "Kimi K2.6"
+    assert calls == [True]
+    browser._shutdown_browser_worker()
+
+
 def test_progress_summary_dedupes_assistant_reply():
     assistant_reply = (
         "已完成！以下是我所完成的内容： 导入了您的素材，时长 1 秒。 "
@@ -394,6 +416,37 @@ def test_browser_authenticates_when_auth_form_is_delayed(cassette_env):
 
     assert result["status"] == "succeeded"
     assert result["outputs"][0]["download"] == "delayed-auth-output.mp4"
+    browser_events = jobs.load_job(job["job_id"]).get("browser_events") or []
+    assert any(
+        event.get("stage") == "authentication" and event.get("operation_status") == "authenticated"
+        for event in browser_events
+    )
+
+
+@pytest.mark.skipif(not browser.check_playwright(), reason="playwright is not installed")
+def test_browser_authenticates_with_enter_without_clicking_submit(cassette_env):
+    hermes_home = Path(os.environ["HERMES_HOME"])
+    hermes_home.mkdir(parents=True, exist_ok=True)
+    (hermes_home / ".env").write_text(
+        "CASSETTE_AUTH_EMAIL=operator@example.com\n"
+        "CASSETTE_AUTH_PASSWORD=generated-password-1234\n",
+        encoding="utf-8",
+    )
+    media = cassette_env["source_root"] / "clip.mp4"
+    media.write_bytes(b"video")
+    fixture = Path(__file__).parent / "fixtures" / "cassette_auth_submit_timeout_mock.html"
+    job = jobs.create_job(
+        "sess",
+        "Make a short edit",
+        "instruction",
+        [str(media)],
+        {"url": fixture.resolve().as_uri(), "timeout_sec": 12, "chat_message": "Make a short edit"},
+    )
+
+    result = browser.run_cassette_browser_job(job)
+
+    assert result["status"] == "succeeded"
+    assert result["outputs"][0]["download"] == "submit-timeout-auth-output.mp4"
     browser_events = jobs.load_job(job["job_id"]).get("browser_events") or []
     assert any(
         event.get("stage") == "authentication" and event.get("operation_status") == "authenticated"

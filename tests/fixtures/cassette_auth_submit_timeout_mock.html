@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Cassette Auth Submit Timeout Mock</title></head>
+  <body>
+    <main id="auth">
+      <h1>Agent Access</h1>
+      <form id="login-form">
+        <input id="agent-auth-email-login" type="email" autocomplete="email" required />
+        <input id="agent-auth-password" type="password" autocomplete="current-password" required />
+        <button type="submit" disabled>Log in</button>
+      </form>
+    </main>
+    <script>
+      const expectedEmail = 'operator@example.com';
+      const expectedPassword = 'generated-password-1234';
+
+      function renderAgent() {
+        document.body.innerHTML = `
+          <main data-testid="agent-page">
+            <input data-testid="agent-file-input" type="file" multiple style="display:none" />
+            <div data-testid="agent-upload-status">No files selected</div>
+            <textarea placeholder="Describe what you want..."></textarea>
+            <button type="submit" disabled>Send</button>
+            <button data-testid="agent-export-button" type="button" disabled>Export</button>
+            <div id="status"></div>
+          </main>
+        `;
+        const uploadStatus = document.querySelector('[data-testid="agent-upload-status"]');
+        const send = document.querySelector('button[type="submit"]');
+        const exportButton = document.querySelector('[data-testid="agent-export-button"]');
+        document.querySelector('[data-testid="agent-file-input"]').addEventListener('change', (event) => {
+          uploadStatus.textContent = `${event.target.files.length} ready, 0 failed`;
+          send.disabled = false;
+        });
+        send.addEventListener('click', () => {
+          document.getElementById('status').innerHTML = '<div data-testid="chat-assistant-message">The edit is complete. Ready to export.</div>';
+          exportButton.disabled = false;
+        });
+        exportButton.addEventListener('click', () => {
+          const blob = new Blob(['fake exported video'], {type: 'video/mp4'});
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = 'submit-timeout-auth-output.mp4';
+          document.body.appendChild(link);
+          link.click();
+        });
+      }
+
+      document.getElementById('agent-auth-password').addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        const email = document.getElementById('agent-auth-email-login').value;
+        const password = document.getElementById('agent-auth-password').value;
+        if (email === expectedEmail && password === expectedPassword) {
+          setTimeout(renderAgent, 1200);
+        }
+      });
+    </script>
+  </body>
+</html>

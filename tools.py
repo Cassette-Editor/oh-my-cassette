@@ -1567,27 +1567,26 @@ def _fixed_asset_status_message(session_id: str, language: str = "zh") -> str:
 
 
 def _looks_like_edit_instruction(text: str) -> bool:
+    """Positive edit-intent classification is delegated to Hermes."""
+    return False
+
+
+def _obviously_not_edit_instruction(text: str) -> bool:
     normalized = (text or "").strip().lower()
     if not normalized:
-        return False
+        return True
     delivery_complaint_terms = {
         "didn't receive", "did not receive", "haven't received", "have not received",
         "not received", "not receive", "没收到", "没有收到", "未收到", "没接收到",
     }
     if any(term in normalized for term in delivery_complaint_terms):
-        return False
-    edit_terms = {
-        "剪", "剪辑", "短视频", "视频", "字幕", "配音", "配乐", "背景音乐", "音乐", "bgm", "歌词", "封面", "转场", "裁剪", "导出",
-        "加", "替换", "换成", "换掉", "换背景", "换音乐", "换bgm", "去掉", "压缩", "变成", "生成", "制作", "做一个", "10秒", "秒", "竖屏", "横屏",
-        "edit", "trim", "cut", "caption", "captions", "subtitle", "subtitles", "music", "soundtrack",
-        "bgm", "replace music", "replace bgm", "background music", "voiceover", "voice-over", "transition", "crop", "thumbnail", "cover",
-        "short video", "video", "clip", "reel", "seconds", "second", "sec", "vertical", "horizontal",
-        "export", "render",
+        return True
+    non_edit_exact_terms = {
+        "你好", "hello", "hi", "嗨", "在吗",
+        "谢谢", "thanks", "thank you", "thx",
+        "好的", "好吧", "ok", "okay", "嗯", "收到",
     }
-    greeting_terms = {"你好", "hello", "hi", "嗨", "在吗"}
-    if normalized in greeting_terms:
-        return False
-    return any(term in normalized for term in edit_terms)
+    return normalized in non_edit_exact_terms or _looks_like_asset_status_query(normalized)
 
 
 _CASSETTE_GATEWAY_COMMANDS = {"edit", "refine", "music", "cut", "check_assets", "cassette_model"}
@@ -1827,6 +1826,7 @@ def _request_cassette_model_choice(
     *,
     language: str = "zh",
     resume_after_model: str = "edit",
+    optimization_enabled: bool | None = None,
 ) -> dict:
     try:
         options = _cassette_model_options(language)
@@ -1841,17 +1841,16 @@ def _request_cassette_model_choice(
             "reply_sent": reply_sent,
             "error": error_details,
         }
-    _save_pending_edit(
-        session_id,
-        instruction,
-        asset_count,
-        "awaiting_model_choice",
-        model_options=options.get("models") or [],
-        thinking_options=options.get("thinking_levels") or [],
-        model_options_source=options.get("source") or "",
-        language=_normalize_cassette_language(language) or "zh",
-        resume_after_model=resume_after_model,
-    )
+    pending_extra: dict[str, Any] = {
+        "model_options": options.get("models") or [],
+        "thinking_options": options.get("thinking_levels") or [],
+        "model_options_source": options.get("source") or "",
+        "language": _normalize_cassette_language(language) or "zh",
+        "resume_after_model": resume_after_model,
+    }
+    if optimization_enabled is not None:
+        pending_extra["optimization_enabled"] = bool(optimization_enabled)
+    _save_pending_edit(session_id, instruction, asset_count, "awaiting_model_choice", **pending_extra)
     reply_sent = _send_gateway_fixed_reply(gateway, event, _cassette_model_choice_message(options, language))
     return {
         "action": "skip",
@@ -1902,6 +1901,7 @@ def _handle_pending_cassette_model_choice(
             resume_after_model=pending_edit.get("resume_after_model") or "edit",
             optimization_enabled=bool(pending_edit.get("optimization_enabled")),
             continue_after_match=bool(pending_edit.get("continue_after_match", True)),
+            semantic_gate=bool(pending_edit.get("semantic_gate")),
             language=_normalize_cassette_language(language) or "zh",
         )
         reply_sent = _send_gateway_fixed_reply(
@@ -1959,6 +1959,18 @@ def _handle_pending_cassette_model_choice(
         }
     instruction = str(pending_edit.get("instruction") or "").strip()
     asset_count = int(pending_edit.get("asset_count") or 0)
+    if resume_after_model == "semantic_edit":
+        return _request_prompt_optimization_choice(session_id, instruction, asset_count, gateway, event, language)
+    if resume_after_model == "semantic_optimization_choice":
+        return _request_smart_bgm_choice(
+            session_id,
+            instruction,
+            asset_count,
+            gateway,
+            event,
+            optimization_enabled=bool(pending_edit.get("optimization_enabled")),
+            language=language,
+        )
     if resume_after_model == "refine":
         _mark_initial_edit_choices_completed(
             session_id,
@@ -2335,6 +2347,92 @@ def _request_prompt_optimization_choice(session_id: str, instruction: str, asset
         f"[Cassette gateway assets available: {asset_count} asset(s). "
         f"Use cassette session_id `{session_id}` for this edit instruction after the user chooses whether to optimize. "
         f"{_prompt_optimization_choice_guard(language)} "
+        f"{_cassette_orchestration_guard()} "
+        "Do not ask the user to resend the already saved media.]"
+    )
+    return {"action": "rewrite", "text": text}
+
+
+def _rewrite_semantic_edit_instruction_judgment(
+    session_id: str,
+    instruction: str,
+    asset_count: int,
+    language: str = "zh",
+) -> dict:
+    if _initial_edit_choices_completed(session_id):
+        text = (
+            f"{instruction}\n\n"
+            f"[Cassette gateway assets available: {asset_count} asset(s). "
+            f"Use cassette session_id `{session_id}` only if this is a follow-up edit instruction. "
+            "Hermes must semantically decide whether the user's message is a request to edit, transform, assemble, caption, style, add/remove/replace audio or visuals, export, or otherwise operate on the saved media. "
+            "Do not rely on keyword matching. Vague follow-ups may be edit instructions when they naturally refer to the saved media. "
+            "If this is not an edit instruction, answer the user normally and do not call Cassette tools. "
+            f"If this is an edit instruction, {_direct_original_instruction_guard('session_default', language)} "
+            f"{_cassette_orchestration_guard()} "
+            "Do not ask the user to resend the already saved media.]"
+        )
+        return {"action": "rewrite", "text": text}
+    if _gateway_model_choice_enabled() and not _cassette_model_selection_completed(session_id):
+        try:
+            options = _cassette_model_options(language)
+        except Exception as exc:
+            unavailable_message = _cassette_model_options_unavailable_message(language, _model_options_error_details(exc))
+            text = (
+                f"{instruction}\n\n"
+                f"[Cassette gateway assets available: {asset_count} asset(s). "
+                f"Use cassette session_id `{session_id}` only if this is an edit instruction. "
+                "Hermes must semantically decide whether the user's message is a request to edit, transform, assemble, caption, style, add/remove/replace audio or visuals, export, or otherwise operate on the saved media. "
+                "Do not rely on keyword matching. Vague follow-ups may be edit instructions when they naturally refer to the saved media. "
+                "If this is not an edit instruction, answer the user normally and do not call Cassette tools. "
+                f"If this is an edit instruction, tell the user exactly this in {_language_name_for_prompt(language)}: {unavailable_message} "
+                "Do not call cassette_list_assets, cassette_make_prompt, cassette_run_job, BGM tools, or browser automation. "
+                "Do not ask about prompt optimization yet because model selection must happen first. "
+                f"{_cassette_orchestration_guard()} "
+                "Do not ask the user to resend the already saved media.]"
+            )
+            return {"action": "rewrite", "text": text}
+        _save_pending_edit(
+            session_id,
+            instruction,
+            asset_count,
+            "awaiting_model_choice",
+            model_options=options.get("models") or [],
+            thinking_options=options.get("thinking_levels") or [],
+            model_options_source=options.get("source") or "",
+            language=_normalize_cassette_language(language) or "zh",
+            resume_after_model="semantic_edit",
+            semantic_gate=True,
+        )
+        text = (
+            f"{instruction}\n\n"
+            f"[Cassette gateway assets available: {asset_count} asset(s). "
+            f"Use cassette session_id `{session_id}` only if this is an edit instruction. "
+                "Hermes must semantically decide whether the user's message is a request to edit, transform, assemble, caption, style, add/remove/replace audio or visuals, export, or otherwise operate on the saved media. "
+                "Do not rely on keyword matching. Vague follow-ups may be edit instructions when they naturally refer to the saved media. "
+                "If this is not an edit instruction, answer the user normally and do not call Cassette tools. "
+                f"If this is an edit instruction, ask exactly this model selection message in {_language_name_for_prompt(language)} before asking about prompt optimization:\n{_cassette_model_choice_message(options, language)} "
+                "Do not call cassette_list_assets, cassette_make_prompt, cassette_run_job, BGM tools, or browser automation. "
+                "Do not ask about prompt optimization yet. Wait for the user's model number first. "
+                f"{_cassette_orchestration_guard()} "
+                "Do not ask the user to resend the already saved media.]"
+        )
+        return {"action": "rewrite", "text": text}
+    _save_pending_edit(
+        session_id,
+        instruction,
+        asset_count,
+        "awaiting_optimization_choice",
+        semantic_gate=True,
+    )
+    text = (
+        f"{instruction}\n\n"
+        f"[Cassette gateway assets available: {asset_count} asset(s). "
+        f"Use cassette session_id `{session_id}` only if this is an edit instruction. "
+        "Hermes must semantically decide whether the user's message is a request to edit, transform, assemble, caption, style, add/remove/replace audio or visuals, export, or otherwise operate on the saved media. "
+        "Do not rely on keyword matching. Vague follow-ups may be edit instructions when they naturally refer to the saved media. "
+        "If this is not an edit instruction, answer the user normally and do not call Cassette tools. "
+        f"If this is an edit instruction, ask exactly this question in {_language_name_for_prompt(language)}: {_prompt_optimization_choice_message(language)} "
+        "Do not call cassette_list_assets, cassette_make_prompt, cassette_run_job, BGM tools, or browser automation yet; wait for the user's optimization choice. "
         f"{_cassette_orchestration_guard()} "
         "Do not ask the user to resend the already saved media.]"
     )
@@ -3251,14 +3349,20 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             }
         pending_edit = _load_pending_edit(session_id)
         if pending_edit and str(pending_edit.get("state") or "") in {"awaiting_model_choice", "awaiting_model_thinking_choice"}:
-            return _handle_pending_cassette_model_choice(
-                session_id,
-                pending_edit,
-                user_text,
-                gateway,
-                event,
-                language=cassette_language,
-            )
+            pending_state = str(pending_edit.get("state") or "")
+            choice_count = len(pending_edit.get("model_options") or []) if pending_state == "awaiting_model_choice" else len(pending_edit.get("thinking_options") or [])
+            if pending_edit.get("semantic_gate") and _numbered_choice(user_text, choice_count) is None:
+                _clear_pending_edit(session_id)
+                pending_edit = None
+            else:
+                return _handle_pending_cassette_model_choice(
+                    session_id,
+                    pending_edit,
+                    user_text,
+                    gateway,
+                    event,
+                    language=cassette_language,
+                )
         if forced_music is not None:
             if not forced_music:
                 reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_music_command_missing_instruction_message(cassette_language))
@@ -3339,12 +3443,36 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             if pending_state in {"awaiting_optimization_choice", "awaiting_bgm_choice"}:
                 _clear_pending_edit(session_id)
                 pending_edit = None
+        if (
+            pending_edit
+            and pending_edit.get("state") == "awaiting_optimization_choice"
+            and pending_edit.get("semantic_gate")
+            and not _looks_like_prompt_optimization_decline(user_text)
+            and not _looks_like_prompt_optimization_accept(user_text)
+        ):
+            _clear_pending_edit(session_id)
+            pending_edit = None
         if pending_edit and pending_edit.get("state") == "awaiting_optimization_choice":
             pending_instruction = str(pending_edit.get("instruction") or "").strip()
             if _looks_like_prompt_optimization_decline(user_text):
                 connectivity = _cassette_connectivity_skip(gateway, event, cassette_language)
                 if connectivity:
                     return connectivity
+                if (
+                    pending_edit.get("semantic_gate")
+                    and _gateway_model_choice_enabled()
+                    and not _cassette_model_selection_completed(session_id)
+                ):
+                    return _request_cassette_model_choice(
+                        session_id,
+                        pending_instruction,
+                        asset_count,
+                        gateway,
+                        event,
+                        language=cassette_language,
+                        resume_after_model="semantic_optimization_choice",
+                        optimization_enabled=False,
+                    )
                 return _request_smart_bgm_choice(
                     session_id,
                     pending_instruction,
@@ -3358,6 +3486,21 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                 connectivity = _cassette_connectivity_skip(gateway, event, cassette_language)
                 if connectivity:
                     return connectivity
+                if (
+                    pending_edit.get("semantic_gate")
+                    and _gateway_model_choice_enabled()
+                    and not _cassette_model_selection_completed(session_id)
+                ):
+                    return _request_cassette_model_choice(
+                        session_id,
+                        pending_instruction,
+                        asset_count,
+                        gateway,
+                        event,
+                        language=cassette_language,
+                        resume_after_model="semantic_optimization_choice",
+                        optimization_enabled=True,
+                    )
                 return _request_smart_bgm_choice(
                     session_id,
                     pending_instruction,
@@ -3522,7 +3665,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             )
             return {"action": "rewrite", "text": text}
         if not _looks_like_edit_instruction(user_text):
-            return None
+            if _obviously_not_edit_instruction(user_text):
+                return None
+            return _rewrite_semantic_edit_instruction_judgment(session_id, user_text, asset_count, cassette_language)
         return _start_gateway_edit_instruction(session_id, user_text, asset_count, gateway, event, language=cassette_language)
 
     ingested: list[dict[str, Any]] = []
@@ -3622,10 +3767,29 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             "reply_sent": reply_sent,
             **({"warnings": sorted(set(failures))} if failures else {}),
         }
-    if is_placeholder_text or not (
-        forced_edit is not None or forced_refine is not None or _looks_like_edit_instruction(edit_text)
-    ):
+    if is_placeholder_text:
         total_count = _gateway_asset_count(session_id)
+        reply_sent = _send_gateway_fixed_reply(
+            gateway,
+            event,
+            _fixed_media_saved_message(asset_count, total_count, failures, cassette_language),
+        )
+        return {
+            "action": "skip",
+            "reason": "cassette_media_saved_waiting_for_instruction",
+            "asset_count": asset_count,
+            "total_asset_count": total_count,
+            "session_id": session_id,
+            "reply_sent": reply_sent,
+            **({"warnings": sorted(set(failures))} if failures else {}),
+        }
+    if forced_edit is None and forced_refine is None and not _looks_like_edit_instruction(edit_text):
+        total_count = _gateway_asset_count(session_id)
+        if not _obviously_not_edit_instruction(edit_text):
+            result = _rewrite_semantic_edit_instruction_judgment(session_id, edit_text, total_count, cassette_language)
+            if failures:
+                result["warnings"] = sorted(set(failures))
+            return result
         reply_sent = _send_gateway_fixed_reply(
             gateway,
             event,
