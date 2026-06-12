@@ -173,7 +173,8 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 * 一个 Cassette 账号。
 * 一个已经配置好的 Hermes 网关，例如 QQ 或 Telegram。
 
-在这里申请 Cassette 账号：[Cassette 注册](https://trycassette.online/signup/)
+> [!TIP]
+> **在这里申请 Cassette 账号：**[**Cassette 注册**](https://trycassette.online/signup/)
 
 如果还没有安装 Hermes Agent：
 

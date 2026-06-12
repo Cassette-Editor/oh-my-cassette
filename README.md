@@ -178,7 +178,8 @@ This plugin is built on top of the <a href="https://trycassette.online/agent"> C
 * A Cassette account.
 * A configured Hermes gateway, such as QQ or Telegram.
 
-Apply for a Cassette account here: [Cassette Sign Up](https://trycassette.online/signup/)
+> [!TIP]
+> **Apply for a Cassette account here:** [**Cassette Sign Up**](https://trycassette.online/signup/)
 
 If Hermes Agent is not installed yet:
 

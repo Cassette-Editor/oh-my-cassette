@@ -1756,10 +1756,21 @@ def _cassette_model_options(language: str = "zh") -> dict[str, Any]:
     return options
 
 
-def _cassette_model_options_unavailable_message(language: str = "zh") -> str:
+def _model_options_error_details(exc: Exception) -> dict[str, str]:
+    code = getattr(exc, "code", None) or type(exc).__name__
+    message = redact_for_log(str(exc) or code)
+    return {"code": str(code), "message": message}
+
+
+def _cassette_model_options_unavailable_message(language: str = "zh", error: dict[str, str] | None = None) -> str:
+    detail = ""
+    if error:
+        code = error.get("code") or "unknown"
+        message = error.get("message") or ""
+        detail = f" ({code}: {message})" if message and message != code else f" ({code})"
     if _normalize_cassette_language(language) == "en":
-        return "Cassette model options are unavailable because the Cassette page could not provide them. Please retry after Cassette is reachable and logged in."
-    return "暂时无法从 Cassette 页面获取模型列表。请确认 Cassette 可访问且已登录后重试。"
+        return f"Cassette model options are unavailable because the Cassette page could not provide them{detail}. Please retry after Cassette is reachable and logged in."
+    return f"暂时无法从 Cassette 页面获取模型列表{detail}。请确认 Cassette 可访问且已登录后重试。"
 
 
 def _numbered_choice(text: str, max_value: int) -> int | None:
@@ -1820,14 +1831,15 @@ def _request_cassette_model_choice(
     try:
         options = _cassette_model_options(language)
     except Exception as exc:
-        reply_sent = _send_gateway_fixed_reply(gateway, event, _cassette_model_options_unavailable_message(language))
+        error_details = _model_options_error_details(exc)
+        reply_sent = _send_gateway_fixed_reply(gateway, event, _cassette_model_options_unavailable_message(language, error_details))
         return {
             "action": "skip",
             "reason": "cassette_model_options_unavailable",
             "asset_count": asset_count,
             "session_id": session_id,
             "reply_sent": reply_sent,
-            "error": type(exc).__name__,
+            "error": error_details,
         }
     _save_pending_edit(
         session_id,
@@ -2187,11 +2199,11 @@ def _mark_initial_edit_choices_completed(
 def _prompt_optimization_choice_message(language: str = "zh") -> str:
     if _normalize_cassette_language(language) == "en":
         return (
-            "Would you like me to optimize your edit instruction into a more professional Cassette execution brief first? "
+            "Would you like me to optimize your edit instruction into a more professional edit instruction first? "
             "Reply \"optimize/yes\" and I will optimize it and ask for confirmation; reply \"no/no optimization\" and I will send your original instruction directly to Cassette."
         )
     return (
-        "是否需要我先把你的剪辑指令优化成更专业的 Cassette 执行 brief？"
+        "是否需要我先把你的剪辑指令优化成更专业的剪辑指令？"
         "回复“优化/是”我会先优化并发给你确认；回复“不优化/否”我会按原指令直接交给 Cassette 开始处理。"
     )
 

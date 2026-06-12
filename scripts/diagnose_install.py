@@ -225,23 +225,65 @@ def visible_selectors(page, selectors):
         return []
 
 
-def page_requires_auth(page):
-    matches = visible_selectors(
-        page,
-        [
-            "#agent-auth-password",
-            "#agent-auth-email-login",
-            "#agent-auth-email",
-            "input[type='password']",
-        ],
-    )
-    if matches:
-        return True
+def auth_element_state(page):
     try:
-        body = page.locator("body").inner_text(timeout=500).lower()
+        return page.evaluate(
+            """() => {
+                const visible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (style.visibility === "hidden" || style.display === "none") return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const signupEmail = document.querySelector("#agent-auth-email");
+                const loginEmail = document.querySelector("#agent-auth-email-login");
+                const password = document.querySelector("#agent-auth-password");
+                return {
+                    signup_email_visible: visible(signupEmail),
+                    login_email_visible: visible(loginEmail),
+                    password_visible: visible(password),
+                };
+            }"""
+        )
     except Exception:
-        return False
-    return "agent access" in body or "send password" in body or "generated password" in body or "登录" in body
+        return {}
+
+
+def page_requires_auth(page):
+    state = auth_element_state(page)
+    return bool(
+        state.get("signup_email_visible")
+        or (state.get("login_email_visible") and state.get("password_visible"))
+    )
+
+
+def switch_to_login_form(page):
+    state = auth_element_state(page)
+    if state.get("login_email_visible") and state.get("password_visible"):
+        return
+    if not state.get("signup_email_visible"):
+        return
+    try:
+        page.evaluate(
+            """() => {
+                const visible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (style.visibility === "hidden" || style.display === "none") return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const signupEmail = document.querySelector("#agent-auth-email");
+                const root = signupEmail?.closest("main,section,div") || document.body;
+                const buttons = Array.from(root.querySelectorAll("button[type='button'],button:not([type])"))
+                    .filter((button) => visible(button) && !button.disabled && button.getAttribute("aria-disabled") !== "true");
+                const target = buttons[buttons.length - 1];
+                if (target) target.click();
+            }"""
+        )
+    except Exception:
+        pass
 
 
 def agent_ui_ready(page):
@@ -312,17 +354,11 @@ def main():
                 print_result("fail", code="cassette_ui_not_ready")
                 return
 
-            login_tab = first_visible_locator(page, ["button:has-text('Log in')", "button:has-text('登录')"], timeout_sec=1)
-            if login_tab:
-                try:
-                    login_tab.click(timeout=1000)
-                except Exception:
-                    pass
+            switch_to_login_form(page)
             email_input = first_visible_locator(
                 page,
                 [
                     "#agent-auth-email-login",
-                    "#agent-auth-email",
                     "input[type='email'][autocomplete='email']",
                     "input[type='email']",
                 ],
@@ -338,10 +374,8 @@ def main():
             submit_button = first_visible_locator(
                 page,
                 [
-                    "form button[type='submit']:has-text('Log in')",
-                    "form button[type='submit']:has-text('登录')",
-                    "button[type='submit']:has-text('Log in')",
-                    "button[type='submit']:has-text('登录')",
+                    "form:has(#agent-auth-password) button[type='submit']",
+                    "button[type='submit']",
                 ],
                 timeout_sec=1,
             )
@@ -352,7 +386,19 @@ def main():
                 print_result("ok", code="authenticated")
                 return
             if page_requires_auth(page):
-                print_result("fail", code="cassette_auth_failed")
+                visible_auth = visible_selectors(
+                    page,
+                    [
+                        "#agent-auth-password",
+                        "#agent-auth-email-login",
+                        "#agent-auth-email",
+                        "input[type='password']",
+                    ],
+                )
+                if visible_auth:
+                    print_result("fail", code="cassette_auth_failed", auth_selectors=visible_auth)
+                    return
+                print_result("fail", code="cassette_post_auth_ui_not_ready")
                 return
             print_result("fail", code="cassette_post_auth_ui_not_ready")
         finally:
