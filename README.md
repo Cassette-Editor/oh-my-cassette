@@ -168,6 +168,94 @@ Be the director of your own story, effortlessly.
   <strong>★ More cases are on the way. Star the project to follow along.</strong>
 </p>
 
+# 🏄 Try without installation
+
+We host a public web demo so you can try the Oh My Cassette workflow from a desktop or mobile browser without installing Hermes Agent locally:
+
+<a href="http://43.134.224.156:8080/"> TRY NOW! </a>
+
+> [!WARNING]
+> The public demo is for illustration and evaluation only. It is intentionally unauthenticated, so do **not** upload sensitive, private, confidential, illegal, copyrighted, regulated, or otherwise restricted content.
+>
+> Uploaded files, prompts, generated outputs, job state, and troubleshooting metadata may be processed by this demo server, Cassette, DeepSeek, and third-party music/search providers used by the BGM flow. Treat anything you upload as visible to the demo operator and external services involved in the workflow.
+>
+> The demo may be reset, rate-limited, unavailable, or changed at any time. We do not guarantee data retention, deletion timing, confidentiality, fitness for production use, output quality, copyright compliance of generated/editing results, or uninterrupted service. You are responsible for the content you upload and for reviewing any generated output before sharing it.
+>
+> By default, the demo uses the server-side DeepSeek configuration when available. You can open **Settings** in the web UI and provide your own DeepSeek API key for testing. Your key is sent only with requests to this demo server and is not written to this repository or server-side disk by the web app, but it still transits the public demo server; use a key you can rotate and monitor.
+
+<details>
+<summary>Deploy Web Demo Locally</summary>
+
+The web demo is a single FastAPI service that keeps the existing Cassette gateway flow but replaces the chat surface with a browser UI. It stores runtime uploads, jobs, exports, screenshots, and outbox data under `CASSETTE_ASSET_ROOT` instead of the repository.
+
+1. Clone the repository and create a dedicated web environment:
+
+```bash
+git clone https://github.com/DAGroup-PKU/oh-my-cassette.git
+cd oh-my-cassette
+
+python3 -m venv .venv-web
+. .venv-web/bin/activate
+pip install -U pip
+pip install -r requirements-web.txt
+python -m playwright install chromium
+```
+
+2. Configure Cassette and DeepSeek runtime settings. The service reads `~/.hermes/.env` and process environment variables:
+
+```bash
+mkdir -p ~/.hermes
+cp .env.example ~/.hermes/.env
+$EDITOR ~/.hermes/.env
+```
+
+At minimum, set:
+
+```dotenv
+CASSETTE_URL=https://sg.trycassette.online/agent
+CASSETTE_AUTH_EMAIL=you@example.com
+CASSETTE_AUTH_PASSWORD=your-cassette-password
+CASSETTE_ASSET_ROOT=$HOME/.hermes/cassette
+
+DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
+OMC_WEB_HOST=0.0.0.0
+OMC_WEB_PORT=8080
+```
+
+If you do not want to put a DeepSeek key on the server, leave `DEEPSEEK_API_KEY` empty and enter a temporary key from the web UI **Settings** panel. That browser-provided key is attached to API requests for that session and is not persisted by the web app.
+
+3. Start the web demo:
+
+```bash
+. .venv-web/bin/activate
+uvicorn web_demo.server:app --host 0.0.0.0 --port 8080
+```
+
+Open `http://127.0.0.1:8080/` for local testing, or `http://<server-ip>:8080/` from another device if the host firewall/security group allows inbound TCP `8080`.
+
+4. Optional systemd deployment:
+
+```bash
+sudo cp deploy/oh-my-cassette-web.service.example /etc/systemd/system/oh-my-cassette-web.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now oh-my-cassette-web
+sudo systemctl status oh-my-cassette-web
+```
+
+Before enabling the service, edit `/etc/systemd/system/oh-my-cassette-web.service` if your repository, virtualenv, or `~/.hermes/.env` path differs from the example.
+
+5. Smoke test:
+
+```bash
+curl -fsS http://127.0.0.1:8080/ -o /dev/null
+python3 -m compileall -q web_demo tools.py notifier.py browser.py
+```
+
+Then open the browser UI, upload a small MP4, send an edit request, and watch the job card/events until the export download appears.
+</details>
+
 # 🚀 Quick Start
 
 ## Before You Start 🎬

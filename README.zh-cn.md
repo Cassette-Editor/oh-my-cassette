@@ -163,6 +163,94 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
   <strong>★ 更多案例持续更新中，欢迎 Star 关注本项目。</strong>
 </p>
 
+# 🏄 无需安装试用
+
+我们提供了一个公开网页演示入口，你可以直接在电脑或手机浏览器里体验 Oh My Cassette 的消息式剪辑流程，不需要先在本地安装 Hermes Agent：
+
+<a href="http://43.134.224.156:8080/"> 立即试用 </a>
+
+> [!WARNING]
+> 该公开演示仅用于功能展示和评估。当前入口刻意不做登录鉴权，请不要上传任何敏感、私密、保密、违法、受版权限制、受监管或不适合公开处理的内容。
+>
+> 你上传的素材、提示词、生成结果、任务状态、排障信息，以及 BGM 流程中涉及的音乐搜索信息，可能会被该演示服务器、Cassette、DeepSeek 以及相关第三方音乐/搜索服务处理。请把上传到公开演示的任何内容都视为演示维护者和工作流相关外部服务可见。
+>
+> 该演示可能随时重置、限流、不可用或变更。我们不承诺数据保留或删除时效，不承诺保密性、生产可用性、输出质量、版权合规性或服务连续性。你需要自行确认上传内容的权利状态，并在分享任何生成结果前自行审核。
+>
+> 默认情况下，演示会使用服务器侧配置的 DeepSeek API Key（如果可用）。你也可以在网页右上角 **设置** 中填写自己的 DeepSeek API Key 进行测试。该 key 只会随请求发送到当前演示服务器，Web 应用不会把它写入仓库或服务端磁盘；但它仍会经过公开演示服务器，请使用可以随时轮换和监控的 key。
+
+<details>
+<summary>本地部署 Web Demo</summary>
+
+Web Demo 是一个单进程 FastAPI 服务：它保留 Oh My Cassette 现有 gateway 流程，只把用户入口换成浏览器网页。上传素材、任务状态、导出文件、截图和网页 outbox 等运行时数据会写入 `CASSETTE_ASSET_ROOT`，不会写入仓库。
+
+1. 克隆仓库并创建独立的网页演示环境：
+
+```bash
+git clone https://github.com/DAGroup-PKU/oh-my-cassette.git
+cd oh-my-cassette
+
+python3 -m venv .venv-web
+. .venv-web/bin/activate
+pip install -U pip
+pip install -r requirements-web.txt
+python -m playwright install chromium
+```
+
+2. 配置 Cassette 和 DeepSeek。服务会读取 `~/.hermes/.env` 以及当前进程环境变量：
+
+```bash
+mkdir -p ~/.hermes
+cp .env.example ~/.hermes/.env
+$EDITOR ~/.hermes/.env
+```
+
+至少需要设置：
+
+```dotenv
+CASSETTE_URL=https://sg.trycassette.online/agent
+CASSETTE_AUTH_EMAIL=you@example.com
+CASSETTE_AUTH_PASSWORD=your-cassette-password
+CASSETTE_ASSET_ROOT=$HOME/.hermes/cassette
+
+DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
+OMC_WEB_HOST=0.0.0.0
+OMC_WEB_PORT=8080
+```
+
+如果不希望在服务器上保存 DeepSeek API Key，可以把 `DEEPSEEK_API_KEY` 留空，然后在网页 **设置** 面板里临时填写自己的 key。浏览器提供的 key 只会附加在当前会话的请求上，Web 应用不会持久化保存。
+
+3. 启动网页演示：
+
+```bash
+. .venv-web/bin/activate
+uvicorn web_demo.server:app --host 0.0.0.0 --port 8080
+```
+
+本机测试打开 `http://127.0.0.1:8080/`；如果要让手机或其他电脑访问，请打开 `http://<服务器 IP>:8080/`，并确认服务器防火墙或云安全组允许入站 TCP `8080`。
+
+4. 可选：使用 systemd 常驻运行：
+
+```bash
+sudo cp deploy/oh-my-cassette-web.service.example /etc/systemd/system/oh-my-cassette-web.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now oh-my-cassette-web
+sudo systemctl status oh-my-cassette-web
+```
+
+启用前请检查 `/etc/systemd/system/oh-my-cassette-web.service`，如果你的仓库路径、虚拟环境路径或 `~/.hermes/.env` 路径与示例不同，需要先改成自己的实际路径。
+
+5. 简单验收：
+
+```bash
+curl -fsS http://127.0.0.1:8080/ -o /dev/null
+python3 -m compileall -q web_demo tools.py notifier.py browser.py
+```
+
+然后在浏览器中上传一个小 MP4，发送剪辑指令，观察事件流和任务卡片，直到出现导出下载入口。
+</details>
+
 # 🚀 快速开始
 
 ## 开始之前 🎬
