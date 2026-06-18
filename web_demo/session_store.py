@@ -9,6 +9,7 @@ from typing import Any
 
 _LOCK = threading.RLock()
 _SESSIONS: dict[str, dict[str, Any]] = {}
+_CLOSED_SESSIONS: set[str] = set()
 _MAX_EVENTS = 500
 _MAX_LLM_MESSAGES = 80
 
@@ -30,6 +31,8 @@ def validate_session_id(session_id: str) -> str:
 def ensure_session(session_id: str | None = None) -> dict[str, Any]:
     sid = validate_session_id(session_id) if session_id else new_session_id()
     with _LOCK:
+        if sid in _CLOSED_SESSIONS:
+            raise ValueError("web session is closed")
         state = _SESSIONS.get(sid)
         if state is None:
             state = {"session_id": sid, "next_event_id": 1, "events": [], "llm_messages": []}
@@ -37,9 +40,23 @@ def ensure_session(session_id: str | None = None) -> dict[str, Any]:
         return state
 
 
+def close_session(session_id: str) -> None:
+    sid = validate_session_id(session_id)
+    with _LOCK:
+        _SESSIONS.pop(sid, None)
+        _CLOSED_SESSIONS.add(sid)
+
+
+def is_closed(session_id: str) -> bool:
+    sid = validate_session_id(session_id)
+    with _LOCK:
+        return sid in _CLOSED_SESSIONS
+
+
 def reset_all() -> None:
     with _LOCK:
         _SESSIONS.clear()
+        _CLOSED_SESSIONS.clear()
 
 
 def add_event(
@@ -54,6 +71,8 @@ def add_event(
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with _LOCK:
+        if validate_session_id(session_id) in _CLOSED_SESSIONS:
+            raise ValueError("web session is closed")
         state = ensure_session(session_id)
         event_id = int(state["next_event_id"])
         state["next_event_id"] = event_id + 1
@@ -108,4 +127,3 @@ def set_llm_messages(session_id: str, messages: list[dict[str, Any]]) -> None:
     with _LOCK:
         state = ensure_session(session_id)
         state["llm_messages"] = deepcopy(messages[-_MAX_LLM_MESSAGES:])
-

@@ -189,3 +189,110 @@ def test_web_api_language_switch_changes_local_reply(cassette_env):
     assert message_response.status_code == 200
     events = client.get(f"/api/events?session_id={session_id}&after=0").json()["events"]
     assert any("Please upload video" in event.get("text", "") for event in events)
+
+
+def test_web_session_creation_cleans_previous_web_session(cassette_env):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    old_session = client.post("/api/sessions").json()["session_id"]
+    upload_response = client.post(
+        "/api/uploads",
+        data={"session_id": old_session},
+        files=[("files", ("clip.mp4", b"video", "video/mp4"))],
+    )
+    assert upload_response.status_code == 200
+    session_hash = tools.manifest.resolve_session_hash(session_id=old_session)
+    upload_dir = tools.manifest.get_asset_root() / "web_uploads" / old_session
+    session_dir = tools.manifest.get_session_dir(session_hash)
+    output_path = tools.manifest.get_asset_root() / "exports" / "web-cleanup-output.mp4"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(b"export")
+    job = jobs.create_job(
+        session_hash,
+        "prompt",
+        "instruction",
+        [],
+        {"cassette_session_id": old_session, "delivery": {"platform": "web", "chat_id": old_session}},
+    )
+    job["status"] = "succeeded"
+    job["outputs"] = [{"local_path": str(output_path)}]
+    jobs.save_job(job)
+    job_path = jobs.get_jobs_dir() / f"{job['job_id']}.json"
+
+    response = client.post("/api/sessions", json={"cleanup_session_id": old_session, "language": "en"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] != old_session
+    assert payload["language"] == "en"
+    assert payload["cleanup"]["ok"] is True
+    assert not upload_dir.exists()
+    assert not session_dir.exists()
+    assert not output_path.exists()
+    assert not job_path.exists()
+    assert client.get(f"/api/events?session_id={old_session}&after=0").status_code == 400
+
+
+def test_web_cleanup_ignores_non_web_jobs(cassette_env):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = "web_boundary_cleanup"
+    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+    output_path = tools.manifest.get_asset_root() / "exports" / "non-web-output.mp4"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(b"export")
+    job = jobs.create_job(
+        session_hash,
+        "prompt",
+        "instruction",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "telegram", "chat_id": "telegram-chat"}},
+    )
+    job["status"] = "succeeded"
+    job["outputs"] = [{"local_path": str(output_path)}]
+    jobs.save_job(job)
+    job_path = jobs.get_jobs_dir() / f"{job['job_id']}.json"
+
+    response = client.post(f"/api/sessions/{session_id}/cleanup")
+
+    assert response.status_code == 200
+    assert job_path.exists()
+    assert output_path.exists()
+
+
+def test_web_cleanup_cancels_active_web_job_without_deleting_record(cassette_env):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = "web_active_cleanup"
+    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+    job = jobs.create_job(
+        session_hash,
+        "prompt",
+        "instruction",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "web", "chat_id": session_id}},
+    )
+    job["status"] = "running"
+    jobs.save_job(job)
+    job_path = jobs.get_jobs_dir() / f"{job['job_id']}.json"
+
+    response = client.post(f"/api/sessions/{session_id}/cleanup")
+
+    assert response.status_code == 200
+    assert job_path.exists()
+    assert jobs.load_job(job["job_id"])["status"] == "cancel_requested"

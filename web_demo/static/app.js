@@ -84,10 +84,12 @@ function initialLanguage() {
 }
 
 const state = {
-  sessionId: localStorage.getItem("omc_web_session") || "",
+  sessionId: "",
+  cleanupSessionId: localStorage.getItem("omc_web_session") || "",
   language: initialLanguage(),
   lastEventId: 0,
   polling: null,
+  cleanupSent: false,
 };
 
 const messagesEl = document.querySelector("#messages");
@@ -173,14 +175,35 @@ async function setLanguage(language) {
 }
 
 async function ensureSession() {
-  if (!state.sessionId) {
-    const response = await fetch("/api/sessions", { method: "POST" });
-    const payload = await response.json();
-    state.sessionId = payload.session_id;
-    localStorage.setItem("omc_web_session", state.sessionId);
-  }
+  const response = await fetch("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      cleanup_session_id: state.cleanupSessionId,
+      language: state.language,
+    }),
+  });
+  const payload = await response.json();
+  state.sessionId = payload.session_id;
+  state.cleanupSessionId = "";
+  state.lastEventId = 0;
+  messagesEl.replaceChildren();
+  localStorage.setItem("omc_web_session", state.sessionId);
   updateSessionLabel();
   await setServerLanguage();
+}
+
+function cleanupCurrentSession() {
+  if (!state.sessionId || state.cleanupSent) return;
+  state.cleanupSent = true;
+  const url = `/api/sessions/${encodeURIComponent(state.sessionId)}/cleanup`;
+  localStorage.setItem("omc_web_session", state.sessionId);
+  if (navigator.sendBeacon) {
+    const payload = new Blob(["{}"], { type: "application/json" });
+    navigator.sendBeacon(url, payload);
+    return;
+  }
+  fetch(url, { method: "POST", keepalive: true }).catch(() => {});
 }
 
 function renderEvent(event) {
@@ -384,3 +407,4 @@ ensureSession().then(() => {
   refreshAll();
   state.polling = setInterval(refreshAll, 3000);
 });
+window.addEventListener("pagehide", cleanupCurrentSession);
