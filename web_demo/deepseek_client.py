@@ -11,7 +11,7 @@ from . import session_store
 
 load_cassette_package()
 
-from cassette import jobs, manifest, notifier, schemas, tools  # noqa: E402
+from cassette import jobs, manifest, schemas, tools  # noqa: E402
 from cassette.errors import CassetteError  # noqa: E402
 
 
@@ -41,7 +41,7 @@ class DeepSeekError(RuntimeError):
 
 
 def _runtime_env(name: str) -> str:
-    return str(os.getenv(name, "") or notifier._runtime_env(name)).strip()
+    return str(os.getenv(name, "")).strip()
 
 
 def api_key_from_runtime() -> str:
@@ -123,6 +123,7 @@ def _guard_job_args(name: str, args: dict[str, Any], session_id: str) -> None:
 
 def _session_scoped_args(name: str, raw_args: dict[str, Any], session_id: str) -> dict[str, Any]:
     args = dict(raw_args or {})
+    language = _session_language(session_id)
     if name in {
         "cassette_list_assets",
         "cassette_make_prompt",
@@ -133,14 +134,23 @@ def _session_scoped_args(name: str, raw_args: dict[str, Any], session_id: str) -
         "cassette_job_status",
     }:
         args["session_id"] = session_id
+    if name == "cassette_make_prompt":
+        args.setdefault("cassette_language", language)
     if name == "cassette_run_job":
         args["wait"] = False
-        args.setdefault("cassette_language", "zh")
+        args.setdefault("cassette_language", language)
     if name in {"cassette_job_status", "cassette_review_completion", "cassette_cancel_job"}:
         _guard_job_args(name, args, session_id)
         if name == "cassette_job_status" and not args.get("job_id"):
             args["session_id"] = session_id
     return args
+
+
+def _session_language(session_id: str) -> str:
+    try:
+        return tools._cassette_language_for_session(session_id, "web")
+    except Exception:
+        return "zh"
 
 
 def _execute_tool(session_id: str, name: str, arguments: str) -> str:
@@ -214,10 +224,12 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "") -
             messages.append(tool_message)
             history.append(tool_message)
     else:
-        final_content = "Cassette 工具流程已经启动或仍在处理中，请稍后查看网页通知。"
+        if _session_language(session_id) == "en":
+            final_content = "The Cassette tool flow has started or is still processing. Please check the web notifications shortly."
+        else:
+            final_content = "Cassette 工具流程已经启动或仍在处理中，请稍后查看网页通知。"
 
     session_store.set_llm_messages(session_id, history)
     if final_content:
         session_store.add_event(session_id, role="assistant", text=final_content, kind="message")
     return {"content": final_content, "tool_call_count": tool_call_count}
-

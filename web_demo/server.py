@@ -20,12 +20,23 @@ from . import deepseek_client, session_store
 load_cassette_package()
 
 from cassette import jobs, manifest, security, tools  # noqa: E402
+from cassette.errors import CassetteError  # noqa: E402
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(title="Oh My Cassette Web Demo")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    return response
 
 
 def _asset_root() -> Path:
@@ -97,6 +108,15 @@ def _tool_payload(result: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"ok": False, "error": {"code": "invalid_tool_payload"}}
 
 
+def _require_session(session_id: str) -> str:
+    try:
+        valid_session_id = session_store.validate_session_id(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid session_id") from exc
+    session_store.ensure_session(valid_session_id)
+    return valid_session_id
+
+
 def _session_hash(session_id: str) -> str:
     return manifest.resolve_session_hash(session_id=session_id)
 
@@ -148,6 +168,32 @@ def _job_download_urls(job: dict, session_id: str) -> list[dict[str, str]]:
     return outputs
 
 
+def _web_language(session_id: str) -> str:
+    try:
+        return tools._cassette_language_for_session(session_id, "web")
+    except Exception:
+        return "zh"
+
+
+def _set_web_language(session_id: str, language: str) -> str:
+    normalized = tools._normalize_cassette_language(language)
+    if normalized not in {"zh", "en"}:
+        raise HTTPException(status_code=400, detail="language must be zh or en")
+    tools._save_cassette_language_preference(session_id, normalized, "web")
+    return normalized
+
+
+def _localized(session_id: str, zh: str, en: str) -> str:
+    return en if _web_language(session_id) == "en" else zh
+
+
+def _api_key_override(value: str | None) -> str:
+    key = str(value or "").strip()
+    if len(key) > 4096:
+        raise HTTPException(status_code=400, detail="DeepSeek API key header is too large")
+    return key
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
@@ -156,17 +202,25 @@ def index() -> FileResponse:
 @app.post("/api/sessions")
 def create_session() -> dict[str, str]:
     state = session_store.ensure_session()
-    return {"session_id": state["session_id"]}
+    return {"session_id": state["session_id"], "language": _web_language(state["session_id"])}
+
+
+@app.post("/api/sessions/{session_id}/language")
+def set_session_language(session_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, str]:
+    valid_session_id = _require_session(session_id)
+    language = _set_web_language(valid_session_id, str(payload.get("language") or ""))
+    return {"session_id": valid_session_id, "language": language}
 
 
 @app.get("/api/events")
 def get_events(session_id: str = Query(...), after: int = Query(0)) -> dict[str, Any]:
-    session_store.ensure_session(session_id)
+    session_id = _require_session(session_id)
     return {"events": session_store.get_events(session_id, after)}
 
 
 @app.get("/api/events/{event_id}/attachment")
 def get_event_attachment(event_id: int, session_id: str = Query(...)) -> FileResponse:
+    session_id = _require_session(session_id)
     event = session_store.get_event(session_id, event_id)
     if not event or not event.get("attachment_path"):
         raise HTTPException(status_code=404, detail="attachment not found")
@@ -180,7 +234,7 @@ def upload_media(
     session_id: str = Form(...),
     files: list[UploadFile] = File(...),
 ) -> dict[str, Any]:
-    session_store.ensure_session(session_id)
+    session_id = _require_session(session_id)
     _ensure_upload_root_allowed()
     saved_paths: list[str] = []
     media_types: list[str] = []
@@ -189,19 +243,26 @@ def upload_media(
     for upload in files:
         filename = _safe_filename(upload.filename or "upload.bin")
         suffix = Path(filename).suffix.lower()
-        if suffix and suffix not in security.get_allowed_extensions():
+        if not suffix or suffix not in security.get_allowed_extensions():
             raise HTTPException(status_code=400, detail=f"extension not allowed: {suffix}")
         target = session_dir / f"{uuid.uuid4().hex}_{filename}"
-        with target.open("wb") as fh:
-            shutil.copyfileobj(upload.file, fh)
-        security.validate_size(target)
+        try:
+            with target.open("wb") as fh:
+                shutil.copyfileobj(upload.file, fh)
+            security.validate_size(target)
+        except CassetteError as exc:
+            try:
+                target.unlink()
+            except OSError:
+                pass
+            raise HTTPException(status_code=400, detail=exc.code) from exc
         saved_paths.append(str(target))
         media_types.append(upload.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream")
         session_store.add_event(
             session_id,
             role="user",
             kind="upload",
-            text=f"上传素材：{filename}",
+            text=_localized(session_id, f"上传素材：{filename}", f"Uploaded asset: {filename}"),
             attachment_path=str(target),
             attachment_type=tools._mime_to_media_type(media_types[-1], str(target)),
         )
@@ -217,17 +278,23 @@ def send_message(
     payload: dict[str, Any] = Body(...),
     x_deepseek_api_key: str | None = Header(default=None, alias="X-DeepSeek-Api-Key"),
 ) -> dict[str, Any]:
-    session_id = session_store.validate_session_id(str(payload.get("session_id") or ""))
+    session_id = _require_session(str(payload.get("session_id") or ""))
     text = str(payload.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
     session_store.ensure_session(session_id)
+    if payload.get("language"):
+        _set_web_language(session_id, str(payload.get("language") or ""))
     session_store.add_event(session_id, role="user", text=text, kind="message")
     result = tools.ingest_gateway_media(event=_make_event(session_id, text=text), gateway=_web_gateway())
     if result is None:
         asset_payload = _tool_payload(tools.cassette_list_assets({"session_id": session_id}))
         assets = (((asset_payload.get("data") or {}).get("manifest") or {}).get("assets") or [])
-        reply = "请先上传视频、图片或音频素材，然后发送剪辑指令。" if not assets else "收到。可以继续发送剪辑指令，或使用 /check_assets 查看素材。"
+        reply = (
+            _localized(session_id, "请先上传视频、图片或音频素材，然后发送剪辑指令。", "Please upload video, image, or audio assets first, then send an edit instruction.")
+            if not assets
+            else _localized(session_id, "收到。可以继续发送剪辑指令，或使用 /check_assets 查看素材。", "Got it. You can continue with an edit instruction, or use /check_assets to inspect assets.")
+        )
         session_store.add_event(session_id, role="assistant", text=reply, kind="message")
         return {"ok": True, "action": "local_reply", "result": result}
     if result.get("action") == "skip":
@@ -237,24 +304,25 @@ def send_message(
             deepseek_result = deepseek_client.run_turn(
                 session_id,
                 str(result.get("text") or text),
-                api_key_override=str(x_deepseek_api_key or ""),
+                api_key_override=_api_key_override(x_deepseek_api_key),
             )
             return {"ok": True, "action": "llm", "result": result, "deepseek": deepseek_result}
         except deepseek_client.DeepSeekError as exc:
-            session_store.add_event(session_id, role="assistant", text=f"DeepSeek 调用失败：{exc}", kind="error")
+            message = _localized(session_id, f"DeepSeek 调用失败：{exc}", f"DeepSeek call failed: {exc}")
+            session_store.add_event(session_id, role="assistant", text=message, kind="error")
             return {"ok": False, "action": "llm_error", "error": str(exc)}
     return {"ok": True, "action": "ignored", "result": result}
 
 
 @app.get("/api/assets")
 def get_assets(session_id: str = Query(...)) -> dict[str, Any]:
-    session_store.ensure_session(session_id)
+    session_id = _require_session(session_id)
     return _tool_payload(tools.cassette_list_assets({"session_id": session_id}))
 
 
 @app.get("/api/jobs")
 def get_jobs(session_id: str = Query(...), limit: int = Query(10)) -> dict[str, Any]:
-    session_store.ensure_session(session_id)
+    session_id = _require_session(session_id)
     payload = _tool_payload(tools.cassette_job_status({"session_id": session_id, "limit": limit}))
     for job in ((payload.get("data") or {}).get("jobs") or []):
         if isinstance(job, dict) and job.get("job_id"):
@@ -269,15 +337,22 @@ def get_jobs(session_id: str = Query(...), limit: int = Query(10)) -> dict[str, 
 
 @app.post("/api/jobs/{job_id}/cancel")
 def cancel_job(job_id: str, payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
-    session_id = session_store.validate_session_id(str(payload.get("session_id") or ""))
+    session_id = _require_session(str(payload.get("session_id") or ""))
     _require_job(session_id, job_id)
     result = _tool_payload(tools.cassette_cancel_job({"job_id": job_id}))
-    session_store.add_event(session_id, role="assistant", text="已请求暂停当前 Cassette 任务。", kind="message", job_id=job_id)
+    session_store.add_event(
+        session_id,
+        role="assistant",
+        text=_localized(session_id, "已请求暂停当前 Cassette 任务。", "Requested cancellation for the current Cassette job."),
+        kind="message",
+        job_id=job_id,
+    )
     return result
 
 
 @app.get("/api/jobs/{job_id}/outputs/{filename}")
 def download_output(job_id: str, filename: str, session_id: str = Query(...)) -> FileResponse:
+    session_id = _require_session(session_id)
     job = _require_job(session_id, job_id)
     for output in job.get("outputs") or []:
         if not isinstance(output, dict) or not output.get("local_path"):

@@ -201,12 +201,11 @@ pip install -r requirements-web.txt
 python -m playwright install chromium
 ```
 
-2. Configure Cassette and DeepSeek runtime settings. The service reads `~/.hermes/.env` and process environment variables:
+2. Configure Cassette and DeepSeek runtime settings as process environment variables. The web demo does not require Hermes Agent or `~/.hermes/.env`.
 
 ```bash
-mkdir -p ~/.hermes
-cp .env.example ~/.hermes/.env
-$EDITOR ~/.hermes/.env
+cp deploy/oh-my-cassette-web.env.example ./oh-my-cassette-web.env
+$EDITOR ./oh-my-cassette-web.env
 ```
 
 At minimum, set:
@@ -214,14 +213,24 @@ At minimum, set:
 ```dotenv
 CASSETTE_URL=https://sg.trycassette.online/agent
 CASSETTE_AUTH_EMAIL=you@example.com
-CASSETTE_AUTH_PASSWORD=your-cassette-password
-CASSETTE_ASSET_ROOT=$HOME/.hermes/cassette
+CASSETTE_AUTH_PASSWORD='your-cassette-password'
+CASSETTE_ASSET_ROOT=$HOME/.oh-my-cassette/cassette
 
-DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_API_KEY='your_deepseek_api_key'
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
 OMC_WEB_HOST=0.0.0.0
 OMC_WEB_PORT=8080
+```
+
+If you load the file with `. ./oh-my-cassette-web.env`, quote any value that contains shell-special characters, spaces, or `#`. The systemd `EnvironmentFile` format also accepts quoted values.
+
+Load the variables before starting the service:
+
+```bash
+set -a
+. ./oh-my-cassette-web.env
+set +a
 ```
 
 If you do not want to put a DeepSeek key on the server, leave `DEEPSEEK_API_KEY` empty and enter a temporary key from the web UI **Settings** panel. That browser-provided key is attached to API requests for that session and is not persisted by the web app.
@@ -230,7 +239,7 @@ If you do not want to put a DeepSeek key on the server, leave `DEEPSEEK_API_KEY`
 
 ```bash
 . .venv-web/bin/activate
-uvicorn web_demo.server:app --host 0.0.0.0 --port 8080
+python -m web_demo.server
 ```
 
 Open `http://127.0.0.1:8080/` for local testing, or `http://<server-ip>:8080/` from another device if the host firewall/security group allows inbound TCP `8080`.
@@ -239,12 +248,14 @@ Open `http://127.0.0.1:8080/` for local testing, or `http://<server-ip>:8080/` f
 
 ```bash
 sudo cp deploy/oh-my-cassette-web.service.example /etc/systemd/system/oh-my-cassette-web.service
+sudo cp deploy/oh-my-cassette-web.env.example /etc/oh-my-cassette-web.env
+sudo $EDITOR /etc/oh-my-cassette-web.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now oh-my-cassette-web
 sudo systemctl status oh-my-cassette-web
 ```
 
-Before enabling the service, edit `/etc/systemd/system/oh-my-cassette-web.service` if your repository, virtualenv, or `~/.hermes/.env` path differs from the example.
+Before enabling the service, edit `/etc/systemd/system/oh-my-cassette-web.service` if your repository or virtualenv path differs from the example.
 
 5. Smoke test:
 
@@ -253,7 +264,7 @@ curl -fsS http://127.0.0.1:8080/ -o /dev/null
 python3 -m compileall -q web_demo tools.py notifier.py browser.py
 ```
 
-Then open the browser UI, upload a small MP4, send an edit request, and watch the job card/events until the export download appears.
+Then open the browser UI, upload a small video, send an edit request, and watch the job card/events until the export download appears.
 </details>
 
 # 🚀 Quick Start
@@ -529,10 +540,13 @@ Run the web demo service:
 uv venv .venv-web
 uv pip install --python .venv-web/bin/python -r requirements-web.txt
 .venv-web/bin/python -m playwright install chromium
-.venv-web/bin/uvicorn web_demo.server:app --host 0.0.0.0 --port 8080
+set -a
+. ./oh-my-cassette-web.env
+set +a
+.venv-web/bin/python -m web_demo.server
 ```
 
-The web demo reuses `CASSETTE_*` and `DEEPSEEK_API_KEY` from `~/.hermes/.env`. Users can also enter a temporary DeepSeek API key in the browser settings; it is sent only with requests to this server and is not written to the repository or server disk. A systemd template lives at `deploy/oh-my-cassette-web.service.example`.
+The web demo reads `CASSETTE_*`, `DEEPSEEK_*`, and `OMC_WEB_*` from process environment variables. Users can also enter a temporary DeepSeek API key in the browser settings; it is sent only with requests to this server and is not written to the repository or server disk. A systemd template lives at `deploy/oh-my-cassette-web.service.example`, with an environment template at `deploy/oh-my-cassette-web.env.example`.
 
 Real gateway E2E tests are opt-in only and are skipped by default:
 

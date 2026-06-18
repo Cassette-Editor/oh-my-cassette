@@ -138,6 +138,18 @@ def test_deepseek_mock_tool_loop_starts_web_job(cassette_env, monkeypatch):
     assert session_store.get_events(session_id)[-1]["text"] == "Cassette 任务已开始。"
 
 
+def test_deepseek_runtime_env_uses_process_env_only(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("DEEPSEEK_API_KEY=from-hermes-file\n", encoding="utf-8")
+    monkeypatch.setenv("HERMES_ENV_FILE", str(env_file))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    assert deepseek_client.api_key_from_runtime() == ""
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "from-process-env")
+    assert deepseek_client.api_key_from_runtime() == "from-process-env"
+
+
 def test_web_api_upload_records_assets(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi
@@ -158,3 +170,22 @@ def test_web_api_upload_records_assets(cassette_env):
     assert len(assets["data"]["manifest"]["assets"]) == 1
     events = client.get(f"/api/events?session_id={session_id}&after=0").json()["events"]
     assert any("已保存素材" in event.get("text", "") for event in events)
+
+
+def test_web_api_language_switch_changes_local_reply(cassette_env):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    language_response = client.post(f"/api/sessions/{session_id}/language", json={"language": "en"})
+    message_response = client.post("/api/messages", json={"session_id": session_id, "text": "hello", "language": "en"})
+
+    assert language_response.status_code == 200
+    assert language_response.json()["language"] == "en"
+    assert message_response.status_code == 200
+    events = client.get(f"/api/events?session_id={session_id}&after=0").json()["events"]
+    assert any("Please upload video" in event.get("text", "") for event in events)

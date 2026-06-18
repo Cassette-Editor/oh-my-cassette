@@ -196,12 +196,11 @@ pip install -r requirements-web.txt
 python -m playwright install chromium
 ```
 
-2. 配置 Cassette 和 DeepSeek。服务会读取 `~/.hermes/.env` 以及当前进程环境变量：
+2. 通过进程环境变量配置 Cassette 和 DeepSeek。Web Demo 不要求安装 Hermes Agent，也不要求存在 `~/.hermes/.env`：
 
 ```bash
-mkdir -p ~/.hermes
-cp .env.example ~/.hermes/.env
-$EDITOR ~/.hermes/.env
+cp deploy/oh-my-cassette-web.env.example ./oh-my-cassette-web.env
+$EDITOR ./oh-my-cassette-web.env
 ```
 
 至少需要设置：
@@ -209,14 +208,24 @@ $EDITOR ~/.hermes/.env
 ```dotenv
 CASSETTE_URL=https://sg.trycassette.online/agent
 CASSETTE_AUTH_EMAIL=you@example.com
-CASSETTE_AUTH_PASSWORD=your-cassette-password
-CASSETTE_ASSET_ROOT=$HOME/.hermes/cassette
+CASSETTE_AUTH_PASSWORD='your-cassette-password'
+CASSETTE_ASSET_ROOT=$HOME/.oh-my-cassette/cassette
 
-DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_API_KEY='your_deepseek_api_key'
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
 OMC_WEB_HOST=0.0.0.0
 OMC_WEB_PORT=8080
+```
+
+如果用 `. ./oh-my-cassette-web.env` 加载配置，包含 shell 特殊字符、空格或 `#` 的值请加引号；systemd 的 `EnvironmentFile` 同样支持带引号的值。
+
+启动前加载这些变量：
+
+```bash
+set -a
+. ./oh-my-cassette-web.env
+set +a
 ```
 
 如果不希望在服务器上保存 DeepSeek API Key，可以把 `DEEPSEEK_API_KEY` 留空，然后在网页 **设置** 面板里临时填写自己的 key。浏览器提供的 key 只会附加在当前会话的请求上，Web 应用不会持久化保存。
@@ -225,7 +234,7 @@ OMC_WEB_PORT=8080
 
 ```bash
 . .venv-web/bin/activate
-uvicorn web_demo.server:app --host 0.0.0.0 --port 8080
+python -m web_demo.server
 ```
 
 本机测试打开 `http://127.0.0.1:8080/`；如果要让手机或其他电脑访问，请打开 `http://<服务器 IP>:8080/`，并确认服务器防火墙或云安全组允许入站 TCP `8080`。
@@ -234,12 +243,14 @@ uvicorn web_demo.server:app --host 0.0.0.0 --port 8080
 
 ```bash
 sudo cp deploy/oh-my-cassette-web.service.example /etc/systemd/system/oh-my-cassette-web.service
+sudo cp deploy/oh-my-cassette-web.env.example /etc/oh-my-cassette-web.env
+sudo $EDITOR /etc/oh-my-cassette-web.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now oh-my-cassette-web
 sudo systemctl status oh-my-cassette-web
 ```
 
-启用前请检查 `/etc/systemd/system/oh-my-cassette-web.service`，如果你的仓库路径、虚拟环境路径或 `~/.hermes/.env` 路径与示例不同，需要先改成自己的实际路径。
+启用前请检查 `/etc/systemd/system/oh-my-cassette-web.service`，如果你的仓库路径或虚拟环境路径与示例不同，需要先改成自己的实际路径。
 
 5. 简单验收：
 
@@ -248,7 +259,7 @@ curl -fsS http://127.0.0.1:8080/ -o /dev/null
 python3 -m compileall -q web_demo tools.py notifier.py browser.py
 ```
 
-然后在浏览器中上传一个小 MP4，发送剪辑指令，观察事件流和任务卡片，直到出现导出下载入口。
+然后在浏览器中上传一个小的视频文件，发送剪辑指令，观察事件流和任务卡片，直到出现导出下载入口。
 </details>
 
 # 🚀 快速开始
@@ -526,10 +537,13 @@ python3 -m compileall -q .
 uv venv .venv-web
 uv pip install --python .venv-web/bin/python -r requirements-web.txt
 .venv-web/bin/python -m playwright install chromium
-.venv-web/bin/uvicorn web_demo.server:app --host 0.0.0.0 --port 8080
+set -a
+. ./oh-my-cassette-web.env
+set +a
+.venv-web/bin/python -m web_demo.server
 ```
 
-网页演示会复用 `~/.hermes/.env` 中的 `CASSETTE_*` 和 `DEEPSEEK_API_KEY`。浏览器内也可以在“设置”里临时填写 DeepSeek API Key；该 key 只随请求发送到当前服务器，不会写入仓库或服务端磁盘。示例 systemd 文件在 `deploy/oh-my-cassette-web.service.example`。
+网页演示会从进程环境变量读取 `CASSETTE_*`、`DEEPSEEK_*` 和 `OMC_WEB_*`。浏览器内也可以在“设置”里临时填写 DeepSeek API Key；该 key 只随请求发送到当前服务器，不会写入仓库或服务端磁盘。示例 systemd 文件在 `deploy/oh-my-cassette-web.service.example`，环境变量模板在 `deploy/oh-my-cassette-web.env.example`。
 
 真实网关端到端测试是可选项，默认会跳过：
 

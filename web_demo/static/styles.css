@@ -80,7 +80,32 @@ button:hover {
 
 .topbar-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.language-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.language-toggle button {
+  min-width: 42px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.language-toggle button + button {
+  border-left: 1px solid var(--line);
+}
+
+.language-toggle button.active {
+  color: #fff;
+  background: var(--accent);
 }
 
 .workspace {
@@ -310,4 +335,3 @@ dialog::backdrop {
     order: -1;
   }
 }
-
