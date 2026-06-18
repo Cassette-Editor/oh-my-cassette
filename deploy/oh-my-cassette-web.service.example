@@ -1,0 +1,17 @@
+[Unit]
+Description=Oh My Cassette Web Demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/oh-my-cassette
+Environment=HERMES_HOME=/home/ubuntu/.hermes
+EnvironmentFile=-/home/ubuntu/.hermes/.env
+ExecStart=/home/ubuntu/oh-my-cassette/.venv-web/bin/uvicorn web_demo.server:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

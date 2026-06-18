@@ -432,6 +432,17 @@ python3 -m compileall -q .
   --instruction "制作一个 10 秒以内、带字幕的短视频。"
 ```
 
+运行网页演示服务：
+
+```bash
+uv venv .venv-web
+uv pip install --python .venv-web/bin/python -r requirements-web.txt
+.venv-web/bin/python -m playwright install chromium
+.venv-web/bin/uvicorn web_demo.server:app --host 0.0.0.0 --port 8080
+```
+
+网页演示会复用 `~/.hermes/.env` 中的 `CASSETTE_*` 和 `DEEPSEEK_API_KEY`。浏览器内也可以在“设置”里临时填写 DeepSeek API Key；该 key 只随请求发送到当前服务器，不会写入仓库或服务端磁盘。示例 systemd 文件在 `deploy/oh-my-cassette-web.service.example`。
+
 真实网关端到端测试是可选项，默认会跳过：
 
 ```bash

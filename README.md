@@ -435,6 +435,17 @@ Run the local Cassette E2E harness:
   --instruction "Make a short captioned video under 10 seconds."
 ```
 
+Run the web demo service:
+
+```bash
+uv venv .venv-web
+uv pip install --python .venv-web/bin/python -r requirements-web.txt
+.venv-web/bin/python -m playwright install chromium
+.venv-web/bin/uvicorn web_demo.server:app --host 0.0.0.0 --port 8080
+```
+
+The web demo reuses `CASSETTE_*` and `DEEPSEEK_API_KEY` from `~/.hermes/.env`. Users can also enter a temporary DeepSeek API key in the browser settings; it is sent only with requests to this server and is not written to the repository or server disk. A systemd template lives at `deploy/oh-my-cassette-web.service.example`.
+
 Real gateway E2E tests are opt-in only and are skipped by default:
 
 ```bash

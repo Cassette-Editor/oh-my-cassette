@@ -421,7 +421,7 @@ def _normalize_thinking_level(value: str | None, text: str = "") -> str:
 def _cassette_model_selection(args: dict, delivery: dict | None = None) -> dict:
     session_id = str(args.get("session_id") or "").strip()
     platform = _normalize_platform_name((delivery or {}).get("platform"))
-    if session_id and platform in {"qqbot", "weixin", "telegram"}:
+    if session_id and platform in {"qqbot", "weixin", "telegram", "web"}:
         preference = _cassette_model_preference_for_session(session_id)
         if preference:
             return {**preference, "source": "session_preference"}
@@ -478,7 +478,7 @@ def _should_run_gateway_job_in_background(args: dict, delivery: dict | None) -> 
     if not _gateway_background_jobs_enabled():
         return False
     platform = _normalize_platform_name((delivery or {}).get("platform"))
-    if platform not in {"qqbot", "weixin", "telegram"}:
+    if platform not in {"qqbot", "weixin", "telegram", "web"}:
         return False
     return bool((delivery or {}).get("chat_id"))
 
@@ -789,6 +789,8 @@ def _normalize_platform_name(platform: Any) -> str:
         return "telegram"
     if value in {"wechat", "weixin", "wx"}:
         return "weixin"
+    if value in {"web", "browser", "web_demo", "webdemo"}:
+        return "web"
     return value
 
 
@@ -1200,6 +1202,10 @@ def _gateway_hermes_session_id(event: Any, session_store: Any = None) -> str:
 def _gateway_session_id(event: Any, session_store: Any = None) -> str:
     source = getattr(event, "source", None)
     platform = getattr(getattr(source, "platform", None), "value", None) or getattr(source, "platform", None) or "gateway"
+    if _normalize_platform_name(platform) == "web":
+        chat_id = str(getattr(source, "chat_id", "") or "").strip()
+        if chat_id.startswith("web_"):
+            return chat_id
     chat_hash = safe_hash_id(getattr(source, "chat_id", None))
     hermes_session_id = _gateway_hermes_session_id(event, session_store)
     if hermes_session_id:

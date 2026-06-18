@@ -2510,21 +2510,35 @@ def _select_cassette_language(page: Any, job: dict) -> dict[str, Any]:
     target = _language_for_job(job)
     if page.url.startswith("file:"):
         return {"status": "skipped", "reason": "fixture_page", "language": target}
-    current = _current_cassette_language(page)
-    if current == target:
-        return {"status": "selected", "reason": "already_selected", "language": target}
+    timeout_sec = max(1.0, min(15.0, float(job.get("timeout_sec") or 15)))
+    deadline = time.monotonic() + timeout_sec
+    last_error: Exception | None = None
     try:
-        if not _click_language_trigger(page):
-            raise RuntimeError("language_trigger_missing")
-        _click_language_option(page, target)
-        try:
-            page.wait_for_timeout(500)
-        except Exception:
-            pass
-        current = _current_cassette_language(page)
-        if current and current != target:
-            raise RuntimeError(f"language_mismatch:{current}")
-        return {"status": "selected", "language": target}
+        while time.monotonic() < deadline:
+            current = _current_cassette_language(page)
+            if current == target:
+                return {"status": "selected", "reason": "already_selected", "language": target}
+            try:
+                if not _click_language_trigger(page):
+                    raise RuntimeError("language_trigger_missing")
+                _click_language_option(page, target)
+                try:
+                    page.wait_for_timeout(500)
+                except Exception:
+                    pass
+                current = _current_cassette_language(page)
+                if current and current != target:
+                    raise RuntimeError(f"language_mismatch:{current}")
+                return {"status": "selected", "language": target}
+            except Exception as exc:
+                last_error = exc
+                try:
+                    page.wait_for_timeout(750)
+                except Exception:
+                    time.sleep(0.75)
+        if last_error:
+            raise last_error
+        raise RuntimeError("language_selection_timeout")
     except Exception as exc:
         if os.getenv("CASSETTE_REQUIRE_LANGUAGE_SELECTION", "true").lower() in {"0", "false", "no", "off"}:
             return {"status": "skipped", "reason": type(exc).__name__, "language": target}
