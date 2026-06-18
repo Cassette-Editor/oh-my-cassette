@@ -73,6 +73,23 @@ def test_exact_search_deterministically_chooses_best_matching_candidate(cassette
     assert selected.id == "1"
 
 
+def test_exact_title_matching_ignores_chinese_song_wrappers(cassette_env):
+    candidates = [
+        _candidate("qq", "mid-1", "New Boy", "房东的猫", query="《New Boy》 房东的猫"),
+    ]
+
+    eligible = exact_bgm.filter_exact_candidates(
+        candidates,
+        title="《New Boy》",
+        artist="房东的猫",
+        require_artist=True,
+        strict_title=True,
+    )
+
+    assert len(eligible) == 1
+    assert eligible[0].title == "New Boy"
+
+
 def test_exact_search_rejects_partial_title_when_artist_query_matches(cassette_env):
     class FakeClient(exact_bgm.ExactBgmClient):
         def __init__(self):

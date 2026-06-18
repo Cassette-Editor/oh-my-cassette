@@ -502,6 +502,8 @@ def _normalize_platform(platform: str | None) -> str:
         return "telegram"
     if value in {"wechat", "weixin", "wx"}:
         return "weixin"
+    if value in {"web", "browser", "web_demo", "webdemo"}:
+        return "web"
     return value
 
 
@@ -513,6 +515,8 @@ def _platform_label(platform: str | None) -> str:
         return "微信"
     if normalized == "telegram":
         return "Telegram"
+    if normalized == "web":
+        return "网页"
     return "当前平台"
 
 
@@ -1127,10 +1131,40 @@ def format_model_selection_message(model_selection: dict, language: str = "zh") 
     return f"Cassette 已选择模型：{model}，思考程度：{thinking_label}。"
 
 
+def _send_web_outbox(
+    chat_id: str,
+    message: str,
+    *,
+    reason: str = "text",
+    attachment_path: str = "",
+    attachment_type: str = "",
+    job_id: str = "",
+    extra: dict[str, Any] | None = None,
+) -> dict:
+    try:
+        from web_demo import session_store as web_sessions
+    except Exception as exc:
+        return {"success": False, "error": f"web_outbox_import_failed:{type(exc).__name__}"}
+    try:
+        event = web_sessions.add_event(
+            str(chat_id),
+            role="assistant",
+            text=message,
+            kind=reason,
+            attachment_path=attachment_path,
+            attachment_type=attachment_type,
+            job_id=job_id,
+            extra=extra or {},
+        )
+        return {"success": True, "message_id": str(event.get("id") or "")}
+    except Exception as exc:
+        return {"success": False, "error": f"web_outbox_write_failed:{type(exc).__name__}"}
+
+
 def notify_model_selection(job: dict) -> dict:
     delivery = job.get("delivery") or {}
     platform = _normalize_platform(delivery.get("platform"))
-    if platform not in {"weixin", "qqbot", "telegram"}:
+    if platform not in {"weixin", "qqbot", "telegram", "web"}:
         return {"status": "skipped", "reason": "unsupported_platform", "platform": platform or ""}
     chat_id = delivery.get("chat_id")
     if not chat_id:
@@ -1138,6 +1172,16 @@ def notify_model_selection(job: dict) -> dict:
     chat_type = delivery.get("chat_type")
     thread_id = delivery.get("thread_id")
     message = format_model_selection_message(job.get("model_selection") or {}, _language_for_platform(platform, job))
+    if platform == "web":
+        result = _send_web_outbox(str(chat_id), message, reason="model_selection", job_id=str(job.get("job_id") or ""))
+        if result.get("success"):
+            return {"status": "sent", "platform": platform, "message_id": result.get("message_id")}
+        return {
+            "status": "failed",
+            "platform": platform,
+            "code": "web_model_selection_send_failed",
+            "error": str(result.get("error") or "unknown")[:200],
+        }
 
     root = _hermes_agent_root()
     if root.exists() and str(root) not in sys.path:
@@ -1166,13 +1210,23 @@ def notify_model_selection(job: dict) -> dict:
 
 def notify_gateway_text(delivery: dict, message: str, reason: str = "text") -> dict:
     platform = _normalize_platform(delivery.get("platform"))
-    if platform not in {"weixin", "qqbot", "telegram"}:
+    if platform not in {"weixin", "qqbot", "telegram", "web"}:
         return {"status": "skipped", "reason": "unsupported_platform", "platform": platform or ""}
     chat_id = delivery.get("chat_id")
     if not chat_id:
         return {"status": "skipped", "reason": "missing_chat_id", "platform": platform}
     chat_type = delivery.get("chat_type")
     thread_id = delivery.get("thread_id")
+    if platform == "web":
+        result = _send_web_outbox(str(chat_id), message, reason=reason)
+        if result.get("success"):
+            return {"status": "sent", "platform": platform, "message_id": result.get("message_id"), "reason": reason}
+        return {
+            "status": "failed",
+            "platform": platform,
+            "code": f"web_{reason}_send_failed",
+            "error": str(result.get("error") or "unknown")[:200],
+        }
 
     root = _hermes_agent_root()
     if root.exists() and str(root) not in sys.path:
@@ -1204,7 +1258,7 @@ def notify_progress_snapshot(job: dict, screenshot_path: str, summary: str = "")
         return {"status": "skipped", "reason": "missing_screenshot"}
     delivery = job.get("delivery") or {}
     platform = _normalize_platform(delivery.get("platform"))
-    if platform not in {"weixin", "qqbot", "telegram"}:
+    if platform not in {"weixin", "qqbot", "telegram", "web"}:
         return {"status": "skipped", "reason": "unsupported_platform", "platform": platform or ""}
     chat_id = delivery.get("chat_id")
     if not chat_id:
@@ -1212,6 +1266,23 @@ def notify_progress_snapshot(job: dict, screenshot_path: str, summary: str = "")
     chat_type = delivery.get("chat_type")
     thread_id = delivery.get("thread_id")
     message = format_progress_snapshot_message(job, summary)
+    if platform == "web":
+        result = _send_web_outbox(
+            str(chat_id),
+            message,
+            reason="progress_snapshot",
+            attachment_path=screenshot_path,
+            attachment_type="image",
+            job_id=str(job.get("job_id") or ""),
+        )
+        if result.get("success"):
+            return {"status": "sent", "platform": platform, "message_id": result.get("message_id"), "media_mode": "web_outbox"}
+        return {
+            "status": "failed",
+            "platform": platform,
+            "code": "web_progress_snapshot_failed",
+            "error": str(result.get("error") or "unknown")[:200],
+        }
 
     root = _hermes_agent_root()
     if root.exists() and str(root) not in sys.path:
@@ -1248,13 +1319,36 @@ def notify_terminal_job(job: dict) -> dict:
         return {"status": "skipped", "reason": "non_terminal"}
     delivery = job.get("delivery") or {}
     platform = _normalize_platform(delivery.get("platform"))
-    if platform not in {"weixin", "qqbot", "telegram"}:
+    if platform not in {"weixin", "qqbot", "telegram", "web"}:
         return {"status": "skipped", "reason": "unsupported_platform", "platform": platform or ""}
     chat_id = delivery.get("chat_id")
     if not chat_id:
         return {"status": "skipped", "reason": "missing_chat_id"}
     chat_type = delivery.get("chat_type")
     thread_id = delivery.get("thread_id")
+    if platform == "web":
+        exported_paths = _exported_media_paths(job) if job.get("status") == "succeeded" else []
+        message = format_platform_final_message(job, media_delivery="sent" if exported_paths else None, platform=platform)
+        result = _send_web_outbox(
+            str(chat_id),
+            message,
+            reason="terminal",
+            attachment_path=exported_paths[0] if exported_paths else "",
+            attachment_type="video" if exported_paths else "",
+            job_id=str(job.get("job_id") or ""),
+        )
+        if result.get("success"):
+            payload = {"status": "sent", "platform": platform, "message_id": result.get("message_id")}
+            if exported_paths:
+                payload["media_message_id"] = result.get("message_id")
+                payload["media_mode"] = "web_download"
+            return payload
+        return {
+            "status": "failed",
+            "platform": platform,
+            "code": "web_send_failed",
+            "error": str(result.get("error") or "unknown")[:200],
+        }
 
     root = _hermes_agent_root()
     if root.exists() and str(root) not in sys.path:

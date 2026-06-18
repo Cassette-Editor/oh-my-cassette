@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+import secrets
+import threading
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+
+_LOCK = threading.RLock()
+_SESSIONS: dict[str, dict[str, Any]] = {}
+_MAX_EVENTS = 500
+_MAX_LLM_MESSAGES = 80
+
+
+def new_session_id() -> str:
+    return f"web_{secrets.token_urlsafe(18).replace('-', '').replace('_', '')[:24]}"
+
+
+def validate_session_id(session_id: str) -> str:
+    value = str(session_id or "").strip()
+    if not value.startswith("web_"):
+        raise ValueError("web session_id must start with web_")
+    suffix = value[4:]
+    if not suffix or len(value) > 96 or not all(ch.isalnum() or ch in {"_", "-"} for ch in value):
+        raise ValueError("invalid web session_id")
+    return value
+
+
+def ensure_session(session_id: str | None = None) -> dict[str, Any]:
+    sid = validate_session_id(session_id) if session_id else new_session_id()
+    with _LOCK:
+        state = _SESSIONS.get(sid)
+        if state is None:
+            state = {"session_id": sid, "next_event_id": 1, "events": [], "llm_messages": []}
+            _SESSIONS[sid] = state
+        return state
+
+
+def reset_all() -> None:
+    with _LOCK:
+        _SESSIONS.clear()
+
+
+def add_event(
+    session_id: str,
+    *,
+    role: str,
+    text: str = "",
+    kind: str = "message",
+    attachment_path: str = "",
+    attachment_type: str = "",
+    job_id: str = "",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    with _LOCK:
+        state = ensure_session(session_id)
+        event_id = int(state["next_event_id"])
+        state["next_event_id"] = event_id + 1
+        event = {
+            "id": event_id,
+            "session_id": state["session_id"],
+            "role": role,
+            "kind": kind,
+            "text": str(text or ""),
+            "attachment_path": str(attachment_path or ""),
+            "attachment_type": str(attachment_type or ""),
+            "job_id": str(job_id or ""),
+        }
+        if extra:
+            event.update(extra)
+        state["events"].append(event)
+        state["events"] = state["events"][-_MAX_EVENTS:]
+        return public_event(event)
+
+
+def public_event(event: dict[str, Any]) -> dict[str, Any]:
+    cleaned = {key: deepcopy(value) for key, value in event.items() if key not in {"attachment_path"}}
+    if event.get("attachment_path"):
+        cleaned["has_attachment"] = True
+        cleaned["attachment_name"] = Path(str(event["attachment_path"])).name
+        cleaned["attachment_url"] = f"/api/events/{event['id']}/attachment?session_id={event['session_id']}"
+    return cleaned
+
+
+def get_events(session_id: str, after: int = 0) -> list[dict[str, Any]]:
+    with _LOCK:
+        state = ensure_session(session_id)
+        return [public_event(event) for event in state["events"] if int(event.get("id") or 0) > after]
+
+
+def get_event(session_id: str, event_id: int) -> dict[str, Any] | None:
+    with _LOCK:
+        state = ensure_session(session_id)
+        for event in state["events"]:
+            if int(event.get("id") or 0) == int(event_id):
+                return deepcopy(event)
+    return None
+
+
+def get_llm_messages(session_id: str) -> list[dict[str, Any]]:
+    with _LOCK:
+        state = ensure_session(session_id)
+        return deepcopy(state["llm_messages"])
+
+
+def set_llm_messages(session_id: str, messages: list[dict[str, Any]]) -> None:
+    with _LOCK:
+        state = ensure_session(session_id)
+        state["llm_messages"] = deepcopy(messages[-_MAX_LLM_MESSAGES:])
+

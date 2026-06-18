@@ -1,0 +1,15 @@
+[Unit]
+Description=Oh My Cassette Web Demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/oh-my-cassette
+EnvironmentFile=-/etc/oh-my-cassette-web.env
+ExecStart=/home/ubuntu/oh-my-cassette/.venv-web/bin/python -m web_demo.server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

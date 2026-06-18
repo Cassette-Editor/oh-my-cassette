@@ -200,6 +200,7 @@ def cassette_match_exact_bgm(args: dict, **kwargs) -> str:
         instruction = str(a.get("instruction") or "").strip()
         title = str(a.get("title") or a.get("songTitle") or a.get("song_title") or "").strip()
         artist = str(a.get("artist") or a.get("singer") or "").strip()
+        title, artist = _normalize_exact_bgm_request(title, artist)
         if not session_id:
             raise CassetteError("missing_required_arg", "session_id is required")
         if not instruction:
@@ -260,6 +261,53 @@ def cassette_match_exact_bgm(args: dict, **kwargs) -> str:
         return ok(data)
 
     return _safe_call("cassette_match_exact_bgm", run, args, **kwargs)
+
+
+def _normalize_exact_bgm_request(title: str, artist: str = "") -> tuple[str, str]:
+    cleaned_title = re.sub(r"^\s*\d+\s*[.．、)]\s*", "", str(title or "").strip())
+    cleaned_artist = str(artist or "").strip()
+    if not cleaned_artist:
+        parsed = _split_exact_bgm_menu_line(cleaned_title)
+        if parsed:
+            cleaned_title, cleaned_artist = parsed
+        else:
+            cleaned_title = _trim_exact_bgm_reason(cleaned_title)
+    else:
+        cleaned_title = _trim_exact_bgm_reason(cleaned_title)
+        cleaned_artist = _trim_exact_bgm_reason(cleaned_artist)
+    return _strip_exact_bgm_wrappers(cleaned_title), _strip_exact_bgm_wrappers(cleaned_artist)
+
+
+def _split_exact_bgm_menu_line(value: str) -> tuple[str, str] | None:
+    text = _trim_exact_bgm_reason(value)
+    wrapped = r"[《「『“\"'].*?[》」』”\"']"
+    patterns = [
+        rf"^\s*(?P<title>{wrapped})\s*[-–—]\s*(?P<artist>.+?)\s*$",
+        r"^\s*(?P<title>.+?)\s+[-–—]\s+(?P<artist>.+?)\s*$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, text)
+        if match:
+            return match.group("title").strip(), _trim_exact_bgm_reason(match.group("artist"))
+    return None
+
+
+def _trim_exact_bgm_reason(value: str) -> str:
+    return re.split(r"\s*[：:]\s*", str(value or "").strip(), maxsplit=1)[0].strip()
+
+
+def _strip_exact_bgm_wrappers(value: str) -> str:
+    text = str(value or "").strip()
+    pairs = [("《", "》"), ("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'), ("'", "'")]
+    changed = True
+    while changed and len(text) >= 2:
+        changed = False
+        for left, right in pairs:
+            if text.startswith(left) and text.endswith(right):
+                text = text[len(left): len(text) - len(right)].strip()
+                changed = True
+                break
+    return text
 
 
 def jamendo_music_matcher(args: dict, **kwargs) -> str:
@@ -421,7 +469,7 @@ def _normalize_thinking_level(value: str | None, text: str = "") -> str:
 def _cassette_model_selection(args: dict, delivery: dict | None = None) -> dict:
     session_id = str(args.get("session_id") or "").strip()
     platform = _normalize_platform_name((delivery or {}).get("platform"))
-    if session_id and platform in {"qqbot", "weixin", "telegram"}:
+    if session_id and platform in {"qqbot", "weixin", "telegram", "web"}:
         preference = _cassette_model_preference_for_session(session_id)
         if preference:
             return {**preference, "source": "session_preference"}
@@ -478,7 +526,7 @@ def _should_run_gateway_job_in_background(args: dict, delivery: dict | None) -> 
     if not _gateway_background_jobs_enabled():
         return False
     platform = _normalize_platform_name((delivery or {}).get("platform"))
-    if platform not in {"qqbot", "weixin", "telegram"}:
+    if platform not in {"qqbot", "weixin", "telegram", "web"}:
         return False
     return bool((delivery or {}).get("chat_id"))
 
@@ -789,6 +837,8 @@ def _normalize_platform_name(platform: Any) -> str:
         return "telegram"
     if value in {"wechat", "weixin", "wx"}:
         return "weixin"
+    if value in {"web", "browser", "web_demo", "webdemo"}:
+        return "web"
     return value
 
 
@@ -1200,6 +1250,10 @@ def _gateway_hermes_session_id(event: Any, session_store: Any = None) -> str:
 def _gateway_session_id(event: Any, session_store: Any = None) -> str:
     source = getattr(event, "source", None)
     platform = getattr(getattr(source, "platform", None), "value", None) or getattr(source, "platform", None) or "gateway"
+    if _normalize_platform_name(platform) == "web":
+        chat_id = str(getattr(source, "chat_id", "") or "").strip()
+        if chat_id.startswith("web_"):
+            return chat_id
     chat_hash = safe_hash_id(getattr(source, "chat_id", None))
     hermes_session_id = _gateway_hermes_session_id(event, session_store)
     if hermes_session_id:
