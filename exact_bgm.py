@@ -716,6 +716,7 @@ def _normalize_music_text(value: str) -> str:
     text = unicodedata.normalize("NFKC", value or "").lower()
     text = re.sub(r"\([^)]*\)|（[^）]*）|\[[^\]]*\]|【[^】]*】", " ", text)
     text = re.sub(r"(?i)\b(feat|ft|featuring)\b", " ", text)
+    text = re.sub(r"[《》〈〉「」『』“”\"']", " ", text)
     text = re.sub(r"[\s._\-~·`'\"“”‘’/\\,，、;；:：!！?？&＋+|]+", "", text)
     return text.strip()
 

@@ -200,6 +200,7 @@ def cassette_match_exact_bgm(args: dict, **kwargs) -> str:
         instruction = str(a.get("instruction") or "").strip()
         title = str(a.get("title") or a.get("songTitle") or a.get("song_title") or "").strip()
         artist = str(a.get("artist") or a.get("singer") or "").strip()
+        title, artist = _normalize_exact_bgm_request(title, artist)
         if not session_id:
             raise CassetteError("missing_required_arg", "session_id is required")
         if not instruction:
@@ -260,6 +261,53 @@ def cassette_match_exact_bgm(args: dict, **kwargs) -> str:
         return ok(data)
 
     return _safe_call("cassette_match_exact_bgm", run, args, **kwargs)
+
+
+def _normalize_exact_bgm_request(title: str, artist: str = "") -> tuple[str, str]:
+    cleaned_title = re.sub(r"^\s*\d+\s*[.．、)]\s*", "", str(title or "").strip())
+    cleaned_artist = str(artist or "").strip()
+    if not cleaned_artist:
+        parsed = _split_exact_bgm_menu_line(cleaned_title)
+        if parsed:
+            cleaned_title, cleaned_artist = parsed
+        else:
+            cleaned_title = _trim_exact_bgm_reason(cleaned_title)
+    else:
+        cleaned_title = _trim_exact_bgm_reason(cleaned_title)
+        cleaned_artist = _trim_exact_bgm_reason(cleaned_artist)
+    return _strip_exact_bgm_wrappers(cleaned_title), _strip_exact_bgm_wrappers(cleaned_artist)
+
+
+def _split_exact_bgm_menu_line(value: str) -> tuple[str, str] | None:
+    text = _trim_exact_bgm_reason(value)
+    wrapped = r"[《「『“\"'].*?[》」』”\"']"
+    patterns = [
+        rf"^\s*(?P<title>{wrapped})\s*[-–—]\s*(?P<artist>.+?)\s*$",
+        r"^\s*(?P<title>.+?)\s+[-–—]\s+(?P<artist>.+?)\s*$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, text)
+        if match:
+            return match.group("title").strip(), _trim_exact_bgm_reason(match.group("artist"))
+    return None
+
+
+def _trim_exact_bgm_reason(value: str) -> str:
+    return re.split(r"\s*[：:]\s*", str(value or "").strip(), maxsplit=1)[0].strip()
+
+
+def _strip_exact_bgm_wrappers(value: str) -> str:
+    text = str(value or "").strip()
+    pairs = [("《", "》"), ("「", "」"), ("『", "』"), ("“", "”"), ('"', '"'), ("'", "'")]
+    changed = True
+    while changed and len(text) >= 2:
+        changed = False
+        for left, right in pairs:
+            if text.startswith(left) and text.endswith(right):
+                text = text[len(left): len(text) - len(right)].strip()
+                changed = True
+                break
+    return text
 
 
 def jamendo_music_matcher(args: dict, **kwargs) -> str:

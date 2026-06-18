@@ -631,6 +631,38 @@ def test_exact_bgm_selection_choice_calls_exact_tool(cassette_env):
     assert tools._load_pending_edit(session_id) is None
 
 
+def test_cassette_match_exact_bgm_sanitizes_numbered_menu_line(cassette_env, monkeypatch):
+    observed = {}
+
+    def fake_match_exact_bgm(**kwargs):
+        observed.update(kwargs)
+        return {
+            "status": "matched",
+            "provider": "musicsquare_exact",
+            "artist": "房东的猫",
+            "title": "New Boy",
+            "query": "New Boy 房东的猫",
+            "source": "qq",
+            "track_id": "mid-1",
+            "candidateCount": 1,
+            "eligibleCandidates": [],
+            "attempts": [],
+        }
+
+    monkeypatch.setattr(tools.exact_bgm, "match_exact_bgm", fake_match_exact_bgm)
+
+    payload = json.loads(tools.cassette_match_exact_bgm({
+        "session_id": "exact-menu-line",
+        "instruction": "剪成产品促销广告",
+        "title": "2. 《New Boy》 - 房东的猫：轻快阳光的节奏，能传递产品的青春活力感",
+        "download": False,
+    }))
+
+    assert payload["ok"] is True
+    assert observed["title"] == "New Boy"
+    assert observed["artist"] == "房东的猫"
+
+
 def test_exact_bgm_selection_can_request_new_batch(cassette_env):
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
