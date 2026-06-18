@@ -218,6 +218,7 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
 OMC_WEB_HOST=0.0.0.0
 OMC_WEB_PORT=8080
+OMC_WEB_LOG_DIR=./web_demo/logs
 ```
 
 如果用 `. ./oh-my-cassette-web.env` 加载配置，包含 shell 特殊字符、空格或 `#` 的值请加引号；systemd 的 `EnvironmentFile` 同样支持带引号的值。
@@ -231,6 +232,8 @@ set +a
 ```
 
 如果不希望在服务器上保存 DeepSeek API Key，可以把 `DEEPSEEK_API_KEY` 留空，然后在网页 **设置** 面板里临时填写自己的 key。浏览器提供的 key 只会附加在当前会话的请求上，Web 应用不会持久化保存。
+
+Web Demo 服务日志和 Hermes Agent / OhMyCassette 插件日志是分开的。默认写入服务工作目录下的 `./web_demo/logs/web_demo.log`；如果设置了 `OMC_WEB_LOG_DIR`，则写入 `$OMC_WEB_LOG_DIR/web_demo.log`。
 
 3. 启动网页演示：
 
@@ -250,15 +253,18 @@ sudo $EDITOR /etc/oh-my-cassette-web.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now oh-my-cassette-web
 sudo systemctl status oh-my-cassette-web
+journalctl -u oh-my-cassette-web -f
 ```
 
 启用前请检查 `/etc/systemd/system/oh-my-cassette-web.service`，如果你的仓库路径或虚拟环境路径与示例不同，需要先改成自己的实际路径。
+`journalctl` 用来看 uvicorn 标准输出和 access log；Web Demo 业务日志仍写到 `$OMC_WEB_LOG_DIR/web_demo.log`。
 
 5. 简单验收：
 
 ```bash
 curl -fsS http://127.0.0.1:8080/ -o /dev/null
 python3 -m compileall -q web_demo tools.py notifier.py browser.py
+tail -f ./web_demo/logs/web_demo.log
 ```
 
 然后在浏览器中上传一个小的视频文件，发送剪辑指令，观察事件流和任务卡片，直到出现导出下载入口。

@@ -18,6 +18,7 @@ const I18N = {
     messagePlaceholder: "发送素材后输入剪辑指令，或使用 /edit、/refine、/music、/cut",
     messagesAria: "消息",
     pause: "暂停",
+    processing: "处理中",
     refresh: "刷新",
     refreshTitle: "刷新状态",
     save: "保存",
@@ -56,6 +57,7 @@ const I18N = {
     messagePlaceholder: "Upload assets, then enter an edit instruction or use /edit, /refine, /music, /cut",
     messagesAria: "Messages",
     pause: "Pause",
+    processing: "Processing",
     refresh: "Refresh",
     refreshTitle: "Refresh status",
     save: "Save",
@@ -359,17 +361,28 @@ async function uploadFiles(files) {
 }
 
 async function sendMessage(text) {
-  const response = await fetch("/api/messages", {
-    method: "POST",
-    headers: headers(true),
-    body: JSON.stringify({ session_id: state.sessionId, text, language: state.language }),
-  });
-  await pollEvents();
-  if (!response.ok) {
-    const detail = await response.text();
-    renderEvent({ id: `local-${Date.now()}`, role: "assistant", kind: "error", text: `${t("sendFailed")}：${detail}` });
+  sendBtn.disabled = true;
+  uploadBtn.disabled = true;
+  sendBtn.textContent = t("processing");
+  try {
+    const response = await fetch("/api/messages", {
+      method: "POST",
+      headers: headers(true),
+      body: JSON.stringify({ session_id: state.sessionId, text, language: state.language }),
+    });
+    await pollEvents();
+    if (!response.ok) {
+      const detail = await response.text();
+      renderEvent({ id: `local-${Date.now()}`, role: "assistant", kind: "error", text: `${t("sendFailed")}：${detail}` });
+    }
+    await refreshAll();
+  } catch (error) {
+    renderEvent({ id: `local-${Date.now()}`, role: "assistant", kind: "error", text: `${t("sendFailed")}：${error.message}` });
+  } finally {
+    sendBtn.disabled = false;
+    uploadBtn.disabled = false;
+    applyI18n();
   }
-  await refreshAll();
 }
 
 composer.addEventListener("submit", async (event) => {

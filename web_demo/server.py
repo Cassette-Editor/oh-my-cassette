@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import mimetypes
 import os
 import signal
 import shutil
+import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +18,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .cassette_loader import load_cassette_package
-from . import deepseek_client, session_store
+from . import deepseek_client, logging_utils, session_store
 
 load_cassette_package()
 
@@ -26,6 +28,7 @@ from cassette.errors import CassetteError  # noqa: E402
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 _ACTIVE_JOB_STATUSES = {"queued", "running", "cancel_requested"}
+_LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=int(os.getenv("OMC_WEB_LLM_WORKERS", "4")), thread_name_prefix="omc-web-llm")
 
 app = FastAPI(title="Oh My Cassette Web Demo")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -33,7 +36,29 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.middleware("http")
 async def _security_headers(request, call_next):
-    response = await call_next(request)
+    started = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        logging_utils.log_event(
+            "http_exception",
+            method=request.method,
+            path=str(request.url.path),
+            client=getattr(request.client, "host", ""),
+            error_type=type(exc).__name__,
+        )
+        raise
+    duration_ms = int((time.monotonic() - started) * 1000)
+    path = str(request.url.path)
+    if request.method != "GET" or response.status_code >= 400 or path == "/":
+        logging_utils.log_event(
+            "http_request",
+            method=request.method,
+            path=path,
+            status_code=response.status_code,
+            duration_ms=duration_ms,
+            client=getattr(request.client, "host", ""),
+        )
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("X-Frame-Options", "DENY")
@@ -85,6 +110,7 @@ class _WebAdapter:
     def send(self, chat_id: str, text: str, metadata: dict | None = None) -> dict:
         del metadata
         event = session_store.add_event(str(chat_id), role="assistant", text=text, kind="message")
+        logging_utils.log_event("web_outbox_send", session_id=str(chat_id), event_id=event.get("id"), text_len=len(text or ""))
         return {"success": True, "message_id": str(event["id"])}
 
 
@@ -194,6 +220,56 @@ def _api_key_override(value: str | None) -> str:
     if len(key) > 4096:
         raise HTTPException(status_code=400, detail="DeepSeek API key header is too large")
     return key
+
+
+def _message_preview(text: str) -> str:
+    return " ".join(str(text or "").split())[:120]
+
+
+def _processing_message(session_id: str) -> str:
+    return _localized(
+        session_id,
+        "已收到剪辑指令，正在调用 DeepSeek 编排 Cassette 流程。请稍等，结果会自动显示在这里。",
+        "Got the edit instruction. Calling DeepSeek to orchestrate the Cassette flow; results will appear here automatically.",
+    )
+
+
+def _llm_error_message(session_id: str, error: str) -> str:
+    return _localized(session_id, f"DeepSeek 调用失败：{error}", f"DeepSeek call failed: {error}")
+
+
+def _add_web_event(session_id: str, *, role: str, text: str, kind: str = "message", **kwargs: Any) -> None:
+    try:
+        session_store.add_event(session_id, role=role, text=text, kind=kind, **kwargs)
+    except Exception as exc:
+        logging_utils.log_event("web_event_write_failed", session_id=session_id, kind=kind, error_type=type(exc).__name__)
+
+
+def _run_llm_background(session_id: str, prompt_text: str, api_key_override: str) -> None:
+    logging_utils.log_event("llm_background_start", session_id=session_id, prompt_len=len(prompt_text or ""), has_api_key_override=bool(api_key_override))
+    try:
+        result = deepseek_client.run_turn(session_id, prompt_text, api_key_override=api_key_override)
+        logging_utils.log_event(
+            "llm_background_done",
+            session_id=session_id,
+            tool_call_count=result.get("tool_call_count"),
+            content_len=len(str(result.get("content") or "")),
+        )
+    except deepseek_client.DeepSeekError as exc:
+        _add_web_event(session_id, role="assistant", text=_llm_error_message(session_id, str(exc)), kind="error")
+        logging_utils.log_event("llm_background_error", session_id=session_id, error_type=type(exc).__name__, error=str(exc))
+    except Exception as exc:
+        _add_web_event(
+            session_id,
+            role="assistant",
+            text=_localized(session_id, f"Web demo 后台处理失败：{type(exc).__name__}", f"Web demo background processing failed: {type(exc).__name__}"),
+            kind="error",
+        )
+        logging_utils.log_event("llm_background_exception", session_id=session_id, error_type=type(exc).__name__)
+
+
+def _submit_llm_background(session_id: str, prompt_text: str, api_key_override: str) -> None:
+    _LLM_EXECUTOR.submit(_run_llm_background, session_id, prompt_text, api_key_override)
 
 
 def _normalize_web_platform(value: Any) -> str:
@@ -320,7 +396,7 @@ def _cleanup_web_session(session_id: str) -> dict[str, Any]:
         if _remove_job_record(str(job.get("job_id") or path.stem)):
             removed_jobs += 1
 
-    return {
+    result = {
         "ok": True,
         "session_id": valid_session_id,
         "session_hash": session_hash,
@@ -331,6 +407,8 @@ def _cleanup_web_session(session_id: str) -> dict[str, Any]:
         "cancelled_jobs": cancelled_jobs,
         "terminated_workers": terminated_workers,
     }
+    logging_utils.log_event("web_session_cleanup", **result)
+    return result
 
 
 @app.get("/")
@@ -351,7 +429,9 @@ def create_session(payload: dict[str, Any] | None = Body(default=None)) -> dict[
     language = str((payload or {}).get("language") or "").strip()
     if language:
         _set_web_language(state["session_id"], language)
-    return {"session_id": state["session_id"], "language": _web_language(state["session_id"]), "cleanup": cleanup_result}
+    response = {"session_id": state["session_id"], "language": _web_language(state["session_id"]), "cleanup": cleanup_result}
+    logging_utils.log_event("web_session_created", session_id=state["session_id"], language=response["language"], cleaned_previous=bool(cleanup_result))
+    return response
 
 
 @app.post("/api/sessions/{session_id}/cleanup")
@@ -389,6 +469,7 @@ def upload_media(
     files: list[UploadFile] = File(...),
 ) -> dict[str, Any]:
     session_id = _require_session(session_id)
+    logging_utils.log_event("web_upload_start", session_id=session_id, file_count=len(files or []))
     _ensure_upload_root_allowed()
     saved_paths: list[str] = []
     media_types: list[str] = []
@@ -398,6 +479,7 @@ def upload_media(
         filename = _safe_filename(upload.filename or "upload.bin")
         suffix = Path(filename).suffix.lower()
         if not suffix or suffix not in security.get_allowed_extensions():
+            logging_utils.log_event("web_upload_rejected", session_id=session_id, filename=filename, reason="extension_not_allowed", suffix=suffix)
             raise HTTPException(status_code=400, detail=f"extension not allowed: {suffix}")
         target = session_dir / f"{uuid.uuid4().hex}_{filename}"
         try:
@@ -409,6 +491,7 @@ def upload_media(
                 target.unlink()
             except OSError:
                 pass
+            logging_utils.log_event("web_upload_rejected", session_id=session_id, filename=filename, reason=exc.code)
             raise HTTPException(status_code=400, detail=exc.code) from exc
         saved_paths.append(str(target))
         media_types.append(upload.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream")
@@ -424,6 +507,7 @@ def upload_media(
         event=_make_event(session_id, media_paths=saved_paths, media_types=media_types),
         gateway=_web_gateway(),
     )
+    logging_utils.log_event("web_upload_done", session_id=session_id, saved_count=len(saved_paths), action=(result or {}).get("action"), reason=(result or {}).get("reason"))
     return {"ok": True, "result": result, "events": session_store.get_events(session_id, 0)}
 
 
@@ -439,8 +523,15 @@ def send_message(
     session_store.ensure_session(session_id)
     if payload.get("language"):
         _set_web_language(session_id, str(payload.get("language") or ""))
+    logging_utils.log_event("web_message_received", session_id=session_id, text_len=len(text), text_preview=_message_preview(text))
     session_store.add_event(session_id, role="user", text=text, kind="message")
     result = tools.ingest_gateway_media(event=_make_event(session_id, text=text), gateway=_web_gateway())
+    logging_utils.log_event(
+        "web_message_gateway_result",
+        session_id=session_id,
+        action=(result or {}).get("action") if isinstance(result, dict) else "",
+        reason=(result or {}).get("reason") if isinstance(result, dict) else "",
+    )
     if result is None:
         asset_payload = _tool_payload(tools.cassette_list_assets({"session_id": session_id}))
         assets = (((asset_payload.get("data") or {}).get("manifest") or {}).get("assets") or [])
@@ -454,17 +545,11 @@ def send_message(
     if result.get("action") == "skip":
         return {"ok": True, "action": "skip", "result": result}
     if result.get("action") == "rewrite":
-        try:
-            deepseek_result = deepseek_client.run_turn(
-                session_id,
-                str(result.get("text") or text),
-                api_key_override=_api_key_override(x_deepseek_api_key),
-            )
-            return {"ok": True, "action": "llm", "result": result, "deepseek": deepseek_result}
-        except deepseek_client.DeepSeekError as exc:
-            message = _localized(session_id, f"DeepSeek 调用失败：{exc}", f"DeepSeek call failed: {exc}")
-            session_store.add_event(session_id, role="assistant", text=message, kind="error")
-            return {"ok": False, "action": "llm_error", "error": str(exc)}
+        api_key = _api_key_override(x_deepseek_api_key)
+        session_store.add_event(session_id, role="assistant", text=_processing_message(session_id), kind="status")
+        _submit_llm_background(session_id, str(result.get("text") or text), api_key)
+        logging_utils.log_event("web_message_llm_submitted", session_id=session_id, prompt_len=len(str(result.get("text") or text)), has_api_key_override=bool(api_key))
+        return {"ok": True, "action": "llm_background", "result": result}
     return {"ok": True, "action": "ignored", "result": result}
 
 

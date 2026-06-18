@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -189,6 +190,45 @@ def test_web_api_language_switch_changes_local_reply(cassette_env):
     assert message_response.status_code == 200
     events = client.get(f"/api/events?session_id={session_id}&after=0").json()["events"]
     assert any("Please upload video" in event.get("text", "") for event in events)
+
+
+def test_web_api_rewrite_runs_deepseek_in_background(cassette_env, monkeypatch):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = client.post("/api/sessions").json()["session_id"]
+
+    def fake_ingest(event, gateway):
+        del event, gateway
+        return {"action": "rewrite", "reason": "test_rewrite", "text": "internal prompt"}
+
+    def fake_run_turn(run_session_id, prompt_text, *, api_key_override=""):
+        assert run_session_id == session_id
+        assert prompt_text == "internal prompt"
+        assert api_key_override == ""
+        session_store.add_event(session_id, role="assistant", text="background done", kind="message")
+        return {"content": "background done", "tool_call_count": 0}
+
+    monkeypatch.setattr(tools, "ingest_gateway_media", fake_ingest)
+    monkeypatch.setattr(deepseek_client, "run_turn", fake_run_turn)
+
+    response = client.post("/api/messages", json={"session_id": session_id, "text": "/edit add captions"})
+
+    assert response.status_code == 200
+    assert response.json()["action"] == "llm_background"
+    deadline = time.time() + 3
+    events = []
+    while time.time() < deadline:
+        events = client.get(f"/api/events?session_id={session_id}&after=0").json()["events"]
+        if any(event.get("text") == "background done" for event in events):
+            break
+        time.sleep(0.05)
+    assert any("正在调用 DeepSeek" in event.get("text", "") for event in events)
+    assert any(event.get("text") == "background done" for event in events)
 
 
 def test_web_session_creation_cleans_previous_web_session(cassette_env):

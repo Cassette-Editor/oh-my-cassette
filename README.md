@@ -223,6 +223,7 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
 OMC_WEB_HOST=0.0.0.0
 OMC_WEB_PORT=8080
+OMC_WEB_LOG_DIR=./web_demo/logs
 ```
 
 If you load the file with `. ./oh-my-cassette-web.env`, quote any value that contains shell-special characters, spaces, or `#`. The systemd `EnvironmentFile` format also accepts quoted values.
@@ -236,6 +237,8 @@ set +a
 ```
 
 If you do not want to put a DeepSeek key on the server, leave `DEEPSEEK_API_KEY` empty and enter a temporary key from the web UI **Settings** panel. That browser-provided key is attached to API requests for that session and is not persisted by the web app.
+
+Web demo service logs are separate from Hermes Agent / OhMyCassette plugin logs. By default they are written to `./web_demo/logs/web_demo.log` relative to the service working directory, or to `$OMC_WEB_LOG_DIR/web_demo.log` when `OMC_WEB_LOG_DIR` is set.
 
 3. Start the web demo:
 
@@ -255,15 +258,18 @@ sudo $EDITOR /etc/oh-my-cassette-web.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now oh-my-cassette-web
 sudo systemctl status oh-my-cassette-web
+journalctl -u oh-my-cassette-web -f
 ```
 
 Before enabling the service, edit `/etc/systemd/system/oh-my-cassette-web.service` if your repository or virtualenv path differs from the example.
+`journalctl` shows uvicorn stdout/access logs; Web demo business logs still go to `$OMC_WEB_LOG_DIR/web_demo.log`.
 
 5. Smoke test:
 
 ```bash
 curl -fsS http://127.0.0.1:8080/ -o /dev/null
 python3 -m compileall -q web_demo tools.py notifier.py browser.py
+tail -f ./web_demo/logs/web_demo.log
 ```
 
 Then open the browser UI, upload a small video, send an edit request, and watch the job card/events until the export download appears.

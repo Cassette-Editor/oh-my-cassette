@@ -27,6 +27,7 @@ cache/
 exports/
 jobs/
 logs/
+web_demo/logs/
 *.part
 *.log
 

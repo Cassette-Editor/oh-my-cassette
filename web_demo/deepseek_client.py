@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 
 import requests
 
 from .cassette_loader import load_cassette_package
-from . import session_store
+from . import logging_utils, session_store
 
 load_cassette_package()
 
@@ -73,6 +74,7 @@ def tool_specs() -> list[dict[str, Any]]:
 def _post_chat_completion(messages: list[dict[str, Any]], api_key: str) -> dict[str, Any]:
     if not api_key:
         raise DeepSeekError("DEEPSEEK_API_KEY is not configured.")
+    started = time.monotonic()
     body = {
         "model": _model(),
         "messages": messages,
@@ -82,6 +84,7 @@ def _post_chat_completion(messages: list[dict[str, Any]], api_key: str) -> dict[
         "temperature": 0.2,
         "stream": False,
     }
+    logging_utils.log_event("deepseek_request_start", model=body["model"], url=_chat_url(), message_count=len(messages), tool_count=len(body["tools"]))
     try:
         response = requests.post(
             _chat_url(),
@@ -90,7 +93,10 @@ def _post_chat_completion(messages: list[dict[str, Any]], api_key: str) -> dict[
             timeout=float(_runtime_env("DEEPSEEK_TIMEOUT_SEC") or "120"),
         )
     except requests.RequestException as exc:
+        logging_utils.log_event("deepseek_request_exception", error_type=type(exc).__name__, duration_ms=int((time.monotonic() - started) * 1000))
         raise DeepSeekError(f"DeepSeek request failed: {type(exc).__name__}") from exc
+    duration_ms = int((time.monotonic() - started) * 1000)
+    logging_utils.log_event("deepseek_response", status_code=response.status_code, duration_ms=duration_ms)
     if response.status_code >= 400:
         detail = response.text[:500]
         raise DeepSeekError(f"DeepSeek returned HTTP {response.status_code}: {detail}")
@@ -167,7 +173,15 @@ def _execute_tool(session_id: str, name: str, arguments: str) -> str:
     except CassetteError as exc:
         return tools.err(name, exc.code, str(exc), exc.details, exc.recoverable)
     _schema, handler = ALLOWED_TOOLS[name]
-    return handler(args)
+    started = time.monotonic()
+    result = handler(args)
+    ok = False
+    try:
+        ok = bool(json.loads(result or "{}").get("ok"))
+    except Exception:
+        ok = False
+    logging_utils.log_event("deepseek_tool_executed", session_id=session_id, tool=name, ok=ok, duration_ms=int((time.monotonic() - started) * 1000))
+    return result
 
 
 def _session_context(session_id: str) -> str:
@@ -195,7 +209,8 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "") -
 
     tool_call_count = 0
     final_content = ""
-    for _round in range(8):
+    logging_utils.log_event("deepseek_turn_start", session_id=session_id, prompt_len=len(prompt_text or ""), has_api_key_override=bool(api_key_override))
+    for round_index in range(8):
         payload = _post_chat_completion(messages, api_key)
         choices = payload.get("choices") or []
         if not choices:
@@ -203,6 +218,7 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "") -
         message = dict((choices[0] or {}).get("message") or {})
         assistant_message: dict[str, Any] = {"role": "assistant", "content": message.get("content")}
         tool_calls = message.get("tool_calls") or []
+        logging_utils.log_event("deepseek_turn_round", session_id=session_id, round=round_index + 1, tool_call_count=len(tool_calls), has_content=bool(message.get("content")))
         if tool_calls:
             assistant_message["tool_calls"] = tool_calls
         messages.append(assistant_message)
@@ -232,4 +248,5 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "") -
     session_store.set_llm_messages(session_id, history)
     if final_content:
         session_store.add_event(session_id, role="assistant", text=final_content, kind="message")
+    logging_utils.log_event("deepseek_turn_done", session_id=session_id, tool_call_count=tool_call_count, content_len=len(final_content or ""))
     return {"content": final_content, "tool_call_count": tool_call_count}
