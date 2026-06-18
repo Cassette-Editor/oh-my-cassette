@@ -16,10 +16,11 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   color: var(--text);
   background: var(--bg);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow-x: hidden;
 }
 
 button,
@@ -36,6 +37,7 @@ button {
   min-height: 36px;
   padding: 0 12px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 button:hover {
@@ -43,7 +45,7 @@ button:hover {
 }
 
 .app-shell {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   grid-template-rows: auto 1fr;
 }
@@ -72,10 +74,18 @@ button:hover {
   line-height: 1.2;
 }
 
+.topbar > div:first-child {
+  min-width: 0;
+}
+
 .topbar p {
   margin-top: 4px;
   color: var(--muted);
   font-size: 13px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar-actions {
@@ -112,6 +122,7 @@ button:hover {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
+  overflow: hidden;
 }
 
 .chat-pane {
@@ -204,6 +215,7 @@ button:hover {
 
 .side-pane {
   min-height: 0;
+  min-width: 0;
   overflow: auto;
   border-left: 1px solid var(--line);
   background: var(--panel-2);
@@ -219,6 +231,14 @@ button:hover {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
+  min-width: 0;
+}
+
+.section-title h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .section-title h2,
@@ -302,36 +322,127 @@ dialog::backdrop {
 }
 
 @media (max-width: 860px) {
+  body {
+    position: relative;
+  }
+
   .topbar {
     height: auto;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 10px;
+    padding: max(12px, env(safe-area-inset-top)) 14px 10px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(72px, 1fr) minmax(72px, 1fr);
+    gap: 8px;
+  }
+
+  .topbar-actions > button {
+    min-width: 0;
+    padding: 0 10px;
+  }
+
+  .language-toggle {
+    align-self: stretch;
+    min-width: 0;
+  }
+
+  .language-toggle button {
+    min-width: 40px;
+    padding: 0 10px;
   }
 
   .workspace {
-    grid-template-columns: 1fr;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
   }
 
   .side-pane {
     border-left: 0;
     border-top: 1px solid var(--line);
-    max-height: 42vh;
+    max-height: 36dvh;
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
   }
 
   .messages {
-    padding: 14px;
+    padding: 12px;
   }
 
   .message {
-    max-width: 94%;
+    max-width: 100%;
   }
 
   .composer {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: minmax(74px, auto) minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   }
 
   .composer textarea {
     grid-column: 1 / -1;
     order: -1;
+    min-height: 64px;
+    font-size: 16px;
+  }
+
+  .composer button,
+  .settings input {
+    font-size: 16px;
+  }
+
+  .composer #sendBtn {
+    width: 100%;
+  }
+
+  .section-title button {
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 420px) {
+  .topbar h1 {
+    font-size: 21px;
+  }
+
+  .topbar p {
+    font-size: 12px;
+  }
+
+  .topbar-actions {
+    grid-template-columns: auto minmax(62px, 1fr) minmax(62px, 1fr);
+    gap: 6px;
+  }
+
+  .topbar-actions > button,
+  .language-toggle button {
+    min-height: 38px;
+    padding: 0 9px;
+  }
+
+  .language-toggle button {
+    min-width: 38px;
+  }
+
+  .composer {
+    grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 340px) {
+  .topbar-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .language-toggle {
+    grid-column: 1 / -1;
+    width: max-content;
+    justify-self: start;
   }
 }
