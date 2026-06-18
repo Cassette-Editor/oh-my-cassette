@@ -181,7 +181,7 @@ We host a public web demo so you can try the Oh My Cassette workflow from a desk
 >
 > The demo may be reset, rate-limited, unavailable, or changed at any time. We do not guarantee data retention, deletion timing, confidentiality, fitness for production use, output quality, copyright compliance of generated/editing results, or uninterrupted service. You are responsible for the content you upload and for reviewing any generated output before sharing it.
 >
-> Browser refreshes, tab closes, or navigation away from the web demo start a new web session and best-effort cleanup the previous web session's temporary uploads, chat history, and finished job files. This cleanup policy is only for the demo web service and does not change the Hermes Agent plugin workflow.
+> Browser refreshes, tab closes, or navigation away from the web demo start a new web session and best-effort cleanup the previous web session's temporary uploads, chat history, and finished job files.
 >
 > By default, the demo uses the server-side DeepSeek configuration when available. You can open **Settings** in the web UI and provide your own DeepSeek API key for testing. Your key is sent only with requests to this demo server and is not written to this repository or server-side disk by the web app, but it still transits the public demo server; use a key you can rotate and monitor.
 
