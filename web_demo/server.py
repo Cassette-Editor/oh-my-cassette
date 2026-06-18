@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from .cassette_loader import load_cassette_package
@@ -168,6 +168,13 @@ def _require_job(session_id: str, job_id: str) -> dict:
     return job
 
 
+def _require_web_job(session_id: str, job_id: str) -> dict:
+    job = _require_job(session_id, job_id)
+    if not _web_job_is_owned(job, session_id, _session_hash(session_id)):
+        raise HTTPException(status_code=403, detail="job does not belong to this web session")
+    return job
+
+
 def _safe_asset_path(path: str) -> Path:
     candidate = Path(path).expanduser().resolve()
     root = _asset_root().resolve()
@@ -194,6 +201,74 @@ def _job_download_urls(job: dict, session_id: str) -> list[dict[str, str]]:
             "url": f"/api/jobs/{quote(str(job.get('job_id') or ''))}/outputs/{quote(path.name)}?session_id={quote(session_id)}",
         })
     return outputs
+
+
+def _job_log_url(job: dict, session_id: str) -> str:
+    return f"/api/jobs/{quote(str(job.get('job_id') or ''))}/log?session_id={quote(session_id)}"
+
+
+def _public_job_log(job: dict) -> str:
+    lines: list[str] = []
+
+    def add(label: str, value: Any) -> None:
+        if value not in (None, "", [], {}):
+            lines.append(f"{label}: {value}")
+
+    add("job_id", job.get("job_id"))
+    add("status", job.get("status"))
+    add("cassette_session_id", job.get("cassette_session_id"))
+    add("session_hash", job.get("session_hash"))
+    add("cassette_language", job.get("cassette_language"))
+    add("current_stage", job.get("current_stage"))
+    add("created_at", job.get("created_at"))
+    add("started_at", job.get("started_at"))
+    add("updated_at", job.get("updated_at"))
+    add("finished_at", job.get("finished_at"))
+    add("worker_kind", job.get("worker_kind"))
+    add("worker_pid", job.get("worker_pid"))
+    add("prompt_redacted", job.get("prompt_redacted"))
+    add("instruction", job.get("instruction"))
+    add("chat_message", job.get("chat_message"))
+    add("model_selection", json.dumps(job.get("model_selection"), ensure_ascii=False, sort_keys=True) if job.get("model_selection") else "")
+    add("language_selection", json.dumps(job.get("language_selection"), ensure_ascii=False, sort_keys=True) if job.get("language_selection") else "")
+    if job.get("stage_timings"):
+        lines.append("\n[stage_timings]")
+        lines.append(json.dumps(job.get("stage_timings"), ensure_ascii=False, indent=2, sort_keys=True))
+    if job.get("quality"):
+        lines.append("\n[quality]")
+        lines.append(json.dumps(job.get("quality"), ensure_ascii=False, indent=2, sort_keys=True))
+    if job.get("errors"):
+        lines.append("\n[errors]")
+        lines.append(json.dumps(job.get("errors"), ensure_ascii=False, indent=2, sort_keys=True))
+    if job.get("questions"):
+        lines.append("\n[questions]")
+        lines.append(json.dumps(job.get("questions"), ensure_ascii=False, indent=2, sort_keys=True))
+    if job.get("progress_events"):
+        lines.append("\n[progress_events]")
+        for event in job.get("progress_events") or []:
+            if isinstance(event, dict):
+                lines.append(json.dumps(event, ensure_ascii=False, sort_keys=True))
+    if job.get("browser_events"):
+        lines.append("\n[browser_events]")
+        for event in job.get("browser_events") or []:
+            if isinstance(event, dict):
+                lines.append(json.dumps(event, ensure_ascii=False, sort_keys=True))
+    if job.get("progress_snapshot_notifications"):
+        lines.append("\n[progress_snapshot_notifications]")
+        lines.append(json.dumps(job.get("progress_snapshot_notifications"), ensure_ascii=False, indent=2, sort_keys=True))
+    if job.get("outputs"):
+        lines.append("\n[outputs]")
+        for output in job.get("outputs") or []:
+            if not isinstance(output, dict):
+                continue
+            cleaned = {key: value for key, value in output.items() if key != "local_path"}
+            if output.get("local_path"):
+                cleaned["filename"] = Path(str(output["local_path"])).name
+            lines.append(json.dumps(cleaned, ensure_ascii=False, sort_keys=True))
+    screenshot = str(job.get("final_screenshot") or "")
+    if screenshot:
+        add("final_screenshot", Path(screenshot).name)
+    return "\n".join(lines).strip() + "\n"
 
 
 def _web_language(session_id: str) -> str:
@@ -563,21 +638,26 @@ def get_assets(session_id: str = Query(...)) -> dict[str, Any]:
 def get_jobs(session_id: str = Query(...), limit: int = Query(10)) -> dict[str, Any]:
     session_id = _require_session(session_id)
     payload = _tool_payload(tools.cassette_job_status({"session_id": session_id, "limit": limit}))
+    visible_jobs: list[dict[str, Any]] = []
     for job in ((payload.get("data") or {}).get("jobs") or []):
         if isinstance(job, dict) and job.get("job_id"):
             try:
                 full = jobs.load_job(str(job["job_id"]))
-                if _job_belongs_to_session(full, session_id):
+                if _web_job_is_owned(full, session_id, _session_hash(session_id)):
                     job["downloads"] = _job_download_urls(full, session_id)
+                    job["log_url"] = _job_log_url(full, session_id)
+                    visible_jobs.append(job)
             except Exception:
                 job["downloads"] = []
+    if isinstance(payload.get("data"), dict):
+        payload["data"]["jobs"] = visible_jobs
     return payload
 
 
 @app.post("/api/jobs/{job_id}/cancel")
 def cancel_job(job_id: str, payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     session_id = _require_session(str(payload.get("session_id") or ""))
-    _require_job(session_id, job_id)
+    _require_web_job(session_id, job_id)
     result = _tool_payload(tools.cassette_cancel_job({"job_id": job_id}))
     session_store.add_event(
         session_id,
@@ -592,7 +672,7 @@ def cancel_job(job_id: str, payload: dict[str, Any] = Body(default_factory=dict)
 @app.get("/api/jobs/{job_id}/outputs/{filename}")
 def download_output(job_id: str, filename: str, session_id: str = Query(...)) -> FileResponse:
     session_id = _require_session(session_id)
-    job = _require_job(session_id, job_id)
+    job = _require_web_job(session_id, job_id)
     for output in job.get("outputs") or []:
         if not isinstance(output, dict) or not output.get("local_path"):
             continue
@@ -601,6 +681,17 @@ def download_output(job_id: str, filename: str, session_id: str = Query(...)) ->
             media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
             return FileResponse(path, media_type=media_type, filename=path.name)
     raise HTTPException(status_code=404, detail="output not found")
+
+
+@app.get("/api/jobs/{job_id}/log")
+def download_job_log(job_id: str, session_id: str = Query(...)) -> PlainTextResponse:
+    session_id = _require_session(session_id)
+    job = _require_web_job(session_id, job_id)
+    return PlainTextResponse(
+        _public_job_log(job),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'inline; filename="{job_id}.log"'},
+    )
 
 
 if __name__ == "__main__":

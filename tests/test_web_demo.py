@@ -231,6 +231,92 @@ def test_web_api_rewrite_runs_deepseek_in_background(cassette_env, monkeypatch):
     assert any(event.get("text") == "background done" for event in events)
 
 
+def test_web_jobs_expose_owned_job_log(cassette_env):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+    output_path = tools.manifest.get_asset_root() / "exports" / "web-job-log.mp4"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(b"export")
+    prompt = "SECRET INTERNAL PROMPT THAT MUST NOT APPEAR"
+    job = jobs.create_job(
+        session_hash,
+        prompt,
+        "add captions",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "web", "chat_id": session_id}},
+    )
+    job["status"] = "running"
+    job["current_stage"] = "editing"
+    job["progress_events"] = [{"status": "running", "summary": "Cassette is editing the timeline."}]
+    job["browser_events"] = [{"event": "click", "summary": "Clicked export button"}]
+    job["errors"] = [{"code": "sample_warning", "message": "diagnostic only"}]
+    job["outputs"] = [{"local_path": str(output_path), "label": "export"}]
+    jobs.save_job(job)
+
+    jobs_response = client.get(f"/api/jobs?session_id={session_id}")
+
+    assert jobs_response.status_code == 200
+    visible_jobs = jobs_response.json()["data"]["jobs"]
+    assert [visible["job_id"] for visible in visible_jobs] == [job["job_id"]]
+    assert visible_jobs[0]["log_url"].endswith(f"/log?session_id={session_id}")
+    log_response = client.get(visible_jobs[0]["log_url"])
+    assert log_response.status_code == 200
+    log_text = log_response.text
+    assert job["job_id"] in log_text
+    assert "prompt_redacted: <redacted:" in log_text
+    assert prompt not in log_text
+    assert "[progress_events]" in log_text
+    assert "Cassette is editing the timeline." in log_text
+    assert "[browser_events]" in log_text
+    assert "web-job-log.mp4" in log_text
+    assert str(output_path) not in log_text
+
+
+def test_web_jobs_filter_and_reject_non_web_jobs(cassette_env):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = "web_job_boundary"
+    session_store.ensure_session(session_id)
+    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+    web_job = jobs.create_job(
+        session_hash,
+        "web prompt",
+        "web instruction",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "web", "chat_id": session_id}},
+    )
+    telegram_job = jobs.create_job(
+        session_hash,
+        "telegram prompt",
+        "telegram instruction",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "telegram", "chat_id": "telegram-chat"}},
+    )
+
+    jobs_response = client.get(f"/api/jobs?session_id={session_id}&limit=10")
+    non_web_log_response = client.get(f"/api/jobs/{telegram_job['job_id']}/log?session_id={session_id}")
+    non_web_cancel_response = client.post(f"/api/jobs/{telegram_job['job_id']}/cancel", json={"session_id": session_id})
+
+    assert jobs_response.status_code == 200
+    visible_ids = [job["job_id"] for job in jobs_response.json()["data"]["jobs"]]
+    assert visible_ids == [web_job["job_id"]]
+    assert "log_url" in jobs_response.json()["data"]["jobs"][0]
+    assert non_web_log_response.status_code == 403
+    assert non_web_cancel_response.status_code == 403
+
+
 def test_web_session_creation_cleans_previous_web_session(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi

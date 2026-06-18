@@ -15,6 +15,7 @@ const I18N = {
     file: "文件",
     image: "图片",
     jobsTitle: "任务",
+    log: "日志",
     messagePlaceholder: "发送素材后输入剪辑指令，或使用 /edit、/refine、/music、/cut",
     messagesAria: "消息",
     pause: "暂停",
@@ -54,6 +55,7 @@ const I18N = {
     file: "File",
     image: "Image",
     jobsTitle: "Jobs",
+    log: "Log",
     messagePlaceholder: "Upload assets, then enter an edit instruction or use /edit, /refine, /music, /cut",
     messagesAria: "Messages",
     pause: "Pause",
@@ -315,6 +317,13 @@ function renderJob(job) {
     link.textContent = `${t("download")} ${item.filename}`;
     link.target = "_blank";
     card.appendChild(link);
+  }
+  if (job.log_url) {
+    const logLink = document.createElement("a");
+    logLink.href = job.log_url;
+    logLink.textContent = `${t("log")} ${job.job_id || ""}`.trim();
+    logLink.target = "_blank";
+    card.appendChild(logLink);
   }
   return card;
 }

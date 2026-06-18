@@ -234,6 +234,7 @@ set +a
 如果不希望在服务器上保存 DeepSeek API Key，可以把 `DEEPSEEK_API_KEY` 留空，然后在网页 **设置** 面板里临时填写自己的 key。浏览器提供的 key 只会附加在当前会话的请求上，Web 应用不会持久化保存。
 
 Web Demo 服务日志和 Hermes Agent / OhMyCassette 插件日志是分开的。默认写入服务工作目录下的 `./web_demo/logs/web_demo.log`；如果设置了 `OMC_WEB_LOG_DIR`，则写入 `$OMC_WEB_LOG_DIR/web_demo.log`。
+如果按上面的方式设置了 `CASSETTE_ASSET_ROOT`，Web Demo 的 Cassette job 记录也会和 Hermes 分开：原始 job JSON 位于 `$CASSETTE_ASSET_ROOT/jobs/cassette_*.json`，网页任务卡片会为当前浏览器会话拥有的任务提供 **日志** 链接。
 
 3. 启动网页演示：
 

@@ -239,6 +239,7 @@ set +a
 If you do not want to put a DeepSeek key on the server, leave `DEEPSEEK_API_KEY` empty and enter a temporary key from the web UI **Settings** panel. That browser-provided key is attached to API requests for that session and is not persisted by the web app.
 
 Web demo service logs are separate from Hermes Agent / OhMyCassette plugin logs. By default they are written to `./web_demo/logs/web_demo.log` relative to the service working directory, or to `$OMC_WEB_LOG_DIR/web_demo.log` when `OMC_WEB_LOG_DIR` is set.
+Cassette job records for the web demo are also separate when `CASSETTE_ASSET_ROOT` is set as above: raw job JSON lives in `$CASSETTE_ASSET_ROOT/jobs/cassette_*.json`, and the web UI exposes a per-job **Log** link for jobs owned by the current browser session.
 
 3. Start the web demo:
 
