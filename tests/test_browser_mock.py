@@ -616,6 +616,42 @@ def test_upload_wait_can_continue_past_180_seconds(monkeypatch):
     assert "4 ready, 0 failed" in body
 
 
+def test_upload_timeout_defaults_to_job_timeout(monkeypatch):
+    monkeypatch.delenv("CASSETTE_UPLOAD_TIMEOUT_SEC", raising=False)
+
+    assert browser._upload_timeout_sec({"timeout_sec": 37}) == 37
+    assert browser._upload_timeout_sec({}) == 1800
+
+
+def test_upload_timeout_can_be_disabled_explicitly(monkeypatch):
+    monkeypatch.setenv("CASSETTE_UPLOAD_TIMEOUT_SEC", "0")
+
+    assert browser._upload_timeout_sec({"timeout_sec": 37}) is None
+
+
+def test_upload_wait_raises_specific_timeout(monkeypatch):
+    clock = {"now": 0.0}
+
+    class FakeLocator:
+        @property
+        def first(self):
+            return self
+
+        def inner_text(self, timeout=0):
+            return "1 个进行中"
+
+    class FakePage:
+        def locator(self, selector):
+            return FakeLocator()
+
+    monkeypatch.setattr(browser.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(browser.time, "sleep", lambda seconds: clock.__setitem__("now", clock["now"] + seconds))
+
+    with pytest.raises(browser.BrowserUploadTimeoutError):
+        browser._wait_for_agent_upload_ready(FakePage(), "job", 1, timeout_sec=2)
+    assert clock["now"] >= 2
+
+
 def test_upload_wait_accepts_chinese_ready_status(monkeypatch):
     class FakeLocator:
         @property

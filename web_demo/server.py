@@ -8,6 +8,7 @@ import signal
 import shutil
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -407,6 +408,109 @@ def _web_job_is_owned(job: dict, session_id: str, session_hash: str) -> bool:
     return str(job.get("cassette_session_id") or "") == session_id or str(job.get("session_hash") or "") == session_hash
 
 
+def _parse_job_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _job_timeout_sec(job: dict) -> int:
+    try:
+        return max(1, int(job.get("timeout_sec") or os.getenv("CASSETTE_BROWSER_TIMEOUT_SEC", "1800")))
+    except (TypeError, ValueError):
+        return 1800
+
+
+def _timeout_stale_web_job(job: dict, *, session_id: str = "") -> dict:
+    if str(job.get("status") or "") not in _ACTIVE_JOB_STATUSES:
+        return job
+    delivery = job.get("delivery") if isinstance(job.get("delivery"), dict) else {}
+    if not _is_web_platform(delivery.get("platform")):
+        return job
+    started = _parse_job_time(job.get("started_at") or job.get("created_at"))
+    if started is None:
+        return job
+    timeout_sec = _job_timeout_sec(job)
+    elapsed_sec = (datetime.now(timezone.utc) - started).total_seconds()
+    if elapsed_sec <= timeout_sec:
+        return job
+    errors = list(job.get("errors") or [])
+    if not any(isinstance(error, dict) and error.get("code") == "web_demo_job_timeout" for error in errors):
+        errors.append({
+            "code": "web_demo_job_timeout",
+            "message": f"Web demo marked this Cassette job timed out after {timeout_sec} seconds.",
+            "details": {
+                "current_stage": job.get("current_stage") or "",
+                "elapsed_sec": round(max(0.0, elapsed_sec), 1),
+                "timeout_sec": timeout_sec,
+            },
+        })
+    quality = dict(job.get("quality") or {})
+    quality["web_demo_timeout_reconciled"] = True
+    quality["timeout_sec"] = timeout_sec
+    quality["elapsed_sec"] = round(max(0.0, elapsed_sec), 1)
+    updated = jobs.update_job(
+        str(job.get("job_id") or ""),
+        status="timed_out",
+        finished_at=jobs.now_iso(),
+        errors=errors,
+        quality=quality,
+    )
+    logging_utils.log_event(
+        "web_job_timeout_reconciled",
+        session_id=session_id or str(job.get("cassette_session_id") or ""),
+        job_id=updated.get("job_id"),
+        elapsed_sec=round(max(0.0, elapsed_sec), 1),
+        timeout_sec=timeout_sec,
+        current_stage=updated.get("current_stage"),
+    )
+    return updated
+
+
+def _reconcile_stale_web_jobs_for_session(session_id: str) -> None:
+    session_hash = _session_hash(session_id)
+    for path in sorted(jobs.get_jobs_dir().glob("cassette_*.json"), reverse=True):
+        try:
+            job = jobs.load_job(path.stem)
+        except Exception:
+            continue
+        if not _web_job_is_owned(job, session_id, session_hash):
+            continue
+        before = str(job.get("status") or "")
+        updated = _timeout_stale_web_job(job, session_id=session_id)
+        if before in _ACTIVE_JOB_STATUSES and str(updated.get("status") or "") == "timed_out":
+            _add_web_event(
+                session_id,
+                role="assistant",
+                kind="error",
+                job_id=str(updated.get("job_id") or ""),
+                text=_localized(
+                    session_id,
+                    f"Cassette 任务已超时退出：{updated.get('job_id')}",
+                    f"Cassette job timed out: {updated.get('job_id')}",
+                ),
+            )
+
+
+def _reconcile_stale_web_jobs_on_startup() -> None:
+    for path in sorted(jobs.get_jobs_dir().glob("cassette_*.json"), reverse=True):
+        try:
+            job = jobs.load_job(path.stem)
+        except Exception:
+            continue
+        delivery = job.get("delivery") if isinstance(job.get("delivery"), dict) else {}
+        if not _is_web_platform(delivery.get("platform")):
+            continue
+        _timeout_stale_web_job(job)
+
+
 def _terminate_worker_if_any(job: dict) -> bool:
     try:
         pid = int(job.get("worker_pid") or 0)
@@ -484,6 +588,13 @@ def _cleanup_web_session(session_id: str) -> dict[str, Any]:
     }
     logging_utils.log_event("web_session_cleanup", **result)
     return result
+
+
+def reconcile_stale_web_jobs_on_startup() -> None:
+    _reconcile_stale_web_jobs_on_startup()
+
+
+app.router.add_event_handler("startup", reconcile_stale_web_jobs_on_startup)
 
 
 @app.get("/")
@@ -637,6 +748,7 @@ def get_assets(session_id: str = Query(...)) -> dict[str, Any]:
 @app.get("/api/jobs")
 def get_jobs(session_id: str = Query(...), limit: int = Query(10)) -> dict[str, Any]:
     session_id = _require_session(session_id)
+    _reconcile_stale_web_jobs_for_session(session_id)
     payload = _tool_payload(tools.cassette_job_status({"session_id": session_id, "limit": limit}))
     visible_jobs: list[dict[str, Any]] = []
     for job in ((payload.get("data") or {}).get("jobs") or []):

@@ -217,6 +217,7 @@ CASSETTE_URL=https://sg.trycassette.online/agent
 CASSETTE_AUTH_EMAIL=you@example.com
 CASSETTE_AUTH_PASSWORD='your-cassette-password'
 CASSETTE_ASSET_ROOT=$HOME/.oh-my-cassette/cassette
+CASSETTE_BROWSER_TIMEOUT_SEC=1800
 
 DEEPSEEK_API_KEY='your_deepseek_api_key'
 DEEPSEEK_BASE_URL=https://api.deepseek.com
@@ -227,6 +228,7 @@ OMC_WEB_LOG_DIR=./web_demo/logs
 ```
 
 If you load the file with `. ./oh-my-cassette-web.env`, quote any value that contains shell-special characters, spaces, or `#`. The systemd `EnvironmentFile` format also accepts quoted values.
+Cassette upload/analysis waits inherit `CASSETTE_BROWSER_TIMEOUT_SEC` by default. Set `CASSETTE_UPLOAD_TIMEOUT_SEC` only when you need a different upload timeout; `0` means wait forever.
 
 Load the variables before starting the service:
 

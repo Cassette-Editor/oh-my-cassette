@@ -317,6 +317,53 @@ def test_web_jobs_filter_and_reject_non_web_jobs(cassette_env):
     assert non_web_cancel_response.status_code == 403
 
 
+def test_web_jobs_reconcile_stale_running_web_job(cassette_env):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+    web_job = jobs.create_job(
+        session_hash,
+        "web prompt",
+        "web instruction",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "web", "chat_id": session_id}, "timeout_sec": 1},
+    )
+    web_job["status"] = "running"
+    web_job["started_at"] = "2020-01-01T00:00:00Z"
+    web_job["current_stage"] = "upload"
+    jobs.save_job(web_job)
+    non_web_job = jobs.create_job(
+        session_hash,
+        "telegram prompt",
+        "telegram instruction",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "telegram", "chat_id": "telegram-chat"}, "timeout_sec": 1},
+    )
+    non_web_job["status"] = "running"
+    non_web_job["started_at"] = "2020-01-01T00:00:00Z"
+    jobs.save_job(non_web_job)
+
+    response = client.get(f"/api/jobs?session_id={session_id}&limit=10")
+
+    assert response.status_code == 200
+    visible_jobs = response.json()["data"]["jobs"]
+    assert [job["job_id"] for job in visible_jobs] == [web_job["job_id"]]
+    assert visible_jobs[0]["status"] == "timed_out"
+    saved_web_job = jobs.load_job(web_job["job_id"])
+    saved_non_web_job = jobs.load_job(non_web_job["job_id"])
+    assert saved_web_job["status"] == "timed_out"
+    assert saved_web_job["errors"][-1]["code"] == "web_demo_job_timeout"
+    assert saved_non_web_job["status"] == "running"
+    events = client.get(f"/api/events?session_id={session_id}&after=0").json()["events"]
+    assert any(event.get("job_id") == web_job["job_id"] and event.get("kind") == "error" for event in events)
+
+
 def test_web_session_creation_cleans_previous_web_session(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi

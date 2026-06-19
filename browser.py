@@ -49,12 +49,21 @@ class BrowserAuthError(RuntimeError):
         self.code = code
 
 
+class BrowserJobCancelled(RuntimeError):
+    pass
+
+
+class BrowserUploadTimeoutError(RuntimeError):
+    pass
+
+
 _PLAYWRIGHT: Any = None
 _PLAYWRIGHT_THREAD_ID: int | None = None
 _BROWSER_SESSIONS: dict[str, dict[str, Any]] = {}
 _BROWSER_WORKER: ThreadPoolExecutor | None = None
 _BROWSER_WORKER_LOCK = threading.Lock()
 _BROWSER_WORKER_THREAD_ID: int | None = None
+_TERMINAL_JOB_STATUSES = {"succeeded", "failed", "needs_user", "timed_out", "cancelled"}
 
 
 def _browser_reuse_enabled() -> bool:
@@ -1619,7 +1628,10 @@ def _upload_timeout_sec(job: dict) -> int | None:
             return max(1, value) if value > 0 else None
         except ValueError:
             pass
-    return None
+    try:
+        return max(1, int(job.get("timeout_sec") or 1800))
+    except (TypeError, ValueError):
+        return 1800
 
 
 _UPLOAD_PROCESSING_TERMS = (
@@ -1704,7 +1716,7 @@ def _wait_for_agent_upload_ready(page: Any, job_id: str, expected_count: int, ti
     last_body = ""
     while timeout_sec is None or time.monotonic() - start < timeout_sec:
         if jobs.is_cancel_requested(job_id):
-            return last_body
+            raise BrowserJobCancelled("Cassette job was cancelled while waiting for asset upload/analysis")
         body = page.locator("body").inner_text(timeout=1000)
         last_body = body
         status = _upload_status_text(page)
@@ -1727,7 +1739,7 @@ def _wait_for_agent_upload_ready(page: Any, job_id: str, expected_count: int, ti
         if not status and not _upload_status_has_processing(body_lower):
             return body
         time.sleep(1)
-    raise RuntimeError("Timed out waiting for Cassette asset upload/analysis")
+    raise BrowserUploadTimeoutError("Timed out waiting for Cassette asset upload/analysis")
 
 
 def _assets_already_uploaded(record: dict[str, Any], asset_paths: list[str]) -> bool:
@@ -1847,7 +1859,10 @@ def _record_stage_progress(
     try:
         job = jobs.load_job(job_id)
         persisted_status = str(job.get("status") or "")
-        event_status = "cancel_requested" if persisted_status == "cancel_requested" and status == "running" else status
+        if persisted_status in _TERMINAL_JOB_STATUSES and status == "running":
+            event_status = persisted_status
+        else:
+            event_status = "cancel_requested" if persisted_status == "cancel_requested" and status == "running" else status
         events = list(job.get("progress_events") or [])[-9:]
         summary = _summarize_page_state(body)
         output_count = len(outputs)
@@ -1880,7 +1895,9 @@ def _record_stage_progress(
         if operation_status:
             event["operation_status"] = operation_status
         events.append(event)
-        fields: dict[str, Any] = {"status": event_status, "progress_events": events}
+        fields: dict[str, Any] = {"progress_events": events}
+        if persisted_status not in _TERMINAL_JOB_STATUSES or event_status in _TERMINAL_JOB_STATUSES:
+            fields["status"] = event_status
         if stage:
             fields["current_stage"] = stage
         jobs.update_job(job_id, **fields)
@@ -3196,6 +3213,37 @@ def run_cassette_browser_job(job: dict) -> dict:
                     record["asset_fingerprint"] = _asset_fingerprint(asset_paths)
                     _record_stage_progress(job_id, body, outputs, "running", stage="upload", stage_elapsed_sec=stage_elapsed("upload"), attempt=int(stage_timings["upload"].get("attempts") or 1))
                     finish_stage("upload", "succeeded")
+                except BrowserJobCancelled as exc:
+                    finish_stage("upload", "cancelled")
+                    return finalize({
+                        "status": "cancelled",
+                        "outputs": outputs,
+                        "questions": questions,
+                        "errors": [],
+                        "quality": {
+                            "completion_observed": False,
+                            "output_link_count": 0,
+                            "progress_summary": str(exc),
+                            "risk": "medium",
+                        },
+                        "final_screenshot": _screenshot(page, job_id),
+                    })
+                except BrowserUploadTimeoutError as exc:
+                    finish_stage("upload", "timed_out")
+                    errors.append({"code": "asset_upload_timeout", "message": str(exc), "details": {"type": type(exc).__name__}})
+                    return finalize({
+                        "status": "timed_out",
+                        "outputs": outputs,
+                        "questions": questions,
+                        "errors": errors,
+                        "quality": {
+                            "completion_observed": False,
+                            "output_link_count": 0,
+                            "progress_summary": str(exc),
+                            "risk": "medium",
+                        },
+                        "final_screenshot": _screenshot(page, job_id),
+                    })
                 except Exception as exc:
                     finish_stage("upload", "failed")
                     errors.append({"code": "asset_upload_failed", "message": str(exc), "details": {"type": type(exc).__name__}})
