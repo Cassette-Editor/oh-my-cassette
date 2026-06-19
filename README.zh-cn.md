@@ -236,12 +236,20 @@ set +a
 Web Demo 服务日志和 Hermes Agent / OhMyCassette 插件日志是分开的。默认写入服务工作目录下的 `./web_demo/logs/web_demo.log`；如果设置了 `OMC_WEB_LOG_DIR`，则写入 `$OMC_WEB_LOG_DIR/web_demo.log`。
 如果按上面的方式设置了 `CASSETTE_ASSET_ROOT`，Web Demo 的 Cassette job 记录也会和 Hermes 分开：原始 job JSON 位于 `$CASSETTE_ASSET_ROOT/jobs/cassette_*.json`，网页任务卡片会为当前浏览器会话拥有的任务提供 **日志** 链接。
 
-3. 启动网页演示：
+3. 构建浏览器前端（Vite + React → `web_demo/frontend/dist`），仅在构建时需要 Node.js + npm：
+
+```bash
+./web_demo/build_frontend.sh
+```
+
+4. 启动网页演示：
 
 ```bash
 . .venv-web/bin/activate
 python -m web_demo.server
 ```
+
+> 服务端只提供构建产物 `web_demo/frontend/dist`。如果尚未构建，访问 `/` 会返回明确的 503 并提示先执行构建。拉取 `web_demo/frontend` 下的改动后，请重新运行 `web_demo/build_frontend.sh`。
 
 本机测试打开 `http://127.0.0.1:8080/`；如果要让手机或其他电脑访问，请打开 `http://<服务器 IP>:8080/`，并确认服务器防火墙或云安全组允许入站 TCP `8080`。
 
@@ -546,11 +554,15 @@ python3 -m compileall -q .
 uv venv .venv-web
 uv pip install --python .venv-web/bin/python -r requirements-web.txt
 .venv-web/bin/python -m playwright install chromium
+# 构建浏览器前端（Vite/React -> web_demo/frontend/dist）；需要 Node.js + npm。
+./web_demo/build_frontend.sh
 set -a
 . ./oh-my-cassette-web.env
 set +a
 .venv-web/bin/python -m web_demo.server
 ```
+
+浏览器前端是位于 `web_demo/frontend` 的 Vite + React + TypeScript 应用；`web_demo/build_frontend.sh` 会将其编译到 `web_demo/frontend/dist`，由服务端在 `/static` 下提供。构建产物不会提交到仓库，因此每次部署都需要构建（拉取前端改动后也要重新构建）。如需实时调试前端，可运行 `cd web_demo/frontend && npm run dev`，Vite 会把 `/api` 代理到 `http://127.0.0.1:8088`，请同时运行 FastAPI 服务。
 
 网页演示会从进程环境变量读取 `CASSETTE_*`、`DEEPSEEK_*` 和 `OMC_WEB_*`。浏览器内也可以在“设置”里临时填写 DeepSeek API Key；该 key 只随请求发送到当前服务器，不会写入仓库或服务端磁盘。示例 systemd 文件在 `deploy/oh-my-cassette-web.service.example`，环境变量模板在 `deploy/oh-my-cassette-web.env.example`。
 
