@@ -9,8 +9,13 @@ Wants=network-online.target
 # This produces web_demo/frontend/dist, which the server serves under /static.
 [Service]
 Type=simple
+User=ubuntu
+Group=ubuntu
 WorkingDirectory=/home/ubuntu/oh-my-cassette
 EnvironmentFile=-/etc/oh-my-cassette-web.env
+Environment=HOME=/home/ubuntu
+Environment=XDG_CACHE_HOME=/home/ubuntu/.cache
+Environment=PLAYWRIGHT_BROWSERS_PATH=/home/ubuntu/.cache/ms-playwright
 ExecStart=/home/ubuntu/oh-my-cassette/.venv-web/bin/python -m web_demo.server
 Restart=on-failure
 RestartSec=5
