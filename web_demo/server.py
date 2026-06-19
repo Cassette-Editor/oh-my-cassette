@@ -26,7 +26,9 @@ from cassette import jobs, manifest, security, tools  # noqa: E402
 from cassette.errors import CassetteError  # noqa: E402
 
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+_FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
+# Serve the built Vite/React app when present; fall back to the legacy static bundle.
+STATIC_DIR = _FRONTEND_DIST if (_FRONTEND_DIST / "index.html").exists() else Path(__file__).resolve().parent / "static"
 _ACTIVE_JOB_STATUSES = {"queued", "running", "cancel_requested"}
 _LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=int(os.getenv("OMC_WEB_LLM_WORKERS", "4")), thread_name_prefix="omc-web-llm")
 

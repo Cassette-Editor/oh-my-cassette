@@ -8,32 +8,40 @@ const I18N = {
     attachment: "附件",
     check: "检查",
     clear: "清空",
+    clearConfirm: "确定清空已保存的 API Key 吗？",
     close: "关闭",
+    commandsAria: "快捷指令",
+    connecting: "正在连接服务器…",
+    connectionError: "无法连接服务器，请重试",
     download: "下载",
-    emptyAssets: "暂无素材",
-    emptyJobs: "暂无任务",
+    dropHint: "松开以上传素材",
+    emptyAssets: "暂无素材 — 上传片段开始",
+    emptyJobs: "暂无任务 — 发送剪辑指令开始",
     file: "文件",
     image: "图片",
     jobsTitle: "任务",
     log: "日志",
-    messagePlaceholder: "发送素材后输入剪辑指令，或使用 /edit、/refine、/music、/cut",
+    messagePlaceholder: "输入剪辑指令，或点上方快捷指令",
     messagesAria: "消息",
     pause: "暂停",
+    pauseTitle: "暂停当前操作",
     processing: "处理中",
     refresh: "刷新",
     refreshTitle: "刷新状态",
+    retry: "重试",
     save: "保存",
     send: "发送",
-    sendFailed: "发送失败",
+    sendFailed: "发送失败，请重试",
     sendTitle: "发送消息",
     sessionPrefix: "会话",
     settings: "设置",
     settingsHeading: "设置",
     settingsTitle: "DeepSeek API Key",
     statusAria: "状态",
+    thinking: "正在处理…",
     unknownJob: "任务",
     upload: "上传",
-    uploadFailed: "上传失败",
+    uploadFailed: "上传失败，请重试",
     uploadTitle: "上传素材",
     video: "视频",
     audio: "音频",
@@ -48,32 +56,40 @@ const I18N = {
     attachment: "attachment",
     check: "Check",
     clear: "Clear",
+    clearConfirm: "Clear the saved API key?",
     close: "Close",
+    commandsAria: "Quick commands",
+    connecting: "Connecting to server…",
+    connectionError: "Can't reach the server — retry",
     download: "Download",
-    emptyAssets: "No assets yet",
-    emptyJobs: "No jobs yet",
+    dropHint: "Drop files to upload",
+    emptyAssets: "No assets yet — upload a clip to begin",
+    emptyJobs: "No jobs yet — send an edit instruction to start",
     file: "File",
     image: "Image",
     jobsTitle: "Jobs",
     log: "Log",
-    messagePlaceholder: "Upload assets, then enter an edit instruction or use /edit, /refine, /music, /cut",
+    messagePlaceholder: "Type an edit instruction, or tap a command above",
     messagesAria: "Messages",
     pause: "Pause",
+    pauseTitle: "Pause the current operation",
     processing: "Processing",
     refresh: "Refresh",
     refreshTitle: "Refresh status",
+    retry: "Retry",
     save: "Save",
     send: "Send",
-    sendFailed: "Send failed",
+    sendFailed: "Couldn't send — please retry",
     sendTitle: "Send message",
     sessionPrefix: "Session",
     settings: "Settings",
     settingsHeading: "Settings",
     settingsTitle: "DeepSeek API Key",
     statusAria: "Status",
+    thinking: "Thinking…",
     unknownJob: "job",
     upload: "Upload",
-    uploadFailed: "Upload failed",
+    uploadFailed: "Couldn't upload — please retry",
     uploadTitle: "Upload assets",
     video: "Video",
     audio: "Audio",
@@ -87,12 +103,17 @@ function initialLanguage() {
   return (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
+const POLL_BASE = 3000;
+const POLL_MAX = 15000;
+
 const state = {
   sessionId: "",
   cleanupSessionId: localStorage.getItem("omc_web_session") || "",
   language: initialLanguage(),
   lastEventId: 0,
-  polling: null,
+  pollTimer: null,
+  pollDelay: POLL_BASE,
+  connection: "connecting",
   cleanupSent: false,
 };
 
@@ -101,9 +122,12 @@ const assetsEl = document.querySelector("#assets");
 const jobsEl = document.querySelector("#jobs");
 const sessionLabel = document.querySelector("#sessionLabel");
 const composer = document.querySelector("#composer");
+const chatPane = document.querySelector(".chat-pane");
 const messageInput = document.querySelector("#messageInput");
 const fileInput = document.querySelector("#fileInput");
 const uploadBtn = document.querySelector("#uploadBtn");
+const sendBtn = document.querySelector("#sendBtn");
+const sendLabel = sendBtn.querySelector("[data-i18n='send']");
 const refreshBtn = document.querySelector("#refreshBtn");
 const cutBtn = document.querySelector("#cutBtn");
 const checkAssetsBtn = document.querySelector("#checkAssetsBtn");
@@ -114,6 +138,9 @@ const saveKeyBtn = document.querySelector("#saveKeyBtn");
 const clearKeyBtn = document.querySelector("#clearKeyBtn");
 const langZhBtn = document.querySelector("#langZhBtn");
 const langEnBtn = document.querySelector("#langEnBtn");
+const connectionBanner = document.querySelector("#connectionBanner");
+const connectionText = document.querySelector("#connectionText");
+const retryBtn = document.querySelector("#retryBtn");
 
 function t(key) {
   return (I18N[state.language] || I18N.zh)[key] || I18N.zh[key] || key;
@@ -131,8 +158,41 @@ function headers(json = true) {
   return result;
 }
 
+function scrollToBottom() {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function formatSize(bytes) {
+  if (!bytes) return "";
+  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function setConnection(connection) {
+  state.connection = connection;
+  connectionBanner.classList.toggle("is-connecting", connection === "connecting");
+  connectionBanner.classList.toggle("is-error", connection === "error");
+  if (connection === "ok") {
+    connectionBanner.hidden = true;
+    retryBtn.hidden = true;
+    return;
+  }
+  connectionBanner.hidden = false;
+  connectionText.textContent = connection === "connecting" ? t("connecting") : t("connectionError");
+  retryBtn.hidden = connection !== "error";
+}
+
 function updateSessionLabel() {
-  sessionLabel.textContent = state.sessionId ? `${t("sessionPrefix")}: ${state.sessionId}` : t("webDemo");
+  sessionLabel.replaceChildren();
+  if (!state.sessionId) {
+    sessionLabel.textContent = t("webDemo");
+    return;
+  }
+  sessionLabel.append(document.createTextNode(`${t("sessionPrefix")}: `));
+  const id = document.createElement("span");
+  id.className = "mono";
+  id.textContent = state.sessionId;
+  sessionLabel.appendChild(id);
 }
 
 function applyI18n() {
@@ -154,6 +214,7 @@ function applyI18n() {
   langZhBtn.setAttribute("aria-pressed", String(state.language === "zh"));
   langEnBtn.setAttribute("aria-pressed", String(state.language === "en"));
   updateSessionLabel();
+  if (!connectionBanner.hidden) setConnection(state.connection);
 }
 
 async function setServerLanguage() {
@@ -175,7 +236,7 @@ async function setLanguage(language) {
   localStorage.setItem("omc_web_language", language);
   applyI18n();
   await setServerLanguage();
-  await refreshAll();
+  await refreshAll().catch(() => {});
 }
 
 async function ensureSession() {
@@ -187,6 +248,7 @@ async function ensureSession() {
       language: state.language,
     }),
   });
+  if (!response.ok) throw new Error(`session request failed: ${response.status}`);
   const payload = await response.json();
   state.sessionId = payload.session_id;
   state.cleanupSessionId = "";
@@ -211,10 +273,10 @@ function cleanupCurrentSession() {
 }
 
 function renderEvent(event) {
-  if (document.querySelector(`[data-event-id="${event.id}"]`)) return;
+  if (event.id && document.querySelector(`[data-event-id="${event.id}"]`)) return;
   const node = document.createElement("article");
-  node.className = `message ${event.role || "assistant"} ${event.kind === "error" ? "error" : ""}`;
-  node.dataset.eventId = event.id;
+  node.className = `message ${event.role || "assistant"}`;
+  if (event.id) node.dataset.eventId = event.id;
   const text = document.createElement("div");
   text.textContent = event.text || "";
   node.appendChild(text);
@@ -241,7 +303,53 @@ function renderEvent(event) {
     node.appendChild(wrap);
   }
   messagesEl.appendChild(node);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  scrollToBottom();
+}
+
+function renderError(message, onRetry) {
+  const node = document.createElement("article");
+  node.className = "message error";
+  node.setAttribute("role", "alert");
+  const row = document.createElement("div");
+  row.className = "error-row";
+  const icon = document.createElement("span");
+  icon.className = "error-icon";
+  icon.textContent = "⚠";
+  icon.setAttribute("aria-hidden", "true");
+  const text = document.createElement("div");
+  text.textContent = message;
+  row.append(icon, text);
+  node.appendChild(row);
+  if (onRetry) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "retry-inline";
+    button.textContent = t("retry");
+    button.addEventListener("click", () => {
+      node.remove();
+      onRetry();
+    });
+    node.appendChild(button);
+  }
+  messagesEl.appendChild(node);
+  scrollToBottom();
+}
+
+function showThinking() {
+  if (messagesEl.querySelector(".message.thinking")) return;
+  const node = document.createElement("article");
+  node.className = "message assistant thinking thinking-ring";
+  node.setAttribute("aria-label", t("thinking"));
+  const dots = document.createElement("span");
+  dots.className = "typing";
+  dots.innerHTML = "<i></i><i></i><i></i>";
+  node.appendChild(dots);
+  messagesEl.appendChild(node);
+  scrollToBottom();
+}
+
+function hideThinking() {
+  messagesEl.querySelector(".message.thinking")?.remove();
 }
 
 async function pollEvents() {
@@ -262,55 +370,89 @@ function mediaTypeLabel(type) {
   return t("file");
 }
 
-function assetLabel(asset) {
-  const type = mediaTypeLabel(asset.media_type || "file");
-  const name = asset.original_name || asset.asset_id || "asset";
-  const size = asset.size_bytes ? `${Math.round(asset.size_bytes / 1024)} KB` : "";
-  return `${type} · ${name}${size ? ` · ${size}` : ""}`;
+function makeBadge(text, variant) {
+  const badge = document.createElement("span");
+  badge.className = `badge ${variant}`;
+  badge.textContent = text;
+  return badge;
 }
 
-async function refreshAssets() {
-  if (!state.sessionId) return;
-  const response = await fetch(`/api/assets?session_id=${encodeURIComponent(state.sessionId)}`);
-  if (!response.ok) return;
-  const payload = await response.json();
-  const assets = (((payload.data || {}).manifest || {}).assets || []);
-  assetsEl.innerHTML = "";
-  if (!assets.length) {
-    const empty = document.createElement("div");
-    empty.className = "status-card";
-    const label = document.createElement("span");
-    label.textContent = t("emptyAssets");
-    empty.appendChild(label);
-    assetsEl.appendChild(empty);
-    return;
-  }
-  for (const asset of assets) {
-    const card = document.createElement("div");
-    card.className = "status-card";
-    const status = asset.exists === false ? t("assetMissing") : t("assetSaved");
-    const title = document.createElement("strong");
-    title.textContent = assetLabel(asset);
-    const statusNode = document.createElement("span");
-    statusNode.textContent = status;
-    card.appendChild(title);
-    card.appendChild(statusNode);
-    assetsEl.appendChild(card);
-  }
+function emptyCard(text) {
+  const card = document.createElement("div");
+  card.className = "status-card empty";
+  card.textContent = text;
+  return card;
 }
 
-function renderJob(job) {
+function statusVariant(status) {
+  const value = String(status || "").toLowerCase();
+  if (/(done|complete|success|finish|ready)/.test(value)) return "success";
+  if (/(fail|error|cancel)/.test(value)) return "danger";
+  if (/(run|process|pend|queue|active|start)/.test(value)) return "info";
+  return "neutral";
+}
+
+function assetCard(asset) {
+  const card = document.createElement("div");
+  card.className = "status-card";
+
+  const title = document.createElement("span");
+  title.className = "card-title";
+  title.textContent = asset.original_name || asset.asset_id || "asset";
+  card.appendChild(title);
+
+  const meta = document.createElement("div");
+  meta.className = "card-meta";
+  const type = document.createElement("span");
+  type.textContent = mediaTypeLabel(asset.media_type || "file");
+  meta.appendChild(type);
+
+  const size = formatSize(asset.size_bytes);
+  if (size) {
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.textContent = "·";
+    const sizeNode = document.createElement("span");
+    sizeNode.className = "mono";
+    sizeNode.textContent = size;
+    meta.append(dot, sizeNode);
+  }
+
+  const sep = document.createElement("span");
+  sep.className = "dot";
+  sep.textContent = "·";
+  const missing = asset.exists === false;
+  meta.append(sep, makeBadge(missing ? t("assetMissing") : t("assetSaved"), missing ? "danger" : "success"));
+  card.appendChild(meta);
+  return card;
+}
+
+function jobCard(job) {
   const card = document.createElement("div");
   card.className = "status-card";
   const report = job.report || {};
   const downloads = job.downloads || [];
-  const summary = report.user_summary || report.latest_progress || "";
-  const title = document.createElement("strong");
-  title.textContent = `${job.job_id || t("unknownJob")} · ${job.status || "unknown"}`;
-  const body = document.createElement("p");
-  body.textContent = summary;
+
+  const title = document.createElement("span");
+  title.className = "card-title";
+  const id = document.createElement("span");
+  id.className = "mono";
+  id.textContent = job.job_id || t("unknownJob");
+  title.appendChild(id);
   card.appendChild(title);
-  card.appendChild(body);
+
+  const meta = document.createElement("div");
+  meta.className = "card-meta";
+  meta.appendChild(makeBadge(job.status || "unknown", statusVariant(job.status)));
+  card.appendChild(meta);
+
+  const summary = report.user_summary || report.latest_progress || "";
+  if (summary) {
+    const body = document.createElement("p");
+    body.textContent = summary;
+    card.appendChild(body);
+  }
+
   for (const item of downloads) {
     const link = document.createElement("a");
     link.href = item.url;
@@ -328,23 +470,32 @@ function renderJob(job) {
   return card;
 }
 
+async function refreshAssets() {
+  if (!state.sessionId) return;
+  const response = await fetch(`/api/assets?session_id=${encodeURIComponent(state.sessionId)}`);
+  if (!response.ok) return;
+  const payload = await response.json();
+  const assets = ((payload.data || {}).manifest || {}).assets || [];
+  assetsEl.replaceChildren();
+  if (!assets.length) {
+    assetsEl.appendChild(emptyCard(t("emptyAssets")));
+    return;
+  }
+  for (const asset of assets) assetsEl.appendChild(assetCard(asset));
+}
+
 async function refreshJobs() {
   if (!state.sessionId) return;
   const response = await fetch(`/api/jobs?session_id=${encodeURIComponent(state.sessionId)}&limit=8`);
   if (!response.ok) return;
   const payload = await response.json();
-  const jobs = ((payload.data || {}).jobs || []);
-  jobsEl.innerHTML = "";
+  const jobs = (payload.data || {}).jobs || [];
+  jobsEl.replaceChildren();
   if (!jobs.length) {
-    const empty = document.createElement("div");
-    empty.className = "status-card";
-    const label = document.createElement("span");
-    label.textContent = t("emptyJobs");
-    empty.appendChild(label);
-    jobsEl.appendChild(empty);
+    jobsEl.appendChild(emptyCard(t("emptyJobs")));
     return;
   }
-  for (const job of jobs) jobsEl.appendChild(renderJob(job));
+  for (const job of jobs) jobsEl.appendChild(jobCard(job));
 }
 
 async function refreshAll() {
@@ -353,6 +504,10 @@ async function refreshAll() {
 
 async function uploadFiles(files) {
   if (!files.length) return;
+  if (!state.sessionId) {
+    renderError(t("connectionError"), boot);
+    return;
+  }
   const form = new FormData();
   form.append("session_id", state.sessionId);
   for (const file of files) form.append("files", file);
@@ -362,7 +517,8 @@ async function uploadFiles(files) {
     if (!response.ok) throw new Error(await response.text());
     await refreshAll();
   } catch (error) {
-    renderEvent({ id: `local-${Date.now()}`, role: "assistant", kind: "error", text: `${t("uploadFailed")}：${error.message}` });
+    console.error("upload failed:", error);
+    renderError(t("uploadFailed"), () => uploadFiles(files));
   } finally {
     uploadBtn.disabled = false;
     fileInput.value = "";
@@ -370,30 +526,78 @@ async function uploadFiles(files) {
 }
 
 async function sendMessage(text) {
+  if (!state.sessionId) {
+    renderError(t("connectionError"), boot);
+    return;
+  }
   sendBtn.disabled = true;
   uploadBtn.disabled = true;
-  sendBtn.textContent = t("processing");
+  if (sendLabel) sendLabel.textContent = t("processing");
+  showThinking();
   try {
     const response = await fetch("/api/messages", {
       method: "POST",
       headers: headers(true),
       body: JSON.stringify({ session_id: state.sessionId, text, language: state.language }),
     });
+    hideThinking();
     await pollEvents();
     if (!response.ok) {
-      const detail = await response.text();
-      renderEvent({ id: `local-${Date.now()}`, role: "assistant", kind: "error", text: `${t("sendFailed")}：${detail}` });
+      console.error("send failed:", await response.text());
+      renderError(t("sendFailed"), () => sendMessage(text));
     }
     await refreshAll();
   } catch (error) {
-    renderEvent({ id: `local-${Date.now()}`, role: "assistant", kind: "error", text: `${t("sendFailed")}：${error.message}` });
+    console.error("send failed:", error);
+    renderError(t("sendFailed"), () => sendMessage(text));
   } finally {
+    hideThinking();
     sendBtn.disabled = false;
     uploadBtn.disabled = false;
     applyI18n();
   }
 }
 
+/* ---- Polling with backoff; recovers the connection banner automatically ---- */
+async function pollTick() {
+  let ok = true;
+  try {
+    await refreshAll();
+  } catch (error) {
+    ok = false;
+    console.error("refresh failed:", error);
+  }
+  if (ok) {
+    state.pollDelay = POLL_BASE;
+    if (state.connection !== "ok") setConnection("ok");
+  } else {
+    state.pollDelay = Math.min(Math.round(state.pollDelay * 1.6), POLL_MAX);
+    setConnection("error");
+  }
+  state.pollTimer = setTimeout(pollTick, state.pollDelay);
+}
+
+function startPolling() {
+  clearTimeout(state.pollTimer);
+  state.pollDelay = POLL_BASE;
+  state.pollTimer = setTimeout(pollTick, state.pollDelay);
+}
+
+async function boot() {
+  setConnection("connecting");
+  clearTimeout(state.pollTimer);
+  try {
+    await ensureSession();
+    await refreshAll();
+    setConnection("ok");
+    startPolling();
+  } catch (error) {
+    console.error("boot failed:", error);
+    setConnection("error");
+  }
+}
+
+/* ---- Events ---- */
 composer.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = messageInput.value.trim();
@@ -402,13 +606,73 @@ composer.addEventListener("submit", async (event) => {
   await sendMessage(text);
 });
 
+messageInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  // Desktop only: Enter sends, Shift+Enter is a newline. Mobile keeps Enter as newline.
+  if (window.matchMedia("(min-width: 861px)").matches) {
+    event.preventDefault();
+    composer.requestSubmit();
+  }
+});
+
+for (const chip of document.querySelectorAll("[data-cmd]")) {
+  chip.addEventListener("click", () => {
+    const cmd = chip.dataset.cmd;
+    const rest = messageInput.value.replace(/^\/\S+\s*/, "");
+    messageInput.value = `${cmd} ${rest}`;
+    messageInput.focus();
+    const end = messageInput.value.length;
+    messageInput.setSelectionRange(end, end);
+  });
+}
+
+let dragDepth = 0;
+function dragHasFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes("Files");
+}
+chatPane.addEventListener("dragenter", (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+  dragDepth += 1;
+  chatPane.classList.add("dragover");
+});
+chatPane.addEventListener("dragover", (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+});
+chatPane.addEventListener("dragleave", (event) => {
+  if (!dragHasFiles(event)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) chatPane.classList.remove("dragover");
+});
+chatPane.addEventListener("drop", (event) => {
+  event.preventDefault();
+  dragDepth = 0;
+  chatPane.classList.remove("dragover");
+  const files = Array.from(event.dataTransfer?.files || []);
+  if (files.length) uploadFiles(files);
+});
+
 uploadBtn.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => uploadFiles(Array.from(fileInput.files || [])));
-refreshBtn.addEventListener("click", refreshAll);
+refreshBtn.addEventListener("click", () => {
+  clearTimeout(state.pollTimer);
+  pollTick();
+});
 checkAssetsBtn.addEventListener("click", () => sendMessage("/check_assets"));
 cutBtn.addEventListener("click", () => sendMessage("/cut"));
 langZhBtn.addEventListener("click", () => setLanguage("zh"));
 langEnBtn.addEventListener("click", () => setLanguage("en"));
+retryBtn.addEventListener("click", () => {
+  clearTimeout(state.pollTimer);
+  if (state.sessionId) {
+    setConnection("connecting");
+    pollTick();
+  } else {
+    boot();
+  }
+});
 
 settingsBtn.addEventListener("click", () => {
   apiKeyInput.value = apiKey();
@@ -420,13 +684,11 @@ saveKeyBtn.addEventListener("click", () => {
   else sessionStorage.removeItem("omc_deepseek_key");
 });
 clearKeyBtn.addEventListener("click", () => {
+  if (apiKey() && !window.confirm(t("clearConfirm"))) return;
   apiKeyInput.value = "";
   sessionStorage.removeItem("omc_deepseek_key");
 });
 
 applyI18n();
-ensureSession().then(() => {
-  refreshAll();
-  state.polling = setInterval(refreshAll, 3000);
-});
+boot();
 window.addEventListener("pagehide", cleanupCurrentSession);
