@@ -26,14 +26,17 @@ from cassette import jobs, manifest, security, tools  # noqa: E402
 from cassette.errors import CassetteError  # noqa: E402
 
 
-_FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
-# Serve the built Vite/React app when present; fall back to the legacy static bundle.
-STATIC_DIR = _FRONTEND_DIST if (_FRONTEND_DIST / "index.html").exists() else Path(__file__).resolve().parent / "static"
+# The web demo UI is the built Vite/React app under frontend/dist.
+# Build it with web_demo/build_frontend.sh (or `npm run build` in web_demo/frontend).
+STATIC_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 _ACTIVE_JOB_STATUSES = {"queued", "running", "cancel_requested"}
 _LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=int(os.getenv("OMC_WEB_LLM_WORKERS", "4")), thread_name_prefix="omc-web-llm")
 
 app = FastAPI(title="Oh My Cassette Web Demo")
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Mount only when the frontend has been built so the module still imports
+# (e.g. for tests) before `npm run build` has produced frontend/dist.
+if STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.middleware("http")
@@ -489,8 +492,14 @@ def _cleanup_web_session(session_id: str) -> dict[str, Any]:
 
 
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+def index():
+    index_file = STATIC_DIR / "index.html"
+    if not index_file.exists():
+        return PlainTextResponse(
+            "Web demo frontend is not built. Run: cd web_demo/frontend && npm install && npm run build",
+            status_code=503,
+        )
+    return FileResponse(index_file)
 
 
 @app.post("/api/sessions")
