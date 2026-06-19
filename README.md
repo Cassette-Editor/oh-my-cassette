@@ -243,12 +243,20 @@ If you do not want to put a DeepSeek key on the server, leave `DEEPSEEK_API_KEY`
 Web demo service logs are separate from Hermes Agent / OhMyCassette plugin logs. By default they are written to `./web_demo/logs/web_demo.log` relative to the service working directory, or to `$OMC_WEB_LOG_DIR/web_demo.log` when `OMC_WEB_LOG_DIR` is set.
 Cassette job records for the web demo are also separate when `CASSETTE_ASSET_ROOT` is set as above: raw job JSON lives in `$CASSETTE_ASSET_ROOT/jobs/cassette_*.json`, and the web UI exposes a per-job **Log** link for jobs owned by the current browser session.
 
-3. Start the web demo:
+3. Build the browser UI (Vite + React → `web_demo/frontend/dist`). Requires Node.js + npm at build time only:
+
+```bash
+./web_demo/build_frontend.sh
+```
+
+4. Start the web demo:
 
 ```bash
 . .venv-web/bin/activate
 python -m web_demo.server
 ```
+
+> The server serves the built `web_demo/frontend/dist`. If it has not been built yet, `/` returns a clear 503 telling you to run the build. Re-run `web_demo/build_frontend.sh` after pulling changes under `web_demo/frontend`.
 
 Open `http://127.0.0.1:8080/` for local testing, or `http://<server-ip>:8080/` from another device if the host firewall/security group allows inbound TCP `8080`.
 
@@ -551,11 +559,15 @@ Run the web demo service:
 uv venv .venv-web
 uv pip install --python .venv-web/bin/python -r requirements-web.txt
 .venv-web/bin/python -m playwright install chromium
+# Build the browser UI (Vite/React -> web_demo/frontend/dist); requires Node.js + npm.
+./web_demo/build_frontend.sh
 set -a
 . ./oh-my-cassette-web.env
 set +a
 .venv-web/bin/python -m web_demo.server
 ```
+
+The browser UI is a Vite + React + TypeScript app under `web_demo/frontend`; `web_demo/build_frontend.sh` compiles it to `web_demo/frontend/dist`, which the server serves under `/static`. The build output is not committed, so build it on each deploy (and re-run it after pulling frontend changes). For live frontend iteration, `cd web_demo/frontend && npm run dev` runs Vite with `/api` proxied to `http://127.0.0.1:8088`, so run the FastAPI server alongside it.
 
 The web demo reads `CASSETTE_*`, `DEEPSEEK_*`, and `OMC_WEB_*` from process environment variables. Users can also enter a temporary DeepSeek API key in the browser settings; it is sent only with requests to this server and is not written to the repository or server disk. A systemd template lives at `deploy/oh-my-cassette-web.service.example`, with an environment template at `deploy/oh-my-cassette-web.env.example`.
 
