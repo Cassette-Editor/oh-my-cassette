@@ -19,6 +19,7 @@ export function Composer() {
   return (
     <form
       className="composer"
+      data-tour="composer"
       onSubmit={(event) => {
         event.preventDefault();
         submit();
@@ -52,7 +53,7 @@ export function Composer() {
         }}
       />
 
-      <button id="uploadBtn" type="button" title={t("uploadTitle")} onClick={() => fileRef.current?.click()}>
+      <button id="uploadBtn" data-tour="upload" type="button" title={t("uploadTitle")} onClick={() => fileRef.current?.click()}>
         <svg className="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
           <path d="M4 16v2.5A1.5 1.5 0 005.5 20h13a1.5 1.5 0 001.5-1.5V16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

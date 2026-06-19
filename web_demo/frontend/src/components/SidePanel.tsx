@@ -10,7 +10,7 @@ interface Props {
 export function SidePanel({ open, onClose }: Props) {
   const { t, assets, jobs, send } = useApp();
   return (
-    <aside className={`side-pane ${open ? "open" : ""}`} aria-label={t("statusAria")}>
+    <aside className={`side-pane ${open ? "open" : ""}`} data-tour="sidepanel" aria-label={t("statusAria")}>
       <button type="button" className="drawer-close" onClick={onClose} aria-label={t("statusClose")}>
         ✕
       </button>
