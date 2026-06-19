@@ -5,6 +5,7 @@ import { TopBar } from "./components/TopBar";
 import { ChatPane } from "./components/ChatPane";
 import { SidePanel } from "./components/SidePanel";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { Onboarding } from "./components/Onboarding";
 
 function Shell() {
   const { language } = useApp();
@@ -29,6 +30,7 @@ function Shell() {
         aria-hidden="true"
       />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <Onboarding />
     </div>
   );
 }

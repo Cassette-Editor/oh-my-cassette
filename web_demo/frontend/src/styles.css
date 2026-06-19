@@ -48,6 +48,7 @@
   --z-drawer-backdrop: 39;
   --z-drawer: 40;
   --z-dialog: 50;
+  --z-onboarding: 60;
 }
 
 @property --agent-angle {
@@ -705,6 +706,172 @@ dialog::backdrop {
   background: rgba(220, 40, 40, 0.1);
 }
 
+/* ---- Onboarding tour ---- */
+/* A guided first-run overlay. The container itself never blocks: only its
+   backdrop captures clicks, the spotlight is purely visual, and the card holds
+   the controls. The dim is emitted entirely by the spotlight's outer shadow so
+   the highlighted target stays at full app brightness. */
+.onb {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-onboarding);
+  pointer-events: none;
+}
+.onb-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: transparent;
+  animation: onb-fade var(--dur-slow) var(--ease);
+}
+
+.onb-spotlight {
+  position: fixed;
+  border-radius: var(--r-lg);
+  pointer-events: none;
+  box-shadow:
+    0 0 0 2px var(--amber),
+    0 0 0 1px rgba(7, 8, 11, 0.9) inset,
+    0 0 0 9999px rgba(6, 7, 10, 0.56);
+  transition: top var(--dur-slow) var(--ease), left var(--dur-slow) var(--ease),
+    width var(--dur-slow) var(--ease), height var(--dur-slow) var(--ease);
+  animation: onb-fade var(--dur-slow) var(--ease);
+}
+/* Breathing amber bloom, kept separate from the position transition above. */
+.onb-spotlight::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: onb-pulse 2.6s var(--ease) infinite;
+}
+
+.onb-card {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--elevated), var(--panel));
+  box-shadow: var(--shadow-lg);
+  animation: onb-card-in var(--dur-slow) var(--ease);
+}
+.onb-card.anchor-bottom {
+  bottom: calc(14px + env(safe-area-inset-bottom));
+}
+
+.onb-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+.onb-step {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-top: 1px;
+  border-radius: var(--r-full);
+  border: 1px solid rgba(244, 147, 37, 0.45);
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.onb-copy {
+  min-width: 0;
+}
+.onb-title {
+  margin: 0;
+  font-size: 1.1875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.onb-body {
+  margin: 7px 0 0;
+  max-width: 56ch;
+  color: var(--ink-secondary);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.onb-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.onb-skip {
+  color: var(--ink-secondary);
+}
+.onb-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-inline: auto;
+}
+.onb-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--hairline-strong);
+  transition: background var(--dur) var(--ease), width var(--dur) var(--ease);
+}
+.onb-dot.is-done {
+  background: rgba(244, 147, 37, 0.5);
+}
+.onb-dot.is-active {
+  width: 20px;
+  background: var(--amber);
+}
+.onb-next {
+  flex: 0 0 auto;
+  min-width: 7rem;
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--grade-black);
+  font-weight: 600;
+}
+.onb-next:hover {
+  background: var(--ink-secondary);
+  border-color: var(--ink-secondary);
+}
+
+@media (min-width: 861px) {
+  .onb-card {
+    right: auto;
+    left: 24px;
+    /* Cap so the card always clears the 340px side panel (plus margins). */
+    width: min(760px, calc(100vw - 388px));
+  }
+  .onb-card.anchor-bottom {
+    bottom: 24px;
+  }
+  .onb-card {
+    padding: 20px 22px;
+    gap: 18px;
+  }
+}
+
+@media (max-width: 380px) {
+  .onb-next {
+    min-width: 5.5rem;
+  }
+  .onb-card {
+    padding: 16px;
+  }
+}
+
 /* ---- Motion keyframes ---- */
 @keyframes spin {
   to {
@@ -744,6 +911,33 @@ dialog::backdrop {
   }
   to {
     transform: translateY(0);
+  }
+}
+@keyframes onb-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes onb-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes onb-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 13px 1px rgba(244, 147, 37, 0.22);
+  }
+  50% {
+    box-shadow: 0 0 26px 5px rgba(244, 147, 37, 0.42);
   }
 }
 

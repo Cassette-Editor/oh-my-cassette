@@ -9,7 +9,7 @@ export function TopBar({ onOpenSettings, onToggleDrawer }: Props) {
   const { t, language, setLanguage, sessionId, refreshNow } = useApp();
   return (
     <header className="topbar">
-      <div className="brand">
+      <div className="brand" data-tour="brand">
         <svg className="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <rect x="2.25" y="5.25" width="19.5" height="13.5" rx="3" stroke="currentColor" strokeWidth="1.5" />
           <circle cx="8" cy="12" r="2.4" stroke="currentColor" strokeWidth="1.5" />
@@ -49,7 +49,7 @@ export function TopBar({ onOpenSettings, onToggleDrawer }: Props) {
             EN
           </button>
         </div>
-        <button type="button" className="status-toggle" onClick={onToggleDrawer} title={t("status")}>
+        <button type="button" className="status-toggle" data-tour="status-toggle" onClick={onToggleDrawer} title={t("status")}>
           {t("status")}
         </button>
         <button type="button" onClick={refreshNow} title={t("refreshTitle")}>
