@@ -3,6 +3,10 @@ Description=Oh My Cassette Web Demo
 After=network-online.target
 Wants=network-online.target
 
+# The browser UI must be built before this unit starts (build time only, needs
+# Node.js + npm). Run during provisioning / on each deploy:
+#   /home/ubuntu/oh-my-cassette/web_demo/build_frontend.sh
+# This produces web_demo/frontend/dist, which the server serves under /static.
 [Service]
 Type=simple
 WorkingDirectory=/home/ubuntu/oh-my-cassette
