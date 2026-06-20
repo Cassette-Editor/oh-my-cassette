@@ -46,6 +46,21 @@ def _assert_semantic_edit_gate(
             assert "是否需要我先把你的剪辑指令优化" in result["text"]
 
 
+def _cassette_debug_events(asset_root: Path) -> list[dict]:
+    log_path = asset_root / "logs" / "cassette.log"
+    if not log_path.exists():
+        return []
+    events = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("event"):
+            events.append(payload)
+    return events
+
+
 def test_all_handlers_return_json_string(cassette_env):
     for handler in HANDLERS:
         result = handler({})
@@ -663,6 +678,56 @@ def test_cassette_match_exact_bgm_sanitizes_numbered_menu_line(cassette_env, mon
     assert observed["artist"] == "房东的猫"
 
 
+def test_cassette_match_exact_bgm_logs_search_failure_details(cassette_env, monkeypatch):
+    def fake_match_exact_bgm(**kwargs):
+        del kwargs
+        raise tools.CassetteError(
+            "exact_bgm_no_search_results",
+            "Exact BGM search returned no eligible song for the requested title/artist",
+            {
+                "attempts": [
+                    {
+                        "mode": "title_artist",
+                        "query": "Chef Song Test Artist",
+                        "candidate_count": 3,
+                        "eligible_count": 0,
+                        "strict_title": True,
+                    },
+                    {
+                        "mode": "title_only",
+                        "query": "Chef Song",
+                        "candidate_count": 1,
+                        "eligible_count": 0,
+                        "downloadable_count": 0,
+                        "strict_title": True,
+                    },
+                ],
+            },
+        )
+
+    monkeypatch.setattr(tools.exact_bgm, "match_exact_bgm", fake_match_exact_bgm)
+
+    payload = json.loads(tools.cassette_match_exact_bgm({
+        "session_id": "exact-fail-log",
+        "instruction": "剪一个美食视频",
+        "title": "Chef Song",
+        "artist": "Test Artist",
+        "download": True,
+    }))
+
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "exact_bgm_no_search_results"
+    events = _cassette_debug_events(cassette_env["asset_root"])
+    failed = [event for event in events if event.get("event") == "bgm_exact_search_failed"][-1]
+    assert failed["session_hash"] == tools.manifest.resolve_session_hash(session_id="exact-fail-log")
+    assert failed["code"] == "exact_bgm_no_search_results"
+    assert failed["title"] == "Chef Song"
+    assert failed["artist"] == "Test Artist"
+    assert failed["attempts"][0]["query"] == "Chef Song Test Artist"
+    assert failed["attempts"][0]["candidate_count"] == 3
+    assert failed["attempts"][1]["downloadable_count"] == 0
+
+
 def test_exact_bgm_selection_can_request_new_batch(cassette_env):
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
@@ -861,6 +926,11 @@ def test_cassette_match_bgm_retries_empty_search_and_registers_audio_asset(casse
     assert any(asset.get("media_type") == "audio" and asset.get("metadata", {}).get("source") == "freetouse" for asset in assets)
     audio_asset = next(asset for asset in assets if asset.get("media_type") == "audio")
     assert Path(audio_asset["saved_path"]).parent.name == "media"
+    events = _cassette_debug_events(cassette_env["asset_root"])
+    done = [event for event in events if event.get("event") == "bgm_freetouse_search_done"][-1]
+    assert done["attempted_queries"] == ["cinematic empty", "energetic empty", "action adrenaline sports"]
+    assert done["zero_result_queries"] == ["cinematic empty", "energetic empty"]
+    assert done["selected"]["query"] == "action adrenaline sports"
 
 
 def test_smart_bgm_network_failure_does_not_block_direct_flow(cassette_env, monkeypatch):
@@ -1002,6 +1072,13 @@ def test_cassette_match_bgm_reports_exact_song_fallback(cassette_env, monkeypatc
     assert data["fallback"] == {"from": "exact_bgm", "reason": "exact_bgm_no_search_results"}
     assert "精确歌曲匹配未成功，已切换到备用智能 BGM 匹配" in data["user_message"]
     assert "已智能匹配 BGM：Fallback Artist - Fallback Track" in data["user_message"]
+    events = _cassette_debug_events(cassette_env["asset_root"])
+    done = [event for event in events if event.get("event") == "bgm_freetouse_search_done"][-1]
+    assert done["fallback_from"] == "exact_bgm"
+    assert done["fallback_reason"] == "exact_bgm_no_search_results"
+    assert done["search_queries"] == ["cinematic cooking"]
+    assert done["selected"]["title"] == "Fallback Track"
+    assert done["selected"]["track_id"] == "track_1"
 
 
 def test_cassette_match_bgm_can_only_register_material(cassette_env, monkeypatch):
