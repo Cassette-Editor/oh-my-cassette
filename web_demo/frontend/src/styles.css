@@ -14,6 +14,12 @@
   --ink-muted: #888a96;
   --ink-faint: #61626b;
 
+  /* Scrollbar — cool-gray thumb on a transparent track, quiet at rest so the
+     footage/preview stays the loudest thing on screen, brighter on interaction. */
+  --scroll-thumb: #3c3d46;
+  --scroll-thumb-hover: #54555f;
+  --scroll-thumb-active: #62636d;
+
   --amber: #f49325;
   --amber-soft: rgba(244, 147, 37, 0.14);
 
@@ -75,6 +81,39 @@ body {
 
 ::selection {
   background: var(--amber-soft);
+}
+
+/* ---- Scrollbars ----
+   Theme the native scrollbar to the grading-room palette so it stops reading as
+   a bright OS chrome element on the near-black surface. Native behaviour is kept
+   intact — this is colour/size only, not a custom affordance. Firefox + modern
+   Chromium read the standards-track properties (inherited from :root); Safari and
+   WebKit/older Chromium read the ::-webkit-scrollbar pseudo-elements. */
+:root {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--scroll-thumb);
+  /* Transparent border + padding-box clip leaves a gutter, so the thumb reads as
+     a slim floating bar with breathing room rather than a full-width slab. */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--r-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scroll-thumb-hover);
+}
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--scroll-thumb-active);
 }
 
 .mono {
