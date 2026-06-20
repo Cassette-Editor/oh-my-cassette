@@ -134,6 +134,45 @@ def _make_event(session_id: str, *, text: str = "", media_paths: list[str] | Non
     )
 
 
+_LLM_BRIDGED_SKIP_REASONS = {
+    "cassette_model_choice_requested",
+    "cassette_model_choice_reasked",
+    "cassette_model_thinking_choice_requested",
+    "cassette_model_thinking_choice_reasked",
+    "cassette_model_set",
+    "cassette_prompt_optimization_choice_requested",
+    "cassette_prompt_optimization_choice_reasked",
+    "cassette_smart_bgm_choice_requested",
+    "cassette_smart_bgm_choice_reasked",
+    "cassette_exact_bgm_selection_reasked",
+}
+
+
+def _latest_assistant_message_after(session_id: str, after_event_id: int) -> str:
+    for event in reversed(session_store.get_events(session_id, after_event_id)):
+        if event.get("role") == "assistant" and event.get("kind") == "message":
+            text = str(event.get("text") or "").strip()
+            if text:
+                return text
+    return ""
+
+
+def _bridge_fixed_reply_to_llm_history(session_id: str, user_text: str, user_event: dict[str, Any], result: dict[str, Any]) -> None:
+    reason = str((result or {}).get("reason") or "")
+    if reason not in _LLM_BRIDGED_SKIP_REASONS:
+        return
+    assistant_text = _latest_assistant_message_after(session_id, int(user_event.get("id") or 0))
+    if not assistant_text:
+        return
+    history = session_store.get_llm_messages(session_id)
+    history.extend([
+        {"role": "user", "content": user_text},
+        {"role": "assistant", "content": assistant_text},
+    ])
+    session_store.set_llm_messages(session_id, history)
+    logging_utils.log_event("web_llm_history_bridged", session_id=session_id, reason=reason)
+
+
 def _tool_payload(result: str) -> dict[str, Any]:
     try:
         payload = json.loads(result)
@@ -721,7 +760,7 @@ def send_message(
     if payload.get("language"):
         _set_web_language(session_id, str(payload.get("language") or ""))
     logging_utils.log_event("web_message_received", session_id=session_id, text_len=len(text), text_preview=_message_preview(text))
-    session_store.add_event(session_id, role="user", text=text, kind="message")
+    user_event = session_store.add_event(session_id, role="user", text=text, kind="message")
     result = tools.ingest_gateway_media(event=_make_event(session_id, text=text), gateway=_web_gateway())
     logging_utils.log_event(
         "web_message_gateway_result",
@@ -740,6 +779,7 @@ def send_message(
         session_store.add_event(session_id, role="assistant", text=reply, kind="message")
         return {"ok": True, "action": "local_reply", "result": result}
     if result.get("action") == "skip":
+        _bridge_fixed_reply_to_llm_history(session_id, text, user_event, result)
         return {"ok": True, "action": "skip", "result": result}
     if result.get("action") == "rewrite":
         api_key = _api_key_override(x_deepseek_api_key)

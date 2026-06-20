@@ -231,6 +231,34 @@ def test_web_api_rewrite_runs_deepseek_in_background(cassette_env, monkeypatch):
     assert any(event.get("text") == "background done" for event in events)
 
 
+def test_web_skip_choice_reply_is_bridged_to_llm_history(cassette_env, monkeypatch):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    session_store.set_llm_messages(session_id, [{"role": "assistant", "content": "请选择当前 Cassette 会话使用的模型，回复序号即可："}])
+
+    def fake_ingest(event, gateway):
+        gateway.adapters["web"].send(event.source.chat_id, "已选择模型：DeepSeek V4 Flash。请选择思考程度，回复序号即可：")
+        return {"action": "skip", "reason": "cassette_model_thinking_choice_requested", "reply_sent": True}
+
+    monkeypatch.setattr(tools, "ingest_gateway_media", fake_ingest)
+
+    response = client.post("/api/messages", json={"session_id": session_id, "text": "1"})
+
+    assert response.status_code == 200
+    assert response.json()["action"] == "skip"
+    history = session_store.get_llm_messages(session_id)
+    assert history[-2:] == [
+        {"role": "user", "content": "1"},
+        {"role": "assistant", "content": "已选择模型：DeepSeek V4 Flash。请选择思考程度，回复序号即可："},
+    ]
+
+
 def test_web_jobs_expose_owned_job_log(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi

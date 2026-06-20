@@ -647,9 +647,10 @@ def test_upload_wait_raises_specific_timeout(monkeypatch):
     monkeypatch.setattr(browser.time, "monotonic", lambda: clock["now"])
     monkeypatch.setattr(browser.time, "sleep", lambda seconds: clock.__setitem__("now", clock["now"] + seconds))
 
-    with pytest.raises(browser.BrowserUploadTimeoutError):
+    with pytest.raises(browser.BrowserUploadTimeoutError) as exc_info:
         browser._wait_for_agent_upload_ready(FakePage(), "job", 1, timeout_sec=2)
     assert clock["now"] >= 2
+    assert "last upload status: 1 个进行中" in str(exc_info.value)
 
 
 def test_upload_wait_accepts_chinese_ready_status(monkeypatch):

@@ -86,6 +86,8 @@ CASSETTE_MATCH_BGM = {
             },
             "optimization_enabled": {"type": "boolean", "description": "Whether the user chose prompt optimization before smart BGM selection."},
             "continue_after_match": {"type": "boolean", "description": "Default true. Set false for /music standalone matching so the tool only registers a BGM asset and does not guide Hermes into Cassette execution."},
+            "fallback_from": {"type": "string", "description": "Optional. Set to exact_bgm when this Free To Use match is a fallback after exact song matching failed."},
+            "fallback_reason": {"type": "string", "description": "Optional concise error code or reason from the primary BGM provider that triggered fallback."},
         },
         "required": ["session_id", "instruction", "search_queries"],
         "additionalProperties": False,

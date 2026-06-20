@@ -1714,12 +1714,15 @@ def _wait_for_agent_upload_ready(page: Any, job_id: str, expected_count: int, ti
     start = time.monotonic()
     last_progress_at = 0.0
     last_body = ""
+    last_status = ""
     while timeout_sec is None or time.monotonic() - start < timeout_sec:
         if jobs.is_cancel_requested(job_id):
             raise BrowserJobCancelled("Cassette job was cancelled while waiting for asset upload/analysis")
         body = page.locator("body").inner_text(timeout=1000)
         last_body = body
         status = _upload_status_text(page)
+        if status:
+            last_status = status
         body_lower = body.lower()
         if status:
             if _upload_status_has_failure(status):
@@ -1739,7 +1742,13 @@ def _wait_for_agent_upload_ready(page: Any, job_id: str, expected_count: int, ti
         if not status and not _upload_status_has_processing(body_lower):
             return body
         time.sleep(1)
-    raise BrowserUploadTimeoutError("Timed out waiting for Cassette asset upload/analysis")
+    detail = _compact_summary_text(last_status or last_body, 300)
+    message = "Timed out waiting for Cassette asset upload/analysis"
+    if detail:
+        message = f"{message}; last upload status: {detail}"
+    if expected_count > 1:
+        message = f"{message}. Try retrying after refreshing Cassette, or upload fewer/lower-resolution assets in one batch."
+    raise BrowserUploadTimeoutError(message)
 
 
 def _assets_already_uploaded(record: dict[str, Any], asset_paths: list[str]) -> bool:

@@ -955,6 +955,55 @@ def test_cassette_match_bgm_uses_telegram_default_language_from_manifest(cassett
     assert "telegram_chat_raw" not in json.dumps(data, ensure_ascii=False)
 
 
+def test_cassette_match_bgm_reports_exact_song_fallback(cassette_env, monkeypatch):
+    monkeypatch.setattr(
+        tools,
+        "_match_and_download_smart_bgm",
+        lambda session_id, instruction, search_queries: {
+            "status": "downloaded",
+            "asset_id": "asset_audio",
+            "track_id": "track_1",
+            "artist": "Fallback Artist",
+            "title": "Fallback Track",
+            "query": search_queries[0],
+            "source_rank": "staff_picks",
+        },
+    )
+    media = cassette_env["source_root"] / "clip.mp4"
+    media.write_bytes(b"video")
+    source = SimpleNamespace(
+        platform=SimpleNamespace(value="qqbot"),
+        chat_id="qq_openid_raw",
+        user_id="qq_user_raw",
+    )
+    gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
+    saved = tools.ingest_gateway_media(
+        event=SimpleNamespace(
+            source=source,
+            media_urls=[str(media)],
+            media_types=["video/mp4"],
+            text="",
+            message_id="raw_message_id",
+        ),
+        gateway=gateway,
+    )
+
+    payload = json.loads(tools.cassette_match_bgm({
+        "session_id": saved["session_id"],
+        "instruction": "剪成 10 秒短视频",
+        "search_queries": ["cinematic cooking"],
+        "optimization_enabled": False,
+        "fallback_from": "exact_bgm",
+        "fallback_reason": "exact_bgm_no_search_results",
+    }))
+
+    assert payload["ok"] is True
+    data = payload["data"]
+    assert data["fallback"] == {"from": "exact_bgm", "reason": "exact_bgm_no_search_results"}
+    assert "精确歌曲匹配未成功，已切换到备用智能 BGM 匹配" in data["user_message"]
+    assert "已智能匹配 BGM：Fallback Artist - Fallback Track" in data["user_message"]
+
+
 def test_cassette_match_bgm_can_only_register_material(cassette_env, monkeypatch):
     monkeypatch.setattr(
         tools,
@@ -2465,6 +2514,8 @@ def test_gateway_retry_after_exact_bgm_selection_does_not_reask_or_rematch_bgm(c
     assert selected is not None
     assert "cassette_match_exact_bgm" in selected["text"]
     assert "selected smart BGM recommendation #1" in selected["text"]
+    assert 'fallback_from="exact_bgm"' in selected["text"]
+    assert "fallback_reason set to the exact-song tool error code" in selected["text"]
 
     retry = tools.ingest_gateway_media(
         event=SimpleNamespace(

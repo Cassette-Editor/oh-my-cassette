@@ -152,7 +152,13 @@ def cassette_match_bgm(args: dict, **kwargs) -> str:
         continue_after_match = a.get("continue_after_match", True)
         continue_after_match = True if continue_after_match is None else bool(continue_after_match)
         language = _cassette_language_for_session(session_id)
-        result = _match_and_download_smart_bgm(session_id, instruction, search_queries)
+        result = dict(_match_and_download_smart_bgm(session_id, instruction, search_queries))
+        fallback_from = str(a.get("fallback_from") or "").strip()
+        fallback_reason = str(a.get("fallback_reason") or "").strip()
+        if fallback_from:
+            result["fallback_from"] = fallback_from
+            if fallback_reason:
+                result["fallback_reason"] = fallback_reason
         effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
         optimization_enabled = bool(a.get("optimization_enabled"))
         if continue_after_match:
@@ -183,6 +189,10 @@ def cassette_match_bgm(args: dict, **kwargs) -> str:
             "effective_instruction": effective_instruction,
             "user_message": user_message,
             "notification": notification,
+            "fallback": {
+                "from": fallback_from,
+                "reason": fallback_reason,
+            } if fallback_from else {},
             "hermes_next_step": _bgm_next_step_guidance(
                 optimization_enabled,
                 continue_after_match=continue_after_match,
@@ -2676,14 +2686,14 @@ def _fuzzy_bgm_fallback_text(
             "First call jamendo_music_matcher with userQuery, searchTerms, fuzzyTags, excludeTerms, vocalInstrumental when clear, download=true, and session_id. "
             "Do not generate or pass raw Jamendo SearchPlan JSON. "
             "If Jamendo also returns ok=false after its internal 3-attempt search budget or reports missing/invalid credentials, fall back to Free To Use: choose exactly 3 Free To Use search queries from the category summary below and call cassette_match_bgm with session_id, instruction, search_queries, optimization_enabled="
-            f"{str(bool(optimization_enabled)).lower()}, and continue_after_match={str(bool(continue_after_match)).lower()}. "
+            f"{str(bool(optimization_enabled)).lower()}, continue_after_match={str(bool(continue_after_match)).lower()}, fallback_from=\"exact_bgm\", and fallback_reason set to the exact-song tool error code or concise failure reason. "
             f"Use the same success handling as the primary exact tool, including cassette_language='{_normalize_cassette_language(language) or 'zh'}'. Original instruction: {instruction}\n\n"
             "Free To Use fallback category summary:\n"
             f"{summary}\n"
         )
     return (
         "If the exact song search tool returns ok=false, fall back without asking the user again: choose exactly 3 Free To Use search queries from the category summary below and call cassette_match_bgm with session_id, instruction, search_queries, optimization_enabled="
-        f"{str(bool(optimization_enabled)).lower()}, and continue_after_match={str(bool(continue_after_match)).lower()}. "
+        f"{str(bool(optimization_enabled)).lower()}, continue_after_match={str(bool(continue_after_match)).lower()}, fallback_from=\"exact_bgm\", and fallback_reason set to the exact-song tool error code or concise failure reason. "
         f"Use the same success handling as the primary exact tool, including cassette_language='{_normalize_cassette_language(language) or 'zh'}'. Original instruction: {instruction}\n\n"
         "Free To Use fallback category summary:\n"
         f"{summary}\n"
@@ -3178,30 +3188,44 @@ def _instruction_with_bgm(instruction: str, bgm_result: dict[str, Any] | None, l
     )
 
 
+def _bgm_fallback_notice(result: dict[str, Any], *, english: bool) -> str:
+    fallback_from = str(result.get("fallback_from") or "").strip().lower()
+    if fallback_from in {"exact_bgm", "exact_song", "cassette_match_exact_bgm"}:
+        if english:
+            return "The exact song match did not succeed, so I switched to fallback smart BGM matching. "
+        return "精确歌曲匹配未成功，已切换到备用智能 BGM 匹配。"
+    if fallback_from:
+        if english:
+            return "The primary BGM provider did not succeed, so I switched to fallback smart BGM matching. "
+        return "首选 BGM 匹配未成功，已切换到备用智能 BGM 匹配。"
+    return ""
+
+
 def _smart_bgm_status_message(result: dict[str, Any], *, continue_after_match: bool = True, language: str = "zh") -> str:
     english = _normalize_cassette_language(language) == "en"
+    fallback_notice = _bgm_fallback_notice(result, english=english)
     if result.get("status") == "downloaded":
         artist = result.get("artist") or ("unknown artist" if english else "未知艺术家")
         title = result.get("title") or ("unknown track" if english else "未知曲目")
         query = result.get("query") or ""
         if english:
             if continue_after_match:
-                return f"Smart BGM matched: {artist} - {title}. Search keywords: {query}. I will continue the edit flow."
-            return f"Smart BGM matched: {artist} - {title}. Search keywords: {query}. Added as a new audio asset for this session."
+                return f"{fallback_notice}Smart BGM matched: {artist} - {title}. Search keywords: {query}. I will continue the edit flow."
+            return f"{fallback_notice}Smart BGM matched: {artist} - {title}. Search keywords: {query}. Added as a new audio asset for this session."
         if continue_after_match:
-            return f"已智能匹配 BGM：{artist} - {title}。搜索关键词：{query}。我会继续后续剪辑流程。"
-        return f"已智能匹配 BGM：{artist} - {title}。搜索关键词：{query}。已添加为当前会话的新音频素材，后续剪辑时会一并上传。"
+            return f"{fallback_notice}已智能匹配 BGM：{artist} - {title}。搜索关键词：{query}。我会继续后续剪辑流程。"
+        return f"{fallback_notice}已智能匹配 BGM：{artist} - {title}。搜索关键词：{query}。已添加为当前会话的新音频素材，后续剪辑时会一并上传。"
     code = result.get("code") or "bgm_match_failed"
     queries = ", ".join(str(item) for item in result.get("queries") or [] if item)
     if english:
         suffix = f"Tried keywords: {queries}. " if queries else ""
         if continue_after_match:
-            return f"Smart BGM matching did not succeed ({code}), so it will not block the edit flow. {suffix}I will continue the edit flow."
-        return f"Smart BGM matching did not succeed ({code}). {suffix}No edit job was started; you can keep sending assets or send an edit instruction."
+            return f"{fallback_notice}Smart BGM matching did not succeed ({code}), so it will not block the edit flow. {suffix}I will continue the edit flow."
+        return f"{fallback_notice}Smart BGM matching did not succeed ({code}). {suffix}No edit job was started; you can keep sending assets or send an edit instruction."
     suffix = f"已尝试关键词：{queries}。" if queries else ""
     if continue_after_match:
-        return f"智能 BGM 匹配未成功（{code}），不会阻断剪辑流程。{suffix}我会继续后续剪辑流程。"
-    return f"智能 BGM 匹配未成功（{code}）。{suffix}不会执行额外剪辑操作；你可以继续发送素材或剪辑指令。"
+        return f"{fallback_notice}智能 BGM 匹配未成功（{code}），不会阻断剪辑流程。{suffix}我会继续后续剪辑流程。"
+    return f"{fallback_notice}智能 BGM 匹配未成功（{code}）。{suffix}不会执行额外剪辑操作；你可以继续发送素材或剪辑指令。"
 
 
 def _notify_smart_bgm_result(session_id: str, message: str) -> dict[str, Any]:
