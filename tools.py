@@ -151,55 +151,108 @@ def cassette_match_bgm(args: dict, **kwargs) -> str:
             raise CassetteError("invalid_bgm_search_query", "At least one valid Free To Use search query is required")
         continue_after_match = a.get("continue_after_match", True)
         continue_after_match = True if continue_after_match is None else bool(continue_after_match)
-        language = _cassette_language_for_session(session_id)
-        result = dict(_match_and_download_smart_bgm(session_id, instruction, search_queries))
+        optimization_enabled = bool(a.get("optimization_enabled"))
         fallback_from = str(a.get("fallback_from") or "").strip()
         fallback_reason = str(a.get("fallback_reason") or "").strip()
-        if fallback_from:
-            result["fallback_from"] = fallback_from
-            if fallback_reason:
-                result["fallback_reason"] = fallback_reason
-        effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
-        optimization_enabled = bool(a.get("optimization_enabled"))
-        if continue_after_match:
-            if optimization_enabled:
-                _save_pending_edit(
-                    session_id,
-                    effective_instruction,
-                    _gateway_asset_count(session_id),
-                    "awaiting_optimized_brief_confirmation",
-                    optimization_enabled=True,
-                )
-            else:
-                _clear_pending_edit(session_id)
-        user_message = _smart_bgm_status_message(result, continue_after_match=continue_after_match, language=language)
-        notification = _notify_smart_bgm_result(session_id, user_message)
-        data = {
-            "status": result.get("status") or "skipped",
-            "code": result.get("code") or "",
-            "search_queries": search_queries[:3],
-            "selected": {
-                "artist": result.get("artist") or "",
-                "title": result.get("title") or "",
-                "query": result.get("query") or "",
-                "source_rank": result.get("source_rank") or "",
-                "track_id": result.get("track_id") or "",
-            },
-            "asset_count": _gateway_asset_count(session_id),
-            "effective_instruction": effective_instruction,
-            "user_message": user_message,
-            "notification": notification,
-            "fallback": {
-                "from": fallback_from,
-                "reason": fallback_reason,
-            } if fallback_from else {},
-            "hermes_next_step": _bgm_next_step_guidance(
-                optimization_enabled,
-                continue_after_match=continue_after_match,
-                language=language,
-            ),
-        }
-        return ok(data)
+        session_hash = _debug_session_hash(session_id)
+        started = time.monotonic()
+        _log_cassette_debug_event(
+            "bgm_freetouse_search_started",
+            session_hash=session_hash,
+            search_queries=search_queries[:3],
+            continue_after_match=continue_after_match,
+            optimization_enabled=optimization_enabled,
+            fallback_from=fallback_from,
+            fallback_reason=fallback_reason,
+        )
+        language = _cassette_language_for_session(session_id)
+        try:
+            result = dict(_match_and_download_smart_bgm(session_id, instruction, search_queries))
+            if fallback_from:
+                result["fallback_from"] = fallback_from
+                if fallback_reason:
+                    result["fallback_reason"] = fallback_reason
+            effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
+            if continue_after_match:
+                if optimization_enabled:
+                    _save_pending_edit(
+                        session_id,
+                        effective_instruction,
+                        _gateway_asset_count(session_id),
+                        "awaiting_optimized_brief_confirmation",
+                        optimization_enabled=True,
+                    )
+                else:
+                    _clear_pending_edit(session_id)
+            user_message = _smart_bgm_status_message(result, continue_after_match=continue_after_match, language=language)
+            notification = _notify_smart_bgm_result(session_id, user_message)
+            data = {
+                "status": result.get("status") or "skipped",
+                "code": result.get("code") or "",
+                "search_queries": search_queries[:3],
+                "selected": {
+                    "artist": result.get("artist") or "",
+                    "title": result.get("title") or "",
+                    "query": result.get("query") or "",
+                    "source_rank": result.get("source_rank") or "",
+                    "track_id": result.get("track_id") or "",
+                },
+                "asset_count": _gateway_asset_count(session_id),
+                "effective_instruction": effective_instruction,
+                "user_message": user_message,
+                "notification": notification,
+                "fallback": {
+                    "from": fallback_from,
+                    "reason": fallback_reason,
+                } if fallback_from else {},
+                "hermes_next_step": _bgm_next_step_guidance(
+                    optimization_enabled,
+                    continue_after_match=continue_after_match,
+                    language=language,
+                ),
+            }
+            _log_cassette_debug_event(
+                "bgm_freetouse_search_done",
+                session_hash=session_hash,
+                status=data["status"],
+                code=data["code"],
+                search_queries=search_queries[:3],
+                attempted_queries=result.get("queries") or search_queries[:3],
+                zero_result_queries=result.get("zero_result_queries") or [],
+                selected=data["selected"],
+                notification_status=notification.get("status") if isinstance(notification, dict) else "",
+                fallback_from=fallback_from,
+                fallback_reason=fallback_reason,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            return ok(data)
+        except CassetteError as exc:
+            _log_cassette_debug_event(
+                "bgm_freetouse_search_failed",
+                session_hash=session_hash,
+                code=exc.code,
+                message=str(exc),
+                recoverable=exc.recoverable,
+                details=exc.details,
+                search_queries=search_queries[:3],
+                fallback_from=fallback_from,
+                fallback_reason=fallback_reason,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            raise
+        except Exception as exc:
+            _log_cassette_debug_event(
+                "bgm_freetouse_search_failed",
+                session_hash=session_hash,
+                code="internal_error",
+                error_type=type(exc).__name__,
+                message=str(exc),
+                search_queries=search_queries[:3],
+                fallback_from=fallback_from,
+                fallback_reason=fallback_reason,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            raise
 
     return _safe_call("cassette_match_bgm", run, args, **kwargs)
 
@@ -220,55 +273,110 @@ def cassette_match_exact_bgm(args: dict, **kwargs) -> str:
         continue_after_match = a.get("continue_after_match", True)
         continue_after_match = True if continue_after_match is None else bool(continue_after_match)
         download = bool(a.get("download", True))
-        language = _cassette_language_for_session(session_id)
-        result = exact_bgm.match_exact_bgm(
-            session_id=session_id,
-            instruction=instruction,
+        optimization_enabled = bool(a.get("optimization_enabled"))
+        session_hash = _debug_session_hash(session_id)
+        started = time.monotonic()
+        _log_cassette_debug_event(
+            "bgm_exact_search_started",
+            session_hash=session_hash,
             title=title,
             artist=artist,
             download=download,
+            continue_after_match=continue_after_match,
+            optimization_enabled=optimization_enabled,
         )
-        effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
-        optimization_enabled = bool(a.get("optimization_enabled"))
-        if continue_after_match and download and result.get("status") == "downloaded":
-            if optimization_enabled:
-                _save_pending_edit(
-                    session_id,
-                    effective_instruction,
-                    _gateway_asset_count(session_id),
-                    "awaiting_optimized_brief_confirmation",
-                    optimization_enabled=True,
-                )
-            else:
-                _clear_pending_edit(session_id)
-        user_message = _smart_bgm_status_message(result, continue_after_match=continue_after_match, language=language)
-        notification = _notify_smart_bgm_result(session_id, user_message) if download else {"status": "skipped", "reason": "download_false"}
-        data = {
-            "status": result.get("status") or "matched",
-            "provider": result.get("provider") or "musicsquare_exact",
-            "selected": {
-                "artist": result.get("artist") or "",
-                "title": result.get("title") or "",
-                "query": result.get("query") or "",
-                "source": result.get("source") or "",
-                "track_id": result.get("track_id") or "",
-            },
-            "asset_count": _gateway_asset_count(session_id),
-            "effective_instruction": effective_instruction,
-            "user_message": user_message,
-            "notification": notification,
-            "metadata_path": result.get("metadata_path") or "",
-            "attempts": result.get("attempts") or [],
-            "hermes_next_step": _bgm_next_step_guidance(
-                optimization_enabled,
-                continue_after_match=continue_after_match,
-                language=language,
-            ),
-        }
-        if not download:
-            data["eligibleCandidates"] = result.get("eligibleCandidates") or []
-            data["candidateCount"] = result.get("candidateCount") or 0
-        return ok(data)
+        language = _cassette_language_for_session(session_id)
+        try:
+            result = exact_bgm.match_exact_bgm(
+                session_id=session_id,
+                instruction=instruction,
+                title=title,
+                artist=artist,
+                download=download,
+            )
+            effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
+            if continue_after_match and download and result.get("status") == "downloaded":
+                if optimization_enabled:
+                    _save_pending_edit(
+                        session_id,
+                        effective_instruction,
+                        _gateway_asset_count(session_id),
+                        "awaiting_optimized_brief_confirmation",
+                        optimization_enabled=True,
+                    )
+                else:
+                    _clear_pending_edit(session_id)
+            user_message = _smart_bgm_status_message(result, continue_after_match=continue_after_match, language=language)
+            notification = _notify_smart_bgm_result(session_id, user_message) if download else {"status": "skipped", "reason": "download_false"}
+            data = {
+                "status": result.get("status") or "matched",
+                "provider": result.get("provider") or "musicsquare_exact",
+                "selected": {
+                    "artist": result.get("artist") or "",
+                    "title": result.get("title") or "",
+                    "query": result.get("query") or "",
+                    "source": result.get("source") or "",
+                    "track_id": result.get("track_id") or "",
+                },
+                "asset_count": _gateway_asset_count(session_id),
+                "effective_instruction": effective_instruction,
+                "user_message": user_message,
+                "notification": notification,
+                "metadata_path": result.get("metadata_path") or "",
+                "attempts": result.get("attempts") or [],
+                "hermes_next_step": _bgm_next_step_guidance(
+                    optimization_enabled,
+                    continue_after_match=continue_after_match,
+                    language=language,
+                ),
+            }
+            if not download:
+                data["eligibleCandidates"] = result.get("eligibleCandidates") or []
+                data["candidateCount"] = result.get("candidateCount") or 0
+            _log_cassette_debug_event(
+                "bgm_exact_search_done",
+                session_hash=session_hash,
+                status=data["status"],
+                provider=data["provider"],
+                title=title,
+                artist=artist,
+                selected=data["selected"],
+                candidate_count=result.get("candidateCount") or 0,
+                attempts=_summarize_exact_bgm_attempts(result.get("attempts") or []),
+                notification_status=notification.get("status") if isinstance(notification, dict) else "",
+                metadata_saved=bool(result.get("metadata_path")),
+                download=download,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            return ok(data)
+        except CassetteError as exc:
+            _log_cassette_debug_event(
+                "bgm_exact_search_failed",
+                session_hash=session_hash,
+                code=exc.code,
+                message=str(exc),
+                recoverable=exc.recoverable,
+                title=title,
+                artist=artist,
+                attempts=_summarize_exact_bgm_attempts(exc.details.get("attempts") or []),
+                details=exc.details,
+                download=download,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            raise
+        except Exception as exc:
+            _log_cassette_debug_event(
+                "bgm_exact_search_failed",
+                session_hash=session_hash,
+                code="internal_error",
+                error_type=type(exc).__name__,
+                message=str(exc),
+                title=title,
+                artist=artist,
+                download=download,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            raise
 
     return _safe_call("cassette_match_exact_bgm", run, args, **kwargs)
 
@@ -3130,7 +3238,10 @@ def _match_and_download_smart_bgm(session_id: str, instruction: str, search_quer
             if not tracks:
                 zero_result_queries.append(query)
                 continue
-            return _download_freetouse_track(session_id, random.choice(tracks), query)
+            result = _download_freetouse_track(session_id, random.choice(tracks), query)
+            result["queries"] = list(attempted)
+            result["zero_result_queries"] = list(zero_result_queries)
+            return result
         return {
             "status": "skipped",
             "code": "bgm_no_search_results",
@@ -4010,6 +4121,69 @@ def _completion_review_jobs(recent: list[dict]) -> list[dict[str, str]]:
             })
             break
     return result[:3]
+
+
+def _debug_session_hash(session_id: str) -> str:
+    try:
+        return manifest.resolve_session_hash(session_id=session_id)
+    except Exception:
+        return safe_hash_id(session_id)
+
+
+def _summarize_exact_bgm_attempts(attempts: Any) -> list[dict[str, Any]]:
+    if not isinstance(attempts, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for attempt in attempts[:6]:
+        if not isinstance(attempt, dict):
+            continue
+        result.append({
+            "mode": attempt.get("mode") or "",
+            "query": attempt.get("query") or "",
+            "candidate_count": attempt.get("candidate_count") or 0,
+            "eligible_count": attempt.get("eligible_count") or 0,
+            "downloadable_count": attempt.get("downloadable_count") if "downloadable_count" in attempt else "",
+            "strict_title": bool(attempt.get("strict_title")),
+        })
+    return result
+
+
+def _clean_cassette_debug_value(value: Any, *, key: str = "") -> Any:
+    lowered_key = key.lower()
+    if any(part in lowered_key for part in ("token", "secret", "password", "credential", "api_key")):
+        return "<redacted>"
+    if lowered_key in {"file_path", "local_path", "saved_path", "source_path", "manifest_path", "metadata_path"}:
+        return "<redacted_path>"
+    if isinstance(value, str):
+        return redact_for_log(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {
+            str(item_key): _clean_cassette_debug_value(item_value, key=str(item_key))
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_clean_cassette_debug_value(item) for item in list(value)[:20]]
+    return redact_for_log(str(value))
+
+
+def _log_cassette_debug_event(event: str, **fields: Any) -> None:
+    try:
+        log_dir = manifest.get_asset_root() / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "ts": jobs.now_iso(),
+            "event": event,
+        }
+        payload.update({
+            key: _clean_cassette_debug_value(value, key=key)
+            for key, value in fields.items()
+        })
+        with (log_dir / "cassette.log").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+    except Exception:
+        return None
 
 
 def log_cassette_tool_call(**kwargs) -> None:

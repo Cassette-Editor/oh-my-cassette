@@ -176,11 +176,40 @@ def _execute_tool(session_id: str, name: str, arguments: str) -> str:
     started = time.monotonic()
     result = handler(args)
     ok = False
+    payload = {}
     try:
-        ok = bool(json.loads(result or "{}").get("ok"))
+        parsed = json.loads(result or "{}")
+        if isinstance(parsed, dict):
+            payload = parsed
+        ok = bool(payload.get("ok"))
     except Exception:
         ok = False
-    logging_utils.log_event("deepseek_tool_executed", session_id=session_id, tool=name, ok=ok, duration_ms=int((time.monotonic() - started) * 1000))
+    log_fields: dict[str, object] = {
+        "session_id": session_id,
+        "tool": name,
+        "ok": ok,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+    }
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if isinstance(data, dict):
+        if data.get("status"):
+            log_fields["status"] = data.get("status")
+        if data.get("code"):
+            log_fields["code"] = data.get("code")
+        fallback = data.get("fallback")
+        if isinstance(fallback, dict):
+            if fallback.get("from"):
+                log_fields["fallback_from"] = fallback.get("from")
+            if fallback.get("reason"):
+                log_fields["fallback_reason"] = fallback.get("reason")
+    error = payload.get("error") if isinstance(payload, dict) else {}
+    if isinstance(error, dict):
+        if error.get("code"):
+            log_fields["error_code"] = error.get("code")
+        details = error.get("details")
+        if isinstance(details, dict) and details.get("type"):
+            log_fields["error_type"] = details.get("type")
+    logging_utils.log_event("deepseek_tool_executed", **log_fields)
     return result
 
 

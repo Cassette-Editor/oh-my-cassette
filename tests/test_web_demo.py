@@ -76,6 +76,29 @@ def test_deepseek_tool_arguments_are_forced_to_current_web_session(cassette_env)
     assert len(manifest_data["assets"]) == 1
 
 
+def test_deepseek_tool_execution_logs_error_code(cassette_env, monkeypatch):
+    del cassette_env
+    captured = []
+    monkeypatch.setattr(
+        deepseek_client.logging_utils,
+        "log_event",
+        lambda event, **fields: captured.append((event, fields)),
+    )
+
+    payload = json.loads(deepseek_client._execute_tool(
+        "web_bgm_log",
+        "cassette_match_exact_bgm",
+        json.dumps({"instruction": "剪一个美食视频"}),
+    ))
+
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "missing_required_arg"
+    assert captured[-1][0] == "deepseek_tool_executed"
+    assert captured[-1][1]["tool"] == "cassette_match_exact_bgm"
+    assert captured[-1][1]["ok"] is False
+    assert captured[-1][1]["error_code"] == "missing_required_arg"
+
+
 def test_deepseek_mock_tool_loop_starts_web_job(cassette_env, monkeypatch):
     session_store.reset_all()
     session_id = "web_deepseek_loop"
