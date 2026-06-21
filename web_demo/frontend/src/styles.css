@@ -442,6 +442,33 @@ a:hover {
   background: var(--coral-glow);
 }
 
+.upload-progress {
+  width: min(360px, 78%);
+}
+.upload-progress-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--ink-secondary);
+}
+.upload-progress-bar {
+  margin-top: 10px;
+  height: 7px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: rgba(255, 255, 255, 0.09);
+}
+.upload-progress-bar span {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--peach), var(--coral));
+  transition: width var(--dur) var(--ease);
+}
+
 .attachment {
   display: block;
   margin-top: 10px;

@@ -700,7 +700,17 @@ def cassette_run_job(args: dict, **kwargs) -> str:
             prompt_text = chat_message
         if not prompt_text:
             raise CassetteError("missing_required_arg", "prompt is required")
+        raw_session_id = str(a.get("session_id") or kw.get("task_id") or "").strip()
         session_hash, asset_paths, delivery = _asset_paths_for_session(a.get("session_id"), a.get("chat_id"), kw.get("task_id"))
+        if raw_session_id:
+            active_job = _latest_active_job_for_session(raw_session_id)
+            if active_job:
+                raise CassetteError(
+                    "cassette_job_already_running",
+                    _fixed_flow_busy_message(_cassette_language_for_run(a, delivery)),
+                    {"job_id": active_job.get("job_id") or "", "status": active_job.get("status") or ""},
+                    True,
+                )
         job = jobs.create_job(
             session_hash=session_hash,
             prompt=prompt_text,
@@ -1534,6 +1544,22 @@ def _fixed_cut_requested_message(active: bool, language: str = "zh") -> str:
     return "Cassette 当前没有正在运行的剪辑任务，已保持浏览器状态暂停。你可以发送重试或下一步剪辑指令继续。"
 
 
+def _fixed_flow_busy_message(language: str = "zh") -> str:
+    if _normalize_cassette_language(language) == "en":
+        return "Use /cut to stop the current flow or edit job before starting a new edit task."
+    return "请使用/cut命令终止当前流程或剪辑任务后再尝试开始新的剪辑任务"
+
+
+def _reject_busy_flow(session_id: str, gateway: Any, event: Any, language: str = "zh", reason: str = "cassette_flow_busy") -> dict:
+    reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_flow_busy_message(language))
+    return {
+        "action": "skip",
+        "reason": reason,
+        "session_id": session_id,
+        "reply_sent": reply_sent,
+    }
+
+
 _ACTIVE_JOB_STATUSES = {"queued", "running", "cancel_requested"}
 
 
@@ -1644,8 +1670,21 @@ def _latest_active_job(limit: int = 50) -> dict | None:
 
 
 def _handle_gateway_cut_command(session_id: str, gateway: Any, event: Any, language: str = "zh") -> dict:
+    pending_edit = _load_pending_edit(session_id)
     active_job = _latest_active_job_for_session(session_id, getattr(event, "source", None))
+    if pending_edit and not active_job:
+        _clear_pending_edit(session_id)
+        reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_cut_requested_message(True, language))
+        return {
+            "action": "skip",
+            "reason": "cassette_cut_requested",
+            "session_id": session_id,
+            "pending_state": str(pending_edit.get("state") or ""),
+            "reply_sent": reply_sent,
+        }
     if active_job:
+        if pending_edit:
+            _clear_pending_edit(session_id)
         job_id = str(active_job.get("job_id") or "")
         if job_id:
             try:
@@ -1720,7 +1759,7 @@ def _fixed_asset_status_message(session_id: str, language: str = "zh") -> str:
         message = f"This Cassette session has saved {len(assets)} asset(s) ({summary})."
         if detail:
             message += f" Saved: {detail}."
-        message += " If you expected more, resend the missing media or wait for gateway attachment downloads to finish before checking again."
+        message += " If you expected more, resend the missing media or wait for the upload to finish before checking again."
         return message
     type_parts = []
     for key, label in (("video", "视频"), ("image", "图片"), ("audio", "音频"), ("file", "文件"), ("unknown", "未知")):
@@ -1734,7 +1773,7 @@ def _fixed_asset_status_message(session_id: str, language: str = "zh") -> str:
     message = f"当前 Cassette 会话已保存素材 {len(assets)} 个（{summary}）。"
     if detail:
         message += f" 已保存：{detail}。"
-    message += " 如果你预期数量更多，请重新发送缺失素材，或稍等 QQ 附件下载完成后再检查。"
+    message += " 如果你预期数量更多，请重新发送缺失素材，或稍等上传完成再检查。"
     return message
 
 
@@ -2048,19 +2087,7 @@ def _handle_pending_cassette_model_choice(
         models = list(pending_edit.get("model_options") or [])
         choice = _numbered_choice(user_text, len(models))
         if choice is None:
-            options = {
-                "models": models,
-                "thinking_levels": list(pending_edit.get("thinking_options") or []),
-                "source": pending_edit.get("model_options_source") or "",
-            }
-            reply_sent = _send_gateway_fixed_reply(gateway, event, _cassette_model_choice_message(options, language))
-            return {
-                "action": "skip",
-                "reason": "cassette_model_choice_reasked",
-                "asset_count": int(pending_edit.get("asset_count") or 0),
-                "session_id": session_id,
-                "reply_sent": reply_sent,
-            }
+            return _reject_busy_flow(session_id, gateway, event, language, "cassette_model_choice_busy_rejected")
         selected_model = str((models[choice - 1] or {}).get("label") or "").strip()
         _save_pending_edit(
             session_id,
@@ -2098,18 +2125,7 @@ def _handle_pending_cassette_model_choice(
     choice = _numbered_choice(user_text, len(thinking_options))
     selected_model = str(pending_edit.get("selected_model") or "").strip()
     if choice is None:
-        reply_sent = _send_gateway_fixed_reply(
-            gateway,
-            event,
-            _cassette_thinking_choice_message(selected_model, {"thinking_levels": thinking_options}, language),
-        )
-        return {
-            "action": "skip",
-            "reason": "cassette_model_thinking_choice_reasked",
-            "asset_count": int(pending_edit.get("asset_count") or 0),
-            "session_id": session_id,
-            "reply_sent": reply_sent,
-        }
+        return _reject_busy_flow(session_id, gateway, event, language, "cassette_model_thinking_choice_busy_rejected")
     selected_thinking = str((thinking_options[choice - 1] or {}).get("value") or (thinking_options[choice - 1] or {}).get("label") or "").strip()
     selected_thinking = _normalize_thinking_level(selected_thinking)
     resume_after_model = str(pending_edit.get("resume_after_model") or "edit")
@@ -3536,22 +3552,18 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                 "session_id": session_id,
                 "reply_sent": reply_sent,
             }
+        if _latest_active_job_for_session(session_id, source):
+            return _reject_busy_flow(session_id, gateway, event, cassette_language, "cassette_active_job_busy_rejected")
         pending_edit = _load_pending_edit(session_id)
         if pending_edit and str(pending_edit.get("state") or "") in {"awaiting_model_choice", "awaiting_model_thinking_choice"}:
-            pending_state = str(pending_edit.get("state") or "")
-            choice_count = len(pending_edit.get("model_options") or []) if pending_state == "awaiting_model_choice" else len(pending_edit.get("thinking_options") or [])
-            if pending_edit.get("semantic_gate") and _numbered_choice(user_text, choice_count) is None:
-                _clear_pending_edit(session_id)
-                pending_edit = None
-            else:
-                return _handle_pending_cassette_model_choice(
-                    session_id,
-                    pending_edit,
-                    user_text,
-                    gateway,
-                    event,
-                    language=cassette_language,
-                )
+            return _handle_pending_cassette_model_choice(
+                session_id,
+                pending_edit,
+                user_text,
+                gateway,
+                event,
+                language=cassette_language,
+            )
         if forced_music is not None:
             if not forced_music:
                 reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_music_command_missing_instruction_message(cassette_language))
@@ -3699,23 +3711,7 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                     optimization_enabled=True,
                     language=cassette_language,
                 )
-            reply_sent = _send_gateway_fixed_reply(gateway, event, _prompt_optimization_choice_message(cassette_language))
-            if reply_sent:
-                return {
-                    "action": "skip",
-                    "reason": "cassette_prompt_optimization_choice_reasked",
-                    "asset_count": asset_count,
-                    "session_id": session_id,
-                    "reply_sent": True,
-                }
-            text = (
-                f"{pending_instruction}\n\n"
-                f"[Cassette prompt optimization choice is still required. Cassette gateway assets available: {asset_count} asset(s). "
-                f"Use cassette session_id `{session_id}`. "
-                f"{_prompt_optimization_choice_guard(cassette_language)} "
-                f"{_cassette_orchestration_guard()}]"
-            )
-            return {"action": "rewrite", "text": text}
+            return _reject_busy_flow(session_id, gateway, event, cassette_language, "cassette_prompt_optimization_choice_busy_rejected")
         if pending_edit and pending_edit.get("state") == "awaiting_bgm_choice":
             pending_instruction = str(pending_edit.get("instruction") or "").strip()
             optimization_enabled = bool(pending_edit.get("optimization_enabled"))
@@ -3743,22 +3739,7 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                 )
                 bgm_result = {"status": "skipped", "code": "bgm_declined_by_user"}
             else:
-                reply_sent = _send_gateway_fixed_reply(gateway, event, _smart_bgm_choice_message(cassette_language))
-                if reply_sent:
-                    return {
-                        "action": "skip",
-                        "reason": "cassette_smart_bgm_choice_reasked",
-                        "asset_count": asset_count,
-                        "session_id": session_id,
-                        "reply_sent": True,
-                    }
-                text = (
-                    f"{pending_instruction}\n\n"
-                    f"[Cassette smart BGM choice is still required. Cassette gateway assets available: {asset_count} asset(s). "
-                    f"Use cassette session_id `{session_id}`. Ask exactly this question in {_language_name_for_prompt(cassette_language)}: {_smart_bgm_choice_message(cassette_language)} "
-                    f"{_cassette_orchestration_guard()}]"
-                )
-                return {"action": "rewrite", "text": text}
+                return _reject_busy_flow(session_id, gateway, event, cassette_language, "cassette_smart_bgm_choice_busy_rejected")
             if optimization_enabled:
                 return _rewrite_accepted_prompt_optimization(session_id, pending_instruction, asset_count, bgm_result, language=cassette_language)
             return _rewrite_direct_original_instruction(session_id, pending_instruction, asset_count, bgm_result, language=cassette_language)
@@ -3838,6 +3819,22 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                 if connectivity:
                     return connectivity
                 return _rewrite_direct_original_instruction(session_id, pending_instruction, asset_count, language=cassette_language)
+            if _looks_like_prompt_confirmation(user_text):
+                connectivity = _cassette_connectivity_skip(gateway, event, cassette_language)
+                if connectivity:
+                    return connectivity
+                _clear_pending_edit(session_id)
+                text = (
+                    f"{user_text}\n\n"
+                    f"[Cassette optimized prompt confirmed. Cassette gateway assets available: {asset_count} asset(s). "
+                    f"Use cassette session_id `{session_id}` for this confirmed edit. "
+                    f"{_confirmed_prompt_guard(cassette_language)} "
+                    "Call cassette_run_job with wait=false for this gateway job so /cut can pause the active Cassette browser operation. "
+                    f"{_cassette_orchestration_guard()} "
+                    "Do not emit MEDIA tags or guess local export paths; cassette_run_job notification handles the stored gateway delivery target and reports any delivery failure.]"
+                )
+                return {"action": "rewrite", "text": text}
+            return _reject_busy_flow(session_id, gateway, event, cassette_language, "cassette_optimized_brief_confirmation_busy_rejected")
         if _looks_like_prompt_confirmation(user_text):
             connectivity = _cassette_connectivity_skip(gateway, event, cassette_language)
             if connectivity:
@@ -3908,6 +3905,8 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             "reply_sent": reply_sent,
             **({"warnings": sorted(set(failures))} if failures else {}),
         }
+    if user_text and _latest_active_job_for_session(session_id, source):
+        return _reject_busy_flow(session_id, gateway, event, cassette_language, "cassette_active_job_busy_rejected")
     if forced_music is not None:
         total_count = _gateway_asset_count(session_id)
         if not forced_music:

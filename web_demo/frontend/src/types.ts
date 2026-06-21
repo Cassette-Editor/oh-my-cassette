@@ -9,6 +9,7 @@ export interface ChatEvent {
   role: Role;
   text: string;
   kind?: string;
+  client_event_id?: string;
   has_attachment?: boolean;
   attachment_url?: string;
   attachment_type?: string;
@@ -22,7 +23,21 @@ export interface LocalError {
   retry?: () => void;
 }
 
-export type Message = ChatEvent | LocalError;
+export interface LocalMessage {
+  id: string;
+  role: Role;
+  text: string;
+  kind?: string;
+  client_event_id?: string;
+}
+
+export type Message = ChatEvent | LocalError | LocalMessage;
+
+export interface UploadProgress {
+  id: string;
+  label: string;
+  percent: number;
+}
 
 export function isLocalError(message: Message): message is LocalError {
   return typeof message.id === "string";

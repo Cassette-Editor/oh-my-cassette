@@ -137,14 +137,20 @@ def _make_event(session_id: str, *, text: str = "", media_paths: list[str] | Non
 _LLM_BRIDGED_SKIP_REASONS = {
     "cassette_model_choice_requested",
     "cassette_model_choice_reasked",
+    "cassette_model_choice_busy_rejected",
     "cassette_model_thinking_choice_requested",
     "cassette_model_thinking_choice_reasked",
+    "cassette_model_thinking_choice_busy_rejected",
     "cassette_model_set",
     "cassette_prompt_optimization_choice_requested",
     "cassette_prompt_optimization_choice_reasked",
+    "cassette_prompt_optimization_choice_busy_rejected",
     "cassette_smart_bgm_choice_requested",
     "cassette_smart_bgm_choice_reasked",
+    "cassette_smart_bgm_choice_busy_rejected",
     "cassette_exact_bgm_selection_reasked",
+    "cassette_optimized_brief_confirmation_busy_rejected",
+    "cassette_active_job_busy_rejected",
 }
 
 
@@ -349,8 +355,30 @@ def _message_preview(text: str) -> str:
 def _processing_message(session_id: str) -> str:
     return _localized(
         session_id,
-        "已收到剪辑指令，正在调用 DeepSeek 编排 Cassette 流程。请稍等，结果会自动显示在这里。",
-        "Got the edit instruction. Calling DeepSeek to orchestrate the Cassette flow; results will appear here automatically.",
+        "正在提交任务",
+        "Submitting the task.",
+    )
+
+
+def _busy_reject_message(session_id: str) -> str:
+    return _localized(
+        session_id,
+        "请使用/cut命令终止当前流程或剪辑任务后再尝试开始新的剪辑任务",
+        "Use /cut to stop the current flow or edit job before starting a new edit task.",
+    )
+
+
+def _web_cut_message(session_id: str, active: bool) -> str:
+    if active:
+        return _localized(
+            session_id,
+            "已请求停止当前 Cassette 流程或剪辑任务。",
+            "Requested a stop for the current Cassette flow or edit job.",
+        )
+    return _localized(
+        session_id,
+        "Cassette 当前没有正在运行的流程或剪辑任务。",
+        "Cassette has no active flow or edit job right now.",
     )
 
 
@@ -365,10 +393,16 @@ def _add_web_event(session_id: str, *, role: str, text: str, kind: str = "messag
         logging_utils.log_event("web_event_write_failed", session_id=session_id, kind=kind, error_type=type(exc).__name__)
 
 
-def _run_llm_background(session_id: str, prompt_text: str, api_key_override: str) -> None:
+def _run_llm_background(session_id: str, prompt_text: str, api_key_override: str, flow_token: str) -> None:
     logging_utils.log_event("llm_background_start", session_id=session_id, prompt_len=len(prompt_text or ""), has_api_key_override=bool(api_key_override))
     try:
-        result = deepseek_client.run_turn(session_id, prompt_text, api_key_override=api_key_override)
+        if session_store.is_flow_cancelled(session_id, flow_token):
+            logging_utils.log_event("llm_background_cancelled", session_id=session_id, phase="before_start")
+            return
+        result = deepseek_client.run_turn(session_id, prompt_text, api_key_override=api_key_override, flow_token=flow_token)
+        if session_store.is_flow_cancelled(session_id, flow_token):
+            logging_utils.log_event("llm_background_cancelled", session_id=session_id, phase="after_run")
+            return
         logging_utils.log_event(
             "llm_background_done",
             session_id=session_id,
@@ -376,20 +410,24 @@ def _run_llm_background(session_id: str, prompt_text: str, api_key_override: str
             content_len=len(str(result.get("content") or "")),
         )
     except deepseek_client.DeepSeekError as exc:
-        _add_web_event(session_id, role="assistant", text=_llm_error_message(session_id, str(exc)), kind="error")
+        if not session_store.is_flow_cancelled(session_id, flow_token):
+            _add_web_event(session_id, role="assistant", text=_llm_error_message(session_id, str(exc)), kind="error")
         logging_utils.log_event("llm_background_error", session_id=session_id, error_type=type(exc).__name__, error=str(exc))
     except Exception as exc:
-        _add_web_event(
-            session_id,
-            role="assistant",
-            text=_localized(session_id, f"Web demo 后台处理失败：{type(exc).__name__}", f"Web demo background processing failed: {type(exc).__name__}"),
-            kind="error",
-        )
+        if not session_store.is_flow_cancelled(session_id, flow_token):
+            _add_web_event(
+                session_id,
+                role="assistant",
+                text=_localized(session_id, f"Web demo 后台处理失败：{type(exc).__name__}", f"Web demo background processing failed: {type(exc).__name__}"),
+                kind="error",
+            )
         logging_utils.log_event("llm_background_exception", session_id=session_id, error_type=type(exc).__name__)
+    finally:
+        session_store.end_flow(session_id, flow_token)
 
 
-def _submit_llm_background(session_id: str, prompt_text: str, api_key_override: str) -> None:
-    _LLM_EXECUTOR.submit(_run_llm_background, session_id, prompt_text, api_key_override)
+def _submit_llm_background(session_id: str, prompt_text: str, api_key_override: str, flow_token: str) -> None:
+    _LLM_EXECUTOR.submit(_run_llm_background, session_id, prompt_text, api_key_override, flow_token)
 
 
 def _normalize_web_platform(value: Any) -> str:
@@ -450,6 +488,61 @@ def _web_job_is_owned(job: dict, session_id: str, session_hash: str) -> bool:
     if not _is_web_platform(delivery.get("platform")):
         return False
     return str(job.get("cassette_session_id") or "") == session_id or str(job.get("session_hash") or "") == session_hash
+
+
+def _active_web_job_for_session(session_id: str) -> dict | None:
+    session_hash = _session_hash(session_id)
+    for path in sorted(jobs.get_jobs_dir().glob("cassette_*.json"), reverse=True):
+        try:
+            job = jobs.load_job(path.stem)
+        except Exception:
+            continue
+        if not _web_job_is_owned(job, session_id, session_hash):
+            continue
+        if str(job.get("status") or "") in _ACTIVE_JOB_STATUSES:
+            return job
+    return None
+
+
+def _is_cut_command(text: str) -> bool:
+    try:
+        return tools._forced_cut_instruction(text) is not None
+    except Exception:
+        return str(text or "").strip().lower() in {"/cut", "／cut"}
+
+
+def _handle_web_cut(session_id: str) -> dict[str, Any]:
+    flow_cancelled = session_store.cancel_flow(session_id)
+    pending_cancelled = bool(tools._load_pending_edit(session_id))
+    if pending_cancelled:
+        tools._clear_pending_edit(session_id)
+    active_job = _active_web_job_for_session(session_id)
+    job_id = ""
+    if active_job:
+        job_id = str(active_job.get("job_id") or "")
+        if job_id:
+            try:
+                jobs.request_cancel(job_id)
+            except Exception:
+                pass
+    active = bool(flow_cancelled or pending_cancelled or active_job)
+    session_store.add_event(session_id, role="assistant", text=_web_cut_message(session_id, active), kind="message", job_id=job_id)
+    logging_utils.log_event(
+        "web_cut_requested",
+        session_id=session_id,
+        flow_cancelled=flow_cancelled,
+        pending_cancelled=pending_cancelled,
+        job_id=job_id,
+        active=active,
+    )
+    return {
+        "action": "skip",
+        "reason": "web_cut_requested" if active else "web_cut_no_active_flow",
+        "session_id": session_id,
+        "flow_cancelled": flow_cancelled,
+        "pending_cancelled": pending_cancelled,
+        "job_id": job_id,
+    }
 
 
 def _parse_job_time(value: Any) -> datetime | None:
@@ -703,6 +796,7 @@ def get_event_attachment(event_id: int, session_id: str = Query(...)) -> FileRes
 def upload_media(
     session_id: str = Form(...),
     files: list[UploadFile] = File(...),
+    client_event_id: str = Form(default=""),
 ) -> dict[str, Any]:
     session_id = _require_session(session_id)
     logging_utils.log_event("web_upload_start", session_id=session_id, file_count=len(files or []))
@@ -738,6 +832,7 @@ def upload_media(
             text=_localized(session_id, f"上传素材：{filename}", f"Uploaded asset: {filename}"),
             attachment_path=str(target),
             attachment_type=tools._mime_to_media_type(media_types[-1], str(target)),
+            extra={"client_event_id": client_event_id} if client_event_id else None,
         )
     result = tools.ingest_gateway_media(
         event=_make_event(session_id, media_paths=saved_paths, media_types=media_types),
@@ -760,7 +855,52 @@ def send_message(
     if payload.get("language"):
         _set_web_language(session_id, str(payload.get("language") or ""))
     logging_utils.log_event("web_message_received", session_id=session_id, text_len=len(text), text_preview=_message_preview(text))
-    user_event = session_store.add_event(session_id, role="user", text=text, kind="message")
+    client_event_id = str(payload.get("client_event_id") or "").strip()
+    user_event = session_store.add_event(
+        session_id,
+        role="user",
+        text=text,
+        kind="message",
+        extra={"client_event_id": client_event_id} if client_event_id else None,
+    )
+    if _is_cut_command(text):
+        result = _handle_web_cut(session_id)
+        logging_utils.log_event(
+            "web_message_gateway_result",
+            session_id=session_id,
+            action=result.get("action"),
+            reason=result.get("reason"),
+        )
+        return {"ok": True, "action": "skip", "result": result}
+    if session_store.is_flow_active(session_id):
+        session_store.add_event(session_id, role="assistant", text=_busy_reject_message(session_id), kind="message")
+        logging_utils.log_event("web_message_rejected_busy", session_id=session_id)
+        return {
+            "ok": True,
+            "action": "skip",
+            "result": {"action": "skip", "reason": "web_session_flow_busy", "session_id": session_id},
+        }
+    _reconcile_stale_web_jobs_for_session(session_id)
+    active_job = _active_web_job_for_session(session_id)
+    if active_job:
+        session_store.add_event(
+            session_id,
+            role="assistant",
+            text=_busy_reject_message(session_id),
+            kind="message",
+            job_id=str(active_job.get("job_id") or ""),
+        )
+        logging_utils.log_event("web_message_rejected_busy", session_id=session_id, phase="active_job", job_id=active_job.get("job_id"))
+        return {
+            "ok": True,
+            "action": "skip",
+            "result": {
+                "action": "skip",
+                "reason": "web_session_flow_busy",
+                "session_id": session_id,
+                "job_id": str(active_job.get("job_id") or ""),
+            },
+        }
     result = tools.ingest_gateway_media(event=_make_event(session_id, text=text), gateway=_web_gateway())
     logging_utils.log_event(
         "web_message_gateway_result",
@@ -783,8 +923,17 @@ def send_message(
         return {"ok": True, "action": "skip", "result": result}
     if result.get("action") == "rewrite":
         api_key = _api_key_override(x_deepseek_api_key)
+        flow_token = session_store.begin_flow(session_id, "llm")
+        if flow_token is None:
+            session_store.add_event(session_id, role="assistant", text=_busy_reject_message(session_id), kind="message")
+            logging_utils.log_event("web_message_rejected_busy", session_id=session_id, phase="after_gateway_rewrite")
+            return {
+                "ok": True,
+                "action": "skip",
+                "result": {"action": "skip", "reason": "web_session_flow_busy", "session_id": session_id},
+            }
         session_store.add_event(session_id, role="assistant", text=_processing_message(session_id), kind="status")
-        _submit_llm_background(session_id, str(result.get("text") or text), api_key)
+        _submit_llm_background(session_id, str(result.get("text") or text), api_key, flow_token)
         logging_utils.log_event("web_message_llm_submitted", session_id=session_id, prompt_len=len(str(result.get("text") or text)), has_api_key_override=bool(api_key))
         return {"ok": True, "action": "llm_background", "result": result}
     return {"ok": True, "action": "ignored", "result": result}

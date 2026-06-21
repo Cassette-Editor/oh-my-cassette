@@ -53,23 +53,45 @@ export interface MutationResult {
   detail?: string;
 }
 
-export async function postMessage(sessionId: string, text: string, language: Lang): Promise<MutationResult> {
+export async function postMessage(sessionId: string, text: string, language: Lang, clientEventId = ""): Promise<MutationResult> {
   const response = await fetch("/api/messages", {
     method: "POST",
     headers: authHeaders(true),
-    body: JSON.stringify({ session_id: sessionId, text, language }),
+    body: JSON.stringify({ session_id: sessionId, text, language, client_event_id: clientEventId }),
   });
   if (response.ok) return { ok: true };
   return { ok: false, detail: await response.text() };
 }
 
-export async function uploadFiles(sessionId: string, files: File[]): Promise<MutationResult> {
-  const form = new FormData();
-  form.append("session_id", sessionId);
-  for (const file of files) form.append("files", file);
-  const response = await fetch("/api/uploads", { method: "POST", body: form });
-  if (response.ok) return { ok: true };
-  return { ok: false, detail: await response.text() };
+export async function uploadFiles(
+  sessionId: string,
+  files: File[],
+  clientEventId = "",
+  onProgress?: (percent: number) => void,
+): Promise<MutationResult> {
+  return new Promise((resolve) => {
+    const form = new FormData();
+    form.append("session_id", sessionId);
+    if (clientEventId) form.append("client_event_id", clientEventId);
+    for (const file of files) form.append("files", file);
+    const request = new XMLHttpRequest();
+    request.open("POST", "/api/uploads");
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onProgress) return;
+      onProgress(Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100))));
+    };
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        onProgress?.(100);
+        resolve({ ok: true });
+        return;
+      }
+      resolve({ ok: false, detail: request.responseText || `upload failed: ${request.status}` });
+    };
+    request.onerror = () => resolve({ ok: false, detail: "upload network error" });
+    request.onabort = () => resolve({ ok: false, detail: "upload aborted" });
+    request.send(form);
+  });
 }
 
 export async function setServerLanguage(sessionId: string, language: Lang): Promise<void> {

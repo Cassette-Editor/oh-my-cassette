@@ -35,8 +35,17 @@ def ensure_session(session_id: str | None = None) -> dict[str, Any]:
             raise ValueError("web session is closed")
         state = _SESSIONS.get(sid)
         if state is None:
-            state = {"session_id": sid, "next_event_id": 1, "events": [], "llm_messages": []}
+            state = {
+                "session_id": sid,
+                "next_event_id": 1,
+                "events": [],
+                "llm_messages": [],
+                "active_flow": None,
+                "cancelled_flows": [],
+            }
             _SESSIONS[sid] = state
+        else:
+            state.setdefault("cancelled_flows", [])
         return state
 
 
@@ -127,3 +136,61 @@ def set_llm_messages(session_id: str, messages: list[dict[str, Any]]) -> None:
     with _LOCK:
         state = ensure_session(session_id)
         state["llm_messages"] = deepcopy(messages[-_MAX_LLM_MESSAGES:])
+
+
+def begin_flow(session_id: str, kind: str) -> str | None:
+    with _LOCK:
+        state = ensure_session(session_id)
+        active = state.get("active_flow")
+        if isinstance(active, dict) and not active.get("cancelled"):
+            return None
+        token = secrets.token_urlsafe(12)
+        state["active_flow"] = {"token": token, "kind": str(kind or "flow"), "cancelled": False}
+        cancelled = [str(item) for item in (state.get("cancelled_flows") or []) if item]
+        state["cancelled_flows"] = cancelled[-20:]
+        return token
+
+
+def end_flow(session_id: str, token: str) -> None:
+    with _LOCK:
+        state = ensure_session(session_id)
+        active = state.get("active_flow")
+        if isinstance(active, dict) and active.get("token") == token:
+            state["active_flow"] = None
+
+
+def cancel_flow(session_id: str) -> bool:
+    with _LOCK:
+        state = ensure_session(session_id)
+        active = state.get("active_flow")
+        if not isinstance(active, dict):
+            return False
+        active["cancelled"] = True
+        state["active_flow"] = active
+        token = str(active.get("token") or "")
+        cancelled = [str(item) for item in (state.get("cancelled_flows") or []) if item]
+        if token and token not in cancelled:
+            cancelled.append(token)
+        state["cancelled_flows"] = cancelled[-20:]
+        return True
+
+
+def is_flow_active(session_id: str) -> bool:
+    with _LOCK:
+        state = ensure_session(session_id)
+        active = state.get("active_flow")
+        return bool(isinstance(active, dict) and not active.get("cancelled"))
+
+
+def is_flow_cancelled(session_id: str, token: str | None = None) -> bool:
+    with _LOCK:
+        state = ensure_session(session_id)
+        active = state.get("active_flow")
+        cancelled = {str(item) for item in (state.get("cancelled_flows") or []) if item}
+        if token is not None and str(token) in cancelled:
+            return True
+        if not isinstance(active, dict):
+            return False
+        if token is not None and active.get("token") != token:
+            return False
+        return bool(active.get("cancelled"))
