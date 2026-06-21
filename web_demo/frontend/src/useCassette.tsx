@@ -28,6 +28,63 @@ export interface CassetteApi {
 
 const Ctx = createContext<CassetteApi | null>(null);
 
+function isServerEvent(message: Message): message is ChatEvent {
+  return typeof message.id === "number";
+}
+
+function clientEventIdOf(message: Message): string {
+  return String((message as { client_event_id?: string }).client_event_id || "");
+}
+
+export function mergeChatMessages(prev: Message[], events: ChatEvent[]): Message[] {
+  if (!events.length) return prev;
+  const serverById = new Map<string, ChatEvent>();
+  for (const message of prev) {
+    if (isServerEvent(message)) serverById.set(String(message.id), message);
+  }
+  for (const event of events) {
+    serverById.set(String(event.id), event);
+  }
+  const serverClientIds = new Set(
+    [...serverById.values()]
+      .map((event) => event.client_event_id)
+      .filter(Boolean)
+      .map(String),
+  );
+  const ordered: Array<{ order: number; message: Message }> = [...serverById.values()].map((event) => ({
+    order: Number(event.id || 0),
+    message: event,
+  }));
+  let localOffset = 0;
+  for (let index = 0; index < prev.length; index += 1) {
+    const message = prev[index];
+    if (isServerEvent(message) || serverClientIds.has(clientEventIdOf(message))) continue;
+    let previousServerId: number | null = null;
+    let nextServerId: number | null = null;
+    for (let before = index - 1; before >= 0; before -= 1) {
+      const candidate = prev[before];
+      if (isServerEvent(candidate)) {
+        previousServerId = Number(candidate.id || 0);
+        break;
+      }
+    }
+    for (let after = index + 1; after < prev.length; after += 1) {
+      const candidate = prev[after];
+      if (isServerEvent(candidate)) {
+        nextServerId = Number(candidate.id || 0);
+        break;
+      }
+    }
+    let order = Number.MAX_SAFE_INTEGER;
+    if (previousServerId !== null && nextServerId !== null) order = (previousServerId + nextServerId) / 2;
+    else if (previousServerId !== null) order = previousServerId + 0.5;
+    else if (nextServerId !== null) order = nextServerId - 0.5;
+    ordered.push({ order: order + localOffset * 0.000001, message });
+    localOffset += 1;
+  }
+  return ordered.sort((a, b) => a.order - b.order).map((item) => item.message);
+}
+
 export function useApp(): CassetteApi {
   const value = useContext(Ctx);
   if (!value) throw new Error("useApp must be used within <CassetteProvider>");
@@ -80,15 +137,7 @@ function useCassette(): CassetteApi {
     for (const event of events) {
       lastEventId.current = Math.max(lastEventId.current, Number(event.id || 0));
     }
-    setMessages((prev) => {
-      const replacementClientIds = new Set(events.map((event) => event.client_event_id).filter(Boolean).map(String));
-      const replaced = replacementClientIds.size
-        ? prev.filter((message) => !replacementClientIds.has(String((message as { client_event_id?: string }).client_event_id || message.id)))
-        : prev;
-      const seen = new Set(replaced.map((message) => String(message.id)));
-      const fresh = events.filter((event) => !seen.has(String(event.id)));
-      return fresh.length || replaced.length !== prev.length ? [...replaced, ...fresh] : prev;
-    });
+    setMessages((prev) => mergeChatMessages(prev, events));
   }, []);
 
   const refresh = useCallback(async () => {
