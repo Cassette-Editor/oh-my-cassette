@@ -4,20 +4,31 @@ import { isErrorMessage, isLocalError, type ChatEvent, type Message } from "../t
 import type { Translate } from "../i18n";
 
 export function Messages() {
-  const { t, messages, sending, dismiss } = useApp();
+  const { t, messages, sending, uploadProgress, dismiss } = useApp();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, sending]);
+  }, [messages, sending, uploadProgress]);
 
   return (
     <div className="messages" ref={scrollRef} role="log" aria-live="polite" aria-relevant="additions">
       {messages.map((message) => (
         <MessageItem key={String(message.id)} message={message} t={t} dismiss={dismiss} />
       ))}
-      {sending && (
+      {uploadProgress && (
+        <article className="message assistant thinking thinking-ring upload-progress" aria-label={uploadProgress.label}>
+          <div className="upload-progress-head">
+            <span>{uploadProgress.label}</span>
+            <span>{uploadProgress.percent}%</span>
+          </div>
+          <div className="upload-progress-bar" aria-hidden="true">
+            <span style={{ width: `${uploadProgress.percent}%` }} />
+          </div>
+        </article>
+      )}
+      {!uploadProgress && sending && (
         <article className="message assistant thinking thinking-ring" aria-label={t("thinking")}>
           <span className="typing">
             <i />

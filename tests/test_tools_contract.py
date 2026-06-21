@@ -1978,6 +1978,90 @@ def test_gateway_first_edit_requests_cassette_model_choice_once(cassette_env, mo
     assert prefs["cassette_model_selection_completed"] is True
 
 
+def test_gateway_model_choice_rejects_non_choice_without_semantic_fallback(cassette_env, monkeypatch):
+    monkeypatch.setenv("CASSETTE_GATEWAY_MODEL_CHOICE_ENABLED", "1")
+    monkeypatch.setattr(
+        tools.browser,
+        "fetch_cassette_model_options",
+        lambda language="zh": {
+            "models": [{"label": "DeepSeek V4 Flash"}, {"label": "Kimi K2.6"}],
+            "thinking_levels": [{"label": "低", "value": "Low"}],
+            "source": "cassette_agent_page",
+            "language": language,
+        },
+    )
+    media = cassette_env["source_root"] / "clip.mp4"
+    media.write_bytes(b"video")
+    sent = []
+    source = SimpleNamespace(platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm")
+    gateway = SimpleNamespace(
+        _is_user_authorized=lambda _: True,
+        adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
+    )
+    tools.ingest_gateway_media(
+        event=SimpleNamespace(source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"),
+        gateway=gateway,
+    )
+    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    tools.ingest_gateway_media(
+        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="剪成10秒短片", message_id="semantic_edit_message_id"),
+        gateway=gateway,
+    )
+
+    result = tools.ingest_gateway_media(
+        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="匹配一个大气的音乐", message_id="bad_choice"),
+        gateway=gateway,
+    )
+
+    assert result is not None
+    assert result["reason"] == "cassette_model_choice_busy_rejected"
+    assert sent[-1][1] == "请使用/cut命令终止当前流程或剪辑任务后再尝试开始新的剪辑任务"
+    assert tools._load_pending_edit(session_id)["state"] == "awaiting_model_choice"
+
+
+def test_gateway_cut_slash_command_clears_pending_model_choice(cassette_env, monkeypatch):
+    monkeypatch.setenv("CASSETTE_GATEWAY_MODEL_CHOICE_ENABLED", "1")
+    monkeypatch.setattr(
+        tools.browser,
+        "fetch_cassette_model_options",
+        lambda language="zh": {
+            "models": [{"label": "DeepSeek V4 Flash"}],
+            "thinking_levels": [{"label": "低", "value": "Low"}],
+            "source": "cassette_agent_page",
+            "language": language,
+        },
+    )
+    media = cassette_env["source_root"] / "clip.mp4"
+    media.write_bytes(b"video")
+    sent = []
+    source = SimpleNamespace(platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm")
+    gateway = SimpleNamespace(
+        _is_user_authorized=lambda _: True,
+        adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
+    )
+    tools.ingest_gateway_media(
+        event=SimpleNamespace(source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"),
+        gateway=gateway,
+    )
+    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    tools.ingest_gateway_media(
+        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="/edit 剪成10秒短片", message_id="edit_message_id"),
+        gateway=gateway,
+    )
+    assert tools._load_pending_edit(session_id)["state"] == "awaiting_model_choice"
+
+    result = tools.ingest_gateway_media(
+        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="/cut", message_id="cut_message_id"),
+        gateway=gateway,
+    )
+
+    assert result is not None
+    assert result["reason"] == "cassette_cut_requested"
+    assert result["pending_state"] == "awaiting_model_choice"
+    assert tools._load_pending_edit(session_id) is None
+    assert "已请求停止当前 Cassette 操作" in sent[-1][1]
+
+
 def test_gateway_semantic_first_edit_requests_cassette_model_choice_before_bgm(cassette_env, monkeypatch):
     monkeypatch.setenv("CASSETTE_GATEWAY_MODEL_CHOICE_ENABLED", "1")
     monkeypatch.setattr(
@@ -2188,6 +2272,57 @@ def test_gateway_cut_slash_command_requests_active_job_cancel(cassette_env):
     assert jobs.load_job(job["job_id"])["status"] == "cancel_requested"
     assert "已请求停止当前 Cassette 操作" in sent[-1][1]
     assert "qq_openid_raw" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_gateway_active_job_rejects_new_text_instruction(cassette_env):
+    media = cassette_env["source_root"] / "clip.mp4"
+    media.write_bytes(b"video")
+    sent = []
+    source = SimpleNamespace(
+        platform=SimpleNamespace(value="qqbot"),
+        chat_id="qq_openid_raw",
+        user_id="qq_user_raw",
+        chat_type="dm",
+    )
+    gateway = SimpleNamespace(
+        _is_user_authorized=lambda _: True,
+        adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
+    )
+    media_event = SimpleNamespace(
+        source=source,
+        media_urls=[str(media)],
+        media_types=["video/mp4"],
+        text="",
+        message_id="raw_message_id",
+    )
+    tools.ingest_gateway_media(event=media_event, gateway=gateway)
+    session_id = tools._gateway_session_id(media_event)
+    sess_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+    job = jobs.create_job(
+        sess_hash,
+        "internal",
+        "instruction",
+        [str(media)],
+        {"cassette_session_id": session_id},
+    )
+    job["status"] = "running"
+    job["started_at"] = jobs.now_iso()
+    jobs.save_job(job)
+
+    result = tools.ingest_gateway_media(
+        event=SimpleNamespace(
+            source=source,
+            media_urls=[],
+            media_types=[],
+            text="再剪一个版本",
+            message_id="raw_second_message_id",
+        ),
+        gateway=gateway,
+    )
+
+    assert result is not None
+    assert result["reason"] == "cassette_active_job_busy_rejected"
+    assert sent[-1][1] == "请使用/cut命令终止当前流程或剪辑任务后再尝试开始新的剪辑任务"
 
 
 def test_gateway_cut_slash_command_without_active_job_pauses_session(cassette_env):
@@ -3099,7 +3234,7 @@ def test_run_job_reuses_same_browser_worker_across_caller_threads(cassette_env, 
     monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
 
     def call_tool(index):
-        return json.loads(tools.cassette_run_job({"prompt": f"internal {index}", "session_id": "threaded-reuse"}))
+        return json.loads(tools.cassette_run_job({"prompt": f"internal {index}", "session_id": f"threaded-reuse-{index}"}))
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(call_tool, [1, 2]))
@@ -3107,6 +3242,26 @@ def test_run_job_reuses_same_browser_worker_across_caller_threads(cassette_env, 
     assert all(result["ok"] for result in results)
     assert len(observed_thread_ids) == 2
     assert len(set(observed_thread_ids)) == 1
+
+
+def test_run_job_rejects_second_active_job_for_same_session(cassette_env):
+    session_id = "single-session"
+    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+    job = jobs.create_job(
+        session_hash,
+        "internal",
+        "instruction",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "web", "chat_id": session_id}},
+    )
+    job["status"] = "running"
+    jobs.save_job(job)
+
+    payload = json.loads(tools.cassette_run_job({"prompt": "second", "session_id": session_id}))
+
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "cassette_job_already_running"
+    assert payload["error"]["message"] == "请使用/cut命令终止当前流程或剪辑任务后再尝试开始新的剪辑任务"
 
 
 def test_run_job_defaults_to_thirty_minute_timeout(cassette_env, monkeypatch):

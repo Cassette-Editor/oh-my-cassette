@@ -99,6 +99,26 @@ def test_deepseek_tool_execution_logs_error_code(cassette_env, monkeypatch):
     assert captured[-1][1]["error_code"] == "missing_required_arg"
 
 
+def test_web_flow_cancelled_token_stays_cancelled_after_new_flow():
+    session_store.reset_all()
+    session_id = "web_cancel_token"
+    session_store.ensure_session(session_id)
+
+    first_token = session_store.begin_flow(session_id, "llm")
+    assert first_token
+    assert session_store.cancel_flow(session_id) is True
+    second_token = session_store.begin_flow(session_id, "llm")
+
+    assert second_token
+    assert second_token != first_token
+    assert session_store.is_flow_cancelled(session_id, first_token) is True
+    assert session_store.is_flow_cancelled(session_id, second_token) is False
+    session_store.end_flow(session_id, first_token)
+    assert session_store.is_flow_active(session_id) is True
+    session_store.end_flow(session_id, second_token)
+    assert session_store.is_flow_active(session_id) is False
+
+
 def test_deepseek_mock_tool_loop_starts_web_job(cassette_env, monkeypatch):
     session_store.reset_all()
     session_id = "web_deepseek_loop"
@@ -185,7 +205,7 @@ def test_web_api_upload_records_assets(cassette_env):
     session_id = client.post("/api/sessions").json()["session_id"]
     response = client.post(
         "/api/uploads",
-        data={"session_id": session_id},
+        data={"session_id": session_id, "client_event_id": "local-upload-test"},
         files=[("files", ("clip.mp4", b"video", "video/mp4"))],
     )
 
@@ -194,6 +214,7 @@ def test_web_api_upload_records_assets(cassette_env):
     assert len(assets["data"]["manifest"]["assets"]) == 1
     events = client.get(f"/api/events?session_id={session_id}&after=0").json()["events"]
     assert any("已保存素材" in event.get("text", "") for event in events)
+    assert any(event.get("client_event_id") == "local-upload-test" for event in events)
 
 
 def test_web_api_language_switch_changes_local_reply(cassette_env):
@@ -229,10 +250,11 @@ def test_web_api_rewrite_runs_deepseek_in_background(cassette_env, monkeypatch):
         del event, gateway
         return {"action": "rewrite", "reason": "test_rewrite", "text": "internal prompt"}
 
-    def fake_run_turn(run_session_id, prompt_text, *, api_key_override=""):
+    def fake_run_turn(run_session_id, prompt_text, *, api_key_override="", flow_token=None):
         assert run_session_id == session_id
         assert prompt_text == "internal prompt"
         assert api_key_override == ""
+        assert flow_token
         session_store.add_event(session_id, role="assistant", text="background done", kind="message")
         return {"content": "background done", "tool_call_count": 0}
 
@@ -250,8 +272,88 @@ def test_web_api_rewrite_runs_deepseek_in_background(cassette_env, monkeypatch):
         if any(event.get("text") == "background done" for event in events):
             break
         time.sleep(0.05)
-    assert any("正在调用 DeepSeek" in event.get("text", "") for event in events)
+    assert any(event.get("text") == "正在提交任务" for event in events)
     assert any(event.get("text") == "background done" for event in events)
+
+
+def test_web_rejects_message_while_llm_flow_active(cassette_env, monkeypatch):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo import server as web_server
+
+    session_store.reset_all()
+    client = TestClient(web_server.app)
+    session_id = client.post("/api/sessions").json()["session_id"]
+
+    monkeypatch.setattr(tools, "ingest_gateway_media", lambda event, gateway: {"action": "rewrite", "reason": "test", "text": "internal"})
+    monkeypatch.setattr(web_server, "_submit_llm_background", lambda session_id, prompt_text, api_key_override, flow_token: None)
+
+    first = client.post("/api/messages", json={"session_id": session_id, "text": "/edit first"})
+    second = client.post("/api/messages", json={"session_id": session_id, "text": "再剪一个版本"})
+
+    assert first.status_code == 200
+    assert first.json()["action"] == "llm_background"
+    assert second.status_code == 200
+    assert second.json()["result"]["reason"] == "web_session_flow_busy"
+    events = client.get(f"/api/events?session_id={session_id}&after=0").json()["events"]
+    assert [event["role"] for event in events[:3]] == ["user", "assistant", "user"]
+    assert events[1]["text"] == "正在提交任务"
+    assert events[-1]["text"] == "请使用/cut命令终止当前流程或剪辑任务后再尝试开始新的剪辑任务"
+
+
+def test_web_cut_clears_pending_llm_flow(cassette_env, monkeypatch):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo import server as web_server
+
+    session_store.reset_all()
+    client = TestClient(web_server.app)
+    session_id = client.post("/api/sessions").json()["session_id"]
+
+    monkeypatch.setattr(tools, "ingest_gateway_media", lambda event, gateway: {"action": "rewrite", "reason": "test", "text": "internal"})
+    monkeypatch.setattr(web_server, "_submit_llm_background", lambda session_id, prompt_text, api_key_override, flow_token: None)
+
+    client.post("/api/messages", json={"session_id": session_id, "text": "/edit first"})
+    assert session_store.is_flow_active(session_id) is True
+
+    cut = client.post("/api/messages", json={"session_id": session_id, "text": "/cut"})
+
+    assert cut.status_code == 200
+    assert cut.json()["result"]["reason"] == "web_cut_requested"
+    assert session_store.is_flow_active(session_id) is False
+    events = client.get(f"/api/events?session_id={session_id}&after=0").json()["events"]
+    assert any("已请求停止当前 Cassette 流程或剪辑任务" in event.get("text", "") for event in events)
+
+
+def test_web_rejects_message_while_job_active(cassette_env):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+    job = jobs.create_job(
+        session_hash,
+        "prompt",
+        "instruction",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "web", "chat_id": session_id}},
+    )
+    job["status"] = "running"
+    jobs.save_job(job)
+
+    response = client.post("/api/messages", json={"session_id": session_id, "text": "再剪一个版本"})
+
+    assert response.status_code == 200
+    assert response.json()["result"]["reason"] == "web_session_flow_busy"
+    events = client.get(f"/api/events?session_id={session_id}&after=0").json()["events"]
+    assert events[-1]["job_id"] == job["job_id"]
+    assert events[-1]["text"] == "请使用/cut命令终止当前流程或剪辑任务后再尝试开始新的剪辑任务"
 
 
 def test_web_skip_choice_reply_is_bridged_to_llm_history(cassette_env, monkeypatch):

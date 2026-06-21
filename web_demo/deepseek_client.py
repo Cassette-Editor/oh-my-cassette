@@ -159,9 +159,11 @@ def _session_language(session_id: str) -> str:
         return "zh"
 
 
-def _execute_tool(session_id: str, name: str, arguments: str) -> str:
+def _execute_tool(session_id: str, name: str, arguments: str, flow_token: str | None = None) -> str:
     if name not in ALLOWED_TOOLS:
         return tools.err(name, "tool_not_allowed", f"Tool {name} is not available in the web demo.", recoverable=False)
+    if session_store.is_flow_cancelled(session_id, flow_token):
+        return tools.err(name, "web_flow_cancelled", "The current web Cassette flow was cancelled by /cut.", recoverable=True)
     try:
         raw_args = json.loads(arguments or "{}")
         if not isinstance(raw_args, dict):
@@ -225,7 +227,7 @@ def _session_context(session_id: str) -> str:
     return "Recent web Cassette jobs for this session: " + "; ".join(parts)
 
 
-def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "") -> dict[str, Any]:
+def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "", flow_token: str | None = None) -> dict[str, Any]:
     session_store.ensure_session(session_id)
     api_key = api_key_override.strip() or api_key_from_runtime()
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -240,7 +242,15 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "") -
     final_content = ""
     logging_utils.log_event("deepseek_turn_start", session_id=session_id, prompt_len=len(prompt_text or ""), has_api_key_override=bool(api_key_override))
     for round_index in range(8):
+        if session_store.is_flow_cancelled(session_id, flow_token):
+            logging_utils.log_event("deepseek_turn_cancelled", session_id=session_id, phase="before_request", round=round_index + 1)
+            final_content = ""
+            break
         payload = _post_chat_completion(messages, api_key)
+        if session_store.is_flow_cancelled(session_id, flow_token):
+            logging_utils.log_event("deepseek_turn_cancelled", session_id=session_id, phase="after_request", round=round_index + 1)
+            final_content = ""
+            break
         choices = payload.get("choices") or []
         if not choices:
             raise DeepSeekError("DeepSeek returned no choices.")
@@ -256,10 +266,14 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "") -
             final_content = str(message.get("content") or "").strip()
             break
         for call in tool_calls:
+            if session_store.is_flow_cancelled(session_id, flow_token):
+                logging_utils.log_event("deepseek_turn_cancelled", session_id=session_id, phase="before_tool", round=round_index + 1)
+                final_content = ""
+                break
             function = (call or {}).get("function") or {}
             name = str(function.get("name") or "")
             arguments = str(function.get("arguments") or "{}")
-            result = _execute_tool(session_id, name, arguments)
+            result = _execute_tool(session_id, name, arguments, flow_token)
             tool_call_count += 1
             tool_message = {
                 "role": "tool",
@@ -268,6 +282,8 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "") -
             }
             messages.append(tool_message)
             history.append(tool_message)
+        if session_store.is_flow_cancelled(session_id, flow_token):
+            break
     else:
         if _session_language(session_id) == "en":
             final_content = "The Cassette tool flow has started or is still processing. Please check the web notifications shortly."
@@ -275,7 +291,7 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "") -
             final_content = "Cassette 工具流程已经启动或仍在处理中，请稍后查看网页通知。"
 
     session_store.set_llm_messages(session_id, history)
-    if final_content:
+    if final_content and not session_store.is_flow_cancelled(session_id, flow_token):
         session_store.add_event(session_id, role="assistant", text=final_content, kind="message")
     logging_utils.log_event("deepseek_turn_done", session_id=session_id, tool_call_count=tool_call_count, content_len=len(final_content or ""))
     return {"content": final_content, "tool_call_count": tool_call_count}

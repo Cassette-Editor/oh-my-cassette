@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as api from "./api";
 import { initialLanguage, makeT, type Translate } from "./i18n";
-import type { Asset, ChatEvent, Connection, Job, Lang, Message } from "./types";
+import type { Asset, ChatEvent, Connection, Job, Lang, Message, UploadProgress } from "./types";
 
 const POLL_BASE = 3000;
 const POLL_MAX = 15000;
@@ -16,6 +16,7 @@ export interface CassetteApi {
   assets: Asset[] | null;
   jobs: Job[] | null;
   sending: boolean;
+  uploadProgress: UploadProgress | null;
   send: (text: string) => Promise<void>;
   upload: (files: File[]) => Promise<void>;
   refreshNow: () => void;
@@ -46,11 +47,13 @@ function useCassette(): CassetteApi {
   const [assets, setAssets] = useState<Asset[] | null>(null);
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [sending, setSending] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
   const lastEventId = useRef(0);
   const sessionRef = useRef("");
   const languageRef = useRef(language);
   const errorSeq = useRef(0);
+  const localSeq = useRef(0);
   const booted = useRef(false);
   const cleanupSent = useRef(false);
 
@@ -78,9 +81,13 @@ function useCassette(): CassetteApi {
       lastEventId.current = Math.max(lastEventId.current, Number(event.id || 0));
     }
     setMessages((prev) => {
-      const seen = new Set(prev.map((message) => String(message.id)));
+      const replacementClientIds = new Set(events.map((event) => event.client_event_id).filter(Boolean).map(String));
+      const replaced = replacementClientIds.size
+        ? prev.filter((message) => !replacementClientIds.has(String((message as { client_event_id?: string }).client_event_id || message.id)))
+        : prev;
+      const seen = new Set(replaced.map((message) => String(message.id)));
       const fresh = events.filter((event) => !seen.has(String(event.id)));
-      return fresh.length ? [...prev, ...fresh] : prev;
+      return fresh.length || replaced.length !== prev.length ? [...replaced, ...fresh] : prev;
     });
   }, []);
 
@@ -181,9 +188,11 @@ function useCassette(): CassetteApi {
         pushError(makeT(languageRef.current)("connectionError"), () => void boot());
         return;
       }
+      const clientEventId = `local-send-${Date.now()}-${(localSeq.current += 1)}`;
+      setMessages((prev) => [...prev, { id: clientEventId, client_event_id: clientEventId, role: "user", text, kind: "message" }]);
       setSending(true);
       try {
-        const result = await api.postMessage(sid, text, languageRef.current);
+        const result = await api.postMessage(sid, text, languageRef.current, clientEventId);
         await refresh();
         if (!result.ok) {
           console.error("send failed:", result.detail);
@@ -207,13 +216,23 @@ function useCassette(): CassetteApi {
         pushError(makeT(languageRef.current)("connectionError"), () => void boot());
         return;
       }
+      const clientEventId = `local-upload-${Date.now()}-${(localSeq.current += 1)}`;
+      const names = files.map((file) => file.name).filter(Boolean);
+      const label = names.slice(0, 3).join(", ") + (names.length > 3 ? ` +${names.length - 3}` : "");
+      const prefix = makeT(languageRef.current)("uploadLocalPrefix");
+      setMessages((prev) => [...prev, { id: clientEventId, client_event_id: clientEventId, role: "user", kind: "upload", text: `${prefix}${label}` }]);
+      setUploadProgress({ id: clientEventId, label: makeT(languageRef.current)("uploadSaving"), percent: 1 });
       try {
-        const result = await api.uploadFiles(sid, files);
+        const result = await api.uploadFiles(sid, files, clientEventId, (percent) => {
+          setUploadProgress({ id: clientEventId, label: makeT(languageRef.current)("uploadSaving"), percent });
+        });
         if (!result.ok) throw new Error(result.detail);
         await refresh();
       } catch (error) {
         console.error("upload failed:", error);
         pushError(makeT(languageRef.current)("uploadFailed"), () => void upload(files));
+      } finally {
+        setUploadProgress((current) => (current?.id === clientEventId ? null : current));
       }
     },
     [refresh, pushError, boot],
@@ -249,6 +268,7 @@ function useCassette(): CassetteApi {
     assets,
     jobs,
     sending,
+    uploadProgress,
     send,
     upload,
     refreshNow,
