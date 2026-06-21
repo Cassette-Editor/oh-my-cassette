@@ -266,9 +266,16 @@ def test_upload_status_parses_chinese_ready_and_failure():
     assert browser._upload_status_counts("1 个就绪，0 个失败") == (1, 0)
     assert browser._upload_status_counts("就绪: 1 个，失败: 0 个") == (1, 0)
     assert browser._upload_status_ready_for_expected("1 个就绪，0 个失败", 1) is True
-    assert browser._upload_status_ready_for_expected("4 个就绪，0 个失败", 6) is True
+    assert browser._upload_status_ready_for_expected("4 个就绪，0 个失败", 6) is False
     assert browser._upload_status_has_failure("0 个就绪，1 个失败") is True
     assert browser._upload_status_ready_for_expected("1 个进行中 · 100%", 1) is False
+    assert browser._upload_status_ready_for_expected("1 active", 1) is False
+
+
+def test_default_chat_selectors_prefer_current_remotion_testids():
+    assert browser.DEFAULT_CHAT_SELECTOR.split(",", 1)[0] == "[data-testid^='chat-input-textarea-']"
+    assert browser.DEFAULT_SEND_SELECTOR.split(",", 1)[0] == "[data-testid^='chat-input-send-']"
+    assert "[data-testid^='chat-input-textarea-']:visible" in browser._chat_input_candidates(browser.DEFAULT_CHAT_SELECTOR)[:2]
 
 
 def test_chinese_routine_and_completion_phrases_are_classified():
@@ -671,7 +678,9 @@ def test_upload_wait_accepts_chinese_ready_status(monkeypatch):
     assert "4 个就绪，0 个失败" in body
 
 
-def test_upload_wait_does_not_require_expected_ready_count(monkeypatch):
+def test_upload_wait_requires_expected_ready_count(monkeypatch):
+    clock = {"now": 0.0}
+
     class FakeLocator:
         @property
         def first(self):
@@ -684,9 +693,11 @@ def test_upload_wait_does_not_require_expected_ready_count(monkeypatch):
         def locator(self, selector):
             return FakeLocator()
 
-    body = browser._wait_for_agent_upload_ready(FakePage(), "job", 6, timeout_sec=1)
+    monkeypatch.setattr(browser.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(browser.time, "sleep", lambda seconds: clock.__setitem__("now", clock["now"] + seconds))
 
-    assert "4 个就绪，0 个失败" in body
+    with pytest.raises(RuntimeError, match="Timed out waiting"):
+        browser._wait_for_agent_upload_ready(FakePage(), "job", 6, timeout_sec=2)
 
 
 def test_upload_wait_fails_only_on_cassette_failed_status(monkeypatch):
@@ -737,7 +748,7 @@ def test_live_page_ready_assets_allow_upload_skip():
             return FakeLocator()
 
     assert browser._agent_page_has_ready_assets(FakePage(), 13) is True
-    assert browser._agent_page_has_ready_assets(FakePage(), 14) is True
+    assert browser._agent_page_has_ready_assets(FakePage(), 14) is False
 
 
 def test_live_page_ready_assets_accepts_chinese_status():
@@ -754,7 +765,143 @@ def test_live_page_ready_assets_accepts_chinese_status():
             return FakeLocator()
 
     assert browser._agent_page_has_ready_assets(FakePage(), 13) is True
-    assert browser._agent_page_has_ready_assets(FakePage(), 14) is True
+    assert browser._agent_page_has_ready_assets(FakePage(), 14) is False
+
+
+def test_live_page_ready_assets_requires_upload_status_not_body_text():
+    class FakeLocator:
+        def __init__(self, selector):
+            self.selector = selector
+
+        @property
+        def first(self):
+            return self
+
+        def inner_text(self, timeout=0):
+            if "agent-upload-status" in self.selector:
+                return ""
+            return "The edit is complete and ready to export."
+
+    class FakePage:
+        def locator(self, selector):
+            return FakeLocator(selector)
+
+    assert browser._agent_page_has_ready_assets(FakePage(), 1) is False
+
+
+def test_live_page_ready_assets_prefers_structured_upload_state():
+    class FakeLocator:
+        @property
+        def first(self):
+            return self
+
+        def inner_text(self, timeout=0):
+            return "6 ready, 0 failed"
+
+    class FakePage:
+        def __init__(self, state):
+            self.state = state
+
+        def evaluate(self, script):
+            return self.state
+
+        def locator(self, selector):
+            return FakeLocator()
+
+    partial = {
+        "source": "upload-strip",
+        "total": "6",
+        "completed": "4",
+        "failed": "0",
+        "active": "2",
+        "status": "active",
+    }
+    ready = {
+        "source": "upload-strip",
+        "total": "6",
+        "completed": "6",
+        "failed": "0",
+        "active": "0",
+        "status": "ready",
+    }
+
+    assert browser._agent_page_has_ready_assets(FakePage(partial), 6) is False
+    assert browser._agent_page_has_ready_assets(FakePage(ready), 6) is True
+
+
+def test_upload_wait_uses_structured_state_before_status_text(monkeypatch):
+    clock = {"now": 0.0}
+    states = [
+        {
+            "source": "upload-strip",
+            "total": "6",
+            "completed": "4",
+            "failed": "0",
+            "active": "2",
+            "status": "active",
+            "statusText": "6 ready, 0 failed",
+        },
+        {
+            "source": "upload-strip",
+            "total": "6",
+            "completed": "6",
+            "failed": "0",
+            "active": "0",
+            "status": "ready",
+            "statusText": "6 ready, 0 failed",
+        },
+    ]
+
+    class FakeLocator:
+        @property
+        def first(self):
+            return self
+
+        def inner_text(self, timeout=0):
+            return "6 ready, 0 failed"
+
+    class FakePage:
+        def locator(self, selector):
+            return FakeLocator()
+
+        def evaluate(self, script):
+            return states[min(int(clock["now"]), 1)]
+
+    monkeypatch.setattr(browser.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(browser.time, "sleep", lambda seconds: clock.__setitem__("now", clock["now"] + seconds))
+
+    body = browser._wait_for_agent_upload_ready(FakePage(), "job", 6, timeout_sec=3)
+
+    assert clock["now"] == 1.0
+    assert "6 ready, 0 failed" in body
+
+
+def test_upload_wait_fails_on_structured_failed_state(monkeypatch):
+    class FakeLocator:
+        @property
+        def first(self):
+            return self
+
+        def inner_text(self, timeout=0):
+            return "6 ready, 0 failed"
+
+    class FakePage:
+        def locator(self, selector):
+            return FakeLocator()
+
+        def evaluate(self, script):
+            return {
+                "source": "upload-strip",
+                "total": "6",
+                "completed": "5",
+                "failed": "1",
+                "active": "0",
+                "status": "failed",
+                "statusText": "6 ready, 0 failed",
+            }
+
+    with pytest.raises(RuntimeError, match="upload/analysis failed"):
+        browser._wait_for_agent_upload_ready(FakePage(), "job", 6, timeout_sec=None)
 
 
 def test_reused_model_selection_must_match_requested_model():
