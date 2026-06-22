@@ -83,6 +83,16 @@ class ApiTransportError(RuntimeError):
 
 
 def _env(name: str) -> str:
+    # Match the rest of the plugin's config resolution: prefer the process env, then fall back to
+    # ~/.hermes/.env (notifier._runtime_env), so settings placed in the Hermes env file are honored
+    # even when Hermes does not export them into os.environ.
+    try:
+        from . import notifier
+        getter = getattr(notifier, "_runtime_env", None)
+        if callable(getter):
+            return str(getter(name) or "").strip()
+    except Exception:  # noqa: BLE001 — fall back to the process env
+        pass
     return str(os.getenv(name, "") or "").strip()
 
 

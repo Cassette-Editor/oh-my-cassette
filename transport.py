@@ -45,8 +45,21 @@ class Transport(Protocol):
         ...
 
 
+def _read_env(name: str) -> str:
+    # Prefer the process env, then fall back to ~/.hermes/.env (notifier._runtime_env), matching the
+    # rest of the plugin so CASSETTE_TRANSPORT set in the Hermes env file is honored.
+    try:
+        from . import notifier
+        getter = getattr(notifier, "_runtime_env", None)
+        if callable(getter):
+            return str(getter(name) or "").strip()
+    except Exception:  # noqa: BLE001 — fall back to the process env
+        pass
+    return str(os.getenv(name, "") or "").strip()
+
+
 def selected_transport() -> str:
-    raw = str(os.getenv(TRANSPORT_ENV, TRANSPORT_BROWSER) or TRANSPORT_BROWSER).strip().lower()
+    raw = _read_env(TRANSPORT_ENV).lower()
     return TRANSPORT_API if raw == TRANSPORT_API else TRANSPORT_BROWSER
 
 

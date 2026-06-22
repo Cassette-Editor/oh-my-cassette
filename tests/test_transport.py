@@ -7,6 +7,13 @@ from cassette.api_transport import ApiTransport
 from cassette.transport import BrowserTransport, Transport, get_transport, selected_transport
 
 
+@pytest.fixture(autouse=True)
+def _isolate_hermes_env(monkeypatch, tmp_path):
+    # Transport env resolution falls back to ~/.hermes/.env; point it at an absent file so these
+    # hermetic tests never read the developer's real Hermes credentials.
+    monkeypatch.setenv("HERMES_ENV_FILE", str(tmp_path / "absent.env"))
+
+
 def test_default_transport_is_browser(monkeypatch):
     monkeypatch.delenv("CASSETTE_TRANSPORT", raising=False)
     assert selected_transport() == "browser"
