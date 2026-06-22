@@ -553,6 +553,23 @@ Run the local Cassette E2E harness:
   --instruction "Make a short captioned video under 10 seconds."
 ```
 
+#### Cassette transport (experimental)
+
+By default the plugin drives the Cassette web UI with Playwright (`CASSETTE_TRANSPORT=browser`). An experimental API transport (`CASSETTE_TRANSPORT=api`) instead calls the Cassette server APIs directly (auth → media upload → LangGraph agent run → render-from-stored-project export), avoiding DOM scraping. It is **off by default** — install and usage are unchanged. It reuses your existing `CASSETTE_AUTH_EMAIL`/`CASSETTE_AUTH_PASSWORD`; the API origin defaults to the deployed Cassette (override with `CASSETTE_API_URL` only for self-hosted deployments). The account must have full API access (for `/api/projects` and `/api/export`); a `403`/`forbidden` error reported by the transport indicates it does not.
+
+The same E2E flow can run on either transport, and a parity harness diffs the two outcomes (terminal status, deliverable-output count, error-code set):
+
+```bash
+# single transport
+.venv/bin/python scripts/e2e_local_cassette.py --transport api \
+  --media tests/fixtures/sample.mp4 --instruction "Make a short captioned video."
+
+# browser-vs-api parity (requires a full-access account; the render-from-project export endpoint
+# must be live on the Cassette server)
+.venv/bin/python scripts/e2e_transport_parity.py \
+  --media tests/fixtures/sample.mp4 --instruction "Make a short captioned video."
+```
+
 Run the web demo service:
 
 ```bash

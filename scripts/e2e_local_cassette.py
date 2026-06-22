@@ -26,6 +26,7 @@ def _tool_payload(result: str) -> dict:
 def _failure(code: str, message: str, job: dict | None = None, result_path: str = "") -> int:
     json_stdout({
         "success": False,
+        "transport": os.getenv("CASSETTE_TRANSPORT", "browser"),
         "job_id": str((job or {}).get("job_id") or ""),
         "status": str((job or {}).get("status") or code),
         "manifest_path": "",
@@ -43,7 +44,17 @@ def main() -> int:
     parser.add_argument("--wait", default="true", help="true or false; false validates detached worker")
     parser.add_argument("--timeout-sec", type=int, default=int(os.getenv("CASSETTE_E2E_TIMEOUT_SEC", "1200")))
     parser.add_argument("--session-id", default=f"local-e2e-{int(time.time())}")
+    parser.add_argument(
+        "--transport",
+        choices=["env", "browser", "api"],
+        default="env",
+        help="Force the Cassette transport (browser|api) or 'env' to honor CASSETTE_TRANSPORT.",
+    )
     args = parser.parse_args()
+
+    # Select the transport before the package loads so the seam picks it up deterministically.
+    if args.transport != "env":
+        os.environ["CASSETTE_TRANSPORT"] = args.transport
 
     media = Path(args.media).expanduser().resolve()
     if not media.exists():
@@ -121,6 +132,7 @@ def main() -> int:
 
     json_stdout({
         "success": success,
+        "transport": os.getenv("CASSETTE_TRANSPORT", "browser"),
         "job_id": str(job.get("job_id") or ""),
         "status": status,
         "manifest_path": made["data"].get("manifest_path", ""),

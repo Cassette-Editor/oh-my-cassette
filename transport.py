@@ -1,0 +1,82 @@
+"""Cassette job transport seam.
+
+The plugin can reach Cassette two ways:
+
+* ``browser`` (default) — drive the Cassette web UI with Playwright. This is the
+  original, battle-tested path; ``browser.py`` is unchanged and ``BrowserTransport``
+  is a pure pass-through so default behavior is byte-identical.
+* ``api`` — call the Cassette server APIs directly (auth + media upload + LangGraph
+  agent run + render-from-stored-project export), avoiding brittle DOM scraping.
+
+Selection is by the ``CASSETTE_TRANSPORT`` env var (``browser`` | ``api``), default
+``browser``. The env is re-read on every ``get_transport()`` call so tests and runtime
+re-config take effect without import-time caching. Both transports return the IDENTICAL
+job-result dict shape (status / outputs / questions / errors / quality / final_screenshot)
+so everything downstream (jobs.save_job, notifier, _scrub_job, _job_report) is unaffected.
+"""
+from __future__ import annotations
+
+import os
+from typing import Any, Protocol, runtime_checkable
+
+TRANSPORT_ENV = "CASSETTE_TRANSPORT"
+TRANSPORT_BROWSER = "browser"
+TRANSPORT_API = "api"
+
+
+@runtime_checkable
+class Transport(Protocol):
+    """Operation surface the cassette tools depend on, regardless of transport."""
+
+    def run_job(self, job: dict) -> dict:
+        """Run a Cassette edit job to a terminal state and return the result dict."""
+        ...
+
+    def export(self, job: dict, decision: dict[str, Any] | None = None) -> dict:
+        """Re-drive/collect the export for an ambiguous-completion review job."""
+        ...
+
+    def close_sessions(self, session_key: str | None = None) -> None:
+        """Tear down any live session(s) for the given key (or all when None)."""
+        ...
+
+    def check_available(self) -> bool:
+        """Whether this transport can run in the current environment/config."""
+        ...
+
+
+def selected_transport() -> str:
+    raw = str(os.getenv(TRANSPORT_ENV, TRANSPORT_BROWSER) or TRANSPORT_BROWSER).strip().lower()
+    return TRANSPORT_API if raw == TRANSPORT_API else TRANSPORT_BROWSER
+
+
+class BrowserTransport:
+    """Pass-through adapter over the existing Playwright ``browser.*`` entrypoints.
+
+    Intentionally a thin delegate: the default path must behave exactly as before.
+    ``browser`` is imported lazily so selecting the API transport never requires it.
+    """
+
+    def run_job(self, job: dict) -> dict:
+        from . import browser
+        return browser.run_cassette_browser_job_threaded(job)
+
+    def export(self, job: dict, decision: dict[str, Any] | None = None) -> dict:
+        from . import browser
+        return browser.export_reviewed_completion_job_threaded(job, decision)
+
+    def close_sessions(self, session_key: str | None = None) -> None:
+        from . import browser
+        browser.close_browser_sessions_threaded(session_key)
+
+    def check_available(self) -> bool:
+        from . import browser
+        return browser.check_playwright()
+
+
+def get_transport() -> Transport:
+    """Return the transport selected by ``CASSETTE_TRANSPORT`` (default browser)."""
+    if selected_transport() == TRANSPORT_API:
+        from . import api_transport
+        return api_transport.ApiTransport()
+    return BrowserTransport()
