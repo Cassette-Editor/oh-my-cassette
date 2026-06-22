@@ -59,6 +59,20 @@ _NAVIGATE_NOOP_RESULT = {
     "noOp": True,
 }
 
+# The Cassette agent requires an explicit modelId (sessionContext.modelId); it errors otherwise.
+# Mirror the PRODUCT model list the editor offers (cassette-config MODEL_OPTIONS) — NOT the broader
+# backend agent-models.ts list — and default to the same model the UI defaults to
+# (useAgentModelPrefsStore DEFAULT_MODEL), so the api transport matches the browser/UI flow. The
+# plugin's model_selection holds UI labels (or is empty), so it is only forwarded when it already
+# names a product model id; otherwise the configured/default model is used.
+DEFAULT_AGENT_MODEL_ID = "deepseek/deepseek-v4-flash"
+_SUPPORTED_AGENT_MODEL_IDS = frozenset({
+    "deepseek/deepseek-v4-flash",
+    "deepseek/deepseek-v4-pro",
+    "openai/gpt-5.4-mini",
+})
+_DEFAULT_THINKING = "low"  # matches cassette-config DEFAULT_THINKING / per-model defaultThinking
+
 
 class ApiTransportError(RuntimeError):
     def __init__(self, code: str, message: str, *, details: dict | None = None):
@@ -277,7 +291,6 @@ class ApiTransport:
         return str(thread_id)
 
     def _session_context(self, session_id: str, job: dict, prompt: str) -> dict:
-        model_selection = job.get("model_selection") or {}
         return {
             "projectId": session_id,
             "mediaSessionId": session_id,
@@ -286,11 +299,31 @@ class ApiTransport:
             "mode": "auto",
             "turnStrategy": "default",
             "turnKind": "conversation",
-            "modelId": model_selection.get("model") or model_selection.get("modelId"),
-            "thinkingConfig": model_selection.get("thinking_level") or model_selection.get("thinkingConfig"),
+            "modelId": self._resolve_model_id(job),
+            "thinkingConfig": self._resolve_thinking_config(job),
             "locale": job.get("cassette_language") or None,
             "currentUserRequest": prompt,
         }
+
+    @staticmethod
+    def _resolve_model_id(job: dict) -> str:
+        ms = job.get("model_selection") or {}
+        candidate = str(ms.get("modelId") or ms.get("model") or "").strip()
+        if candidate in _SUPPORTED_AGENT_MODEL_IDS:
+            return candidate
+        return _env("CASSETTE_API_MODEL_ID") or DEFAULT_AGENT_MODEL_ID
+
+    @staticmethod
+    def _resolve_thinking_config(job: dict) -> str:
+        # The editor thinking values are lowercase 'low'|'medium'|'high'; default 'low' matches the UI
+        # (cassette-config). Honor an env override or the job's thinking selection (case-insensitive).
+        valid = {"low", "medium", "high"}
+        override = _env("CASSETTE_API_THINKING").lower()
+        if override in valid:
+            return override
+        ms = job.get("model_selection") or {}
+        raw = str(ms.get("thinkingConfig") or ms.get("thinking_level") or "").strip().lower()
+        return raw if raw in valid else _DEFAULT_THINKING
 
     def _run_agent(self, thread_id: str, session_id: str, prompt: str, job: dict, deadline: float) -> tuple[str, list[dict]]:
         """Start the run, satisfy interrupts headlessly, return (terminal_status, questions)."""
@@ -327,7 +360,21 @@ class ApiTransport:
                 return _SUCCEEDED, questions
             if status == "timeout":
                 return _TIMED_OUT, questions
-            return _FAILED, questions
+            raise ApiTransportError("agent_run_error", f"Agent run failed: {self._run_error_detail(thread_id)}")
+
+    def _run_error_detail(self, thread_id: str) -> str:
+        """Best-effort extraction of why a run reached 'error' (thread-state task errors)."""
+        try:
+            _, state = self._request("GET", f"/api/langgraph/threads/{thread_id}/state", expect=200)
+        except Exception:  # noqa: BLE001
+            return "unknown error"
+        details: list[str] = []
+        if isinstance(state, dict):
+            for task in state.get("tasks") or []:
+                err = task.get("error") if isinstance(task, dict) else None
+                if err:
+                    details.append(str(err)[:300])
+        return "; ".join(details) or "unknown error"
 
     def _post_run(self, thread_id: str, body: dict) -> str:
         _, resp = self._request("POST", f"/api/langgraph/threads/{thread_id}/runs", json_body=body, expect=200)
