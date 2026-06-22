@@ -73,6 +73,65 @@ def test_exact_search_deterministically_chooses_best_matching_candidate(cassette
     assert selected.id == "1"
 
 
+def test_exact_search_skips_candidate_with_invalid_audio_url(cassette_env):
+    class FakeClient(exact_bgm.ExactBgmClient):
+        def search_all(self, query, *, limit=None):
+            del limit
+            return [
+                _candidate("qq", "bad", "Song A", "Artist A", query=query, audio_url="None"),
+                _candidate("qq", "good", "Song A", "Artist A", query=query, audio_url="https://music.test/good.mp3"),
+            ]
+
+        def ensure_audio_url(self, candidate):
+            return candidate
+
+    _, selected, attempts = exact_bgm.search_exact_song(FakeClient(), title="Song A", artist="Artist A")
+
+    assert selected.id == "good"
+    assert attempts[0]["candidate_failures"][0]["track_id"] == "bad"
+    assert attempts[0]["candidate_failures"][0]["code"] == "exact_bgm_audio_url_missing"
+    assert attempts[0]["candidate_failures"][0]["audio_url"] == {"status": "invalid_literal", "value": "none"}
+
+
+def test_match_exact_bgm_retries_next_candidate_after_download_url_failure(cassette_env):
+    class FakeClient(exact_bgm.ExactBgmClient):
+        def search_all(self, query, *, limit=None):
+            del limit
+            return [
+                _candidate("qq", "bad", "晴天", "周杰伦", query=query, audio_url="https://music.test/bad.mp3"),
+                _candidate("qq", "good", "晴天", "周杰伦", query=query, audio_url="https://music.test/good.mp3"),
+            ]
+
+        def ensure_audio_url(self, candidate):
+            return candidate
+
+        def download_candidate(self, candidate, output_dir):
+            if candidate.id == "bad":
+                raise exact_bgm.CassetteError(
+                    "exact_bgm_invalid_audio_url",
+                    "Exact BGM download URL was not a valid http(s) URL",
+                    {"url": {"status": "invalid_literal", "value": "none"}},
+                )
+            output_dir = exact_bgm._safe_output_dir(output_dir)
+            path = output_dir / "jay-chou-good.mp3"
+            path.write_bytes(b"fake mp3")
+            return path
+
+    result = exact_bgm.match_exact_bgm(
+        session_id="exact-session",
+        instruction="剪成温柔怀旧短片",
+        title="晴天",
+        artist="周杰伦",
+        config=exact_bgm.ExactBgmConfig(),
+        client=FakeClient(),
+    )
+
+    assert result["status"] == "downloaded"
+    assert result["track_id"] == "good"
+    assert result["downloadFailures"][0]["track_id"] == "bad"
+    assert result["attempts"][0]["candidate_failures"][0]["code"] == "exact_bgm_invalid_audio_url"
+
+
 def test_exact_title_matching_ignores_chinese_song_wrappers(cassette_env):
     candidates = [
         _candidate("qq", "mid-1", "New Boy", "房东的猫", query="《New Boy》 房东的猫"),
@@ -192,3 +251,13 @@ def test_exact_search_raises_when_no_title_or_title_only_results(cassette_env):
 
 def test_exact_bgm_filename_sanitizer_handles_special_characters():
     assert exact_bgm._safe_music_filename("A/B:C", "Song?*Name", "qq:mid", ".mp3") == "A_B_C - Song_Name - qq_mid.mp3"
+
+
+def test_download_url_rejects_invalid_literal_without_value_error(cassette_env, tmp_path):
+    client = exact_bgm.ExactBgmClient(exact_bgm.ExactBgmConfig())
+
+    with pytest.raises(exact_bgm.CassetteError) as exc:
+        client._download_url("None", tmp_path / "song.mp3.part", seen_urls=set())
+
+    assert exc.value.code == "exact_bgm_invalid_audio_url"
+    assert exc.value.details["url"] == {"status": "invalid_literal", "value": "none"}

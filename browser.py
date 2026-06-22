@@ -425,15 +425,43 @@ def _wait_for_agent_ui_ready(page: Any, job_id: str = "", timeout_ms: int = 6000
 
 
 def _asset_fingerprint(asset_paths: list[str]) -> tuple[str, ...]:
-    values: list[str] = []
+    return tuple(_asset_file_fingerprint(path) for path in asset_paths)
+
+
+def _asset_file_fingerprint(path: str) -> str:
+    try:
+        resolved = Path(path).resolve()
+        stat = resolved.stat()
+        return f"{resolved}:{stat.st_size}:{stat.st_mtime_ns}"
+    except Exception:
+        return str(path)
+
+
+def _uploaded_asset_fingerprints(record: dict[str, Any]) -> set[str]:
+    uploaded = set(str(item) for item in (record.get("uploaded_asset_fingerprints") or ()) if str(item))
+    if not uploaded:
+        uploaded.update(str(item) for item in (record.get("asset_fingerprint") or ()) if str(item))
+    return uploaded
+
+
+def _asset_paths_needing_upload(record: dict[str, Any], asset_paths: list[str]) -> list[str]:
+    uploaded = _uploaded_asset_fingerprints(record)
+    result: list[str] = []
+    seen: set[str] = set()
     for path in asset_paths:
-        try:
-            resolved = Path(path).resolve()
-            stat = resolved.stat()
-            values.append(f"{resolved}:{stat.st_size}:{stat.st_mtime_ns}")
-        except Exception:
-            values.append(str(path))
-    return tuple(values)
+        fingerprint = _asset_file_fingerprint(path)
+        if fingerprint in uploaded or fingerprint in seen:
+            continue
+        result.append(path)
+        seen.add(fingerprint)
+    return result
+
+
+def _mark_uploaded_assets(record: dict[str, Any], upload_paths: list[str], all_asset_paths: list[str]) -> None:
+    uploaded = _uploaded_asset_fingerprints(record)
+    uploaded.update(_asset_fingerprint(upload_paths))
+    record["uploaded_asset_fingerprints"] = tuple(sorted(uploaded))
+    record["asset_fingerprint"] = _asset_fingerprint(all_asset_paths)
 
 
 def _close_browser_record(record: dict[str, Any]) -> None:
@@ -706,6 +734,7 @@ def _new_browser_record(job: dict, headless: bool, launch_args: list[str], url: 
         "url": url,
         "owner_thread_id": threading.get_ident(),
         "asset_fingerprint": (),
+        "uploaded_asset_fingerprints": (),
         "console_messages": [],
         "connectivity": connectivity,
     }
@@ -1619,27 +1648,10 @@ def _upload_assets(page: Any, asset_paths: list[str], upload_selector: str) -> N
     raise RuntimeError("No programmatic file input found for Cassette asset upload")
 
 
-_AUDIO_UPLOAD_SUFFIXES = {
-    ".aac",
-    ".aif",
-    ".aiff",
-    ".amr",
-    ".flac",
-    ".m4a",
-    ".mp3",
-    ".ogg",
-    ".opus",
-    ".wav",
-    ".wma",
-}
-
-
 def _upload_ready_expected_count(asset_paths: list[str]) -> int:
-    paths = [str(path or "").strip() for path in asset_paths if str(path or "").strip()]
-    if not paths:
-        return 0
-    visual_paths = [path for path in paths if Path(path).suffix.lower() not in _AUDIO_UPLOAD_SUFFIXES]
-    return len(visual_paths) if visual_paths else len(paths)
+    # Cassette's ready counter reflects successfully processed files in the
+    # latest upload batch, not the cumulative number of assets in the chat.
+    return len([path for path in asset_paths if str(path or "").strip()])
 
 
 def _upload_status_text(page: Any) -> str:
@@ -1894,10 +1906,6 @@ def _wait_for_agent_upload_ready(page: Any, job_id: str, expected_count: int, ti
     if expected_count > 1:
         message = f"{message}. Try retrying after refreshing Cassette, or upload fewer/lower-resolution assets in one batch."
     raise BrowserUploadTimeoutError(message)
-
-
-def _assets_already_uploaded(record: dict[str, Any], asset_paths: list[str]) -> bool:
-    return bool(asset_paths) and tuple(record.get("asset_fingerprint") or ()) == _asset_fingerprint(asset_paths)
 
 
 def _assistant_message_text(page: Any) -> str:
@@ -3337,15 +3345,14 @@ def run_cassette_browser_job(job: dict) -> dict:
 
         asset_paths = [p for p in job.get("asset_paths", []) if Path(p).exists()]
         if asset_paths:
-            upload_ready_expected_count = _upload_ready_expected_count(asset_paths)
-            fingerprint_matches = _assets_already_uploaded(record, asset_paths)
-            live_page_assets_ready = fingerprint_matches and _agent_page_has_ready_assets(page, upload_ready_expected_count)
-            if live_page_assets_ready:
+            upload_paths = _asset_paths_needing_upload(record, asset_paths)
+            upload_ready_expected_count = _upload_ready_expected_count(upload_paths)
+            if not upload_paths:
                 begin_stage("upload")
                 record["asset_fingerprint"] = _asset_fingerprint(asset_paths)
                 _record_stage_progress(
                     job_id,
-                    f"Cassette live page already has {len(asset_paths)} ready asset(s); skipping upload.",
+                    f"Cassette session already has {len(asset_paths)} uploaded asset(s); skipping upload.",
                     outputs,
                     "running",
                     stage="upload",
@@ -3353,10 +3360,10 @@ def run_cassette_browser_job(job: dict) -> dict:
                     attempt=0,
                 )
                 finish_stage("upload", "skipped")
-            if not live_page_assets_ready and not fingerprint_matches:
+            else:
                 begin_stage("upload")
                 try:
-                    _upload_assets(page, asset_paths, upload_selector)
+                    _upload_assets(page, upload_paths, upload_selector)
                 except Exception as exc:
                     finish_stage("upload", "failed")
                     errors.append({"code": "asset_upload_failed", "message": str(exc), "details": {"type": type(exc).__name__}})
@@ -3367,7 +3374,7 @@ def run_cassette_browser_job(job: dict) -> dict:
                     pass
                 try:
                     body = _wait_for_agent_upload_ready(page, job_id, upload_ready_expected_count, _upload_timeout_sec(job))
-                    record["asset_fingerprint"] = _asset_fingerprint(asset_paths)
+                    _mark_uploaded_assets(record, upload_paths, asset_paths)
                     _record_stage_progress(job_id, body, outputs, "running", stage="upload", stage_elapsed_sec=stage_elapsed("upload"), attempt=int(stage_timings["upload"].get("attempts") or 1))
                     finish_stage("upload", "succeeded")
                 except BrowserJobCancelled as exc:

@@ -278,10 +278,34 @@ def test_default_chat_selectors_prefer_current_remotion_testids():
     assert "[data-testid^='chat-input-textarea-']:visible" in browser._chat_input_candidates(browser.DEFAULT_CHAT_SELECTOR)[:2]
 
 
-def test_upload_ready_expected_count_ignores_audio_sidecar():
-    assert browser._upload_ready_expected_count(["clip.mp4", "bgm.mp3"]) == 1
-    assert browser._upload_ready_expected_count(["clip.mp4", "still.jpg", "bgm.wav"]) == 2
+def test_upload_ready_expected_count_tracks_upload_batch_files():
+    assert browser._upload_ready_expected_count(["clip.mp4", "bgm.mp3"]) == 2
+    assert browser._upload_ready_expected_count(["clip.mp4", "still.jpg", "bgm.wav"]) == 3
     assert browser._upload_ready_expected_count(["voice.mp3"]) == 1
+    assert browser._upload_ready_expected_count([]) == 0
+
+
+def test_asset_paths_needing_upload_returns_incremental_batch(cassette_env):
+    first = cassette_env["source_root"] / "clip.mp4"
+    second = cassette_env["source_root"] / "clip-2.mp4"
+    first.write_bytes(b"video")
+    second.write_bytes(b"video 2")
+    record = {"uploaded_asset_fingerprints": browser._asset_fingerprint([str(first)])}
+
+    assert browser._asset_paths_needing_upload(record, [str(first), str(second)]) == [str(second)]
+
+
+def test_mark_uploaded_assets_preserves_full_current_fingerprint(cassette_env):
+    first = cassette_env["source_root"] / "clip.mp4"
+    second = cassette_env["source_root"] / "clip-2.mp4"
+    first.write_bytes(b"video")
+    second.write_bytes(b"video 2")
+    record = {"uploaded_asset_fingerprints": browser._asset_fingerprint([str(first)])}
+
+    browser._mark_uploaded_assets(record, [str(second)], [str(first), str(second)])
+
+    assert set(record["uploaded_asset_fingerprints"]) == set(browser._asset_fingerprint([str(first), str(second)]))
+    assert record["asset_fingerprint"] == browser._asset_fingerprint([str(first), str(second)])
 
 
 def test_chinese_routine_and_completion_phrases_are_classified():
@@ -1052,7 +1076,7 @@ def test_same_session_followup_waits_for_new_assistant_before_export(cassette_en
 
 
 @pytest.mark.skipif(not browser.check_playwright(), reason="playwright is not installed")
-def test_same_session_new_assets_reupload_even_when_page_has_ready_status(cassette_env, monkeypatch):
+def test_same_session_new_assets_uploads_only_incremental_files(cassette_env, monkeypatch):
     browser.close_browser_sessions()
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
@@ -1086,7 +1110,7 @@ def test_same_session_new_assets_reupload_even_when_page_has_ready_status(casset
         assert browser.run_cassette_browser_job(first)["status"] == "succeeded"
         assert browser.run_cassette_browser_job(second)["status"] == "succeeded"
         assert len(upload_calls) == 2
-        assert upload_calls[1] == [str(media), str(second_media)]
+        assert upload_calls[1] == [str(second_media)]
     finally:
         browser.close_browser_sessions()
 
