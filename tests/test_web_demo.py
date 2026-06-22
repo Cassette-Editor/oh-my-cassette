@@ -596,6 +596,32 @@ def test_web_cleanup_ignores_non_web_jobs(cassette_env):
     assert output_path.exists()
 
 
+def test_web_cleanup_closes_browser_sessions(cassette_env, monkeypatch):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo import server
+
+    session_store.reset_all()
+    closed_keys = []
+    def fake_close(key=None):
+        closed_keys.append(key)
+        return key != "missing"
+    monkeypatch.setattr(server.browser, "close_browser_sessions_threaded", fake_close)
+    client = TestClient(server.app)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+
+    response = client.post(f"/api/sessions/{session_id}/cleanup?reason=pagehide")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["browser_sessions_closed"] == 2
+    assert payload["browser_session_cleanup_attempts"] == 2
+    assert payload["reason"] == "pagehide"
+    assert closed_keys == [session_id, session_hash]
+
+
 def test_web_cleanup_cancels_active_web_job_without_deleting_record(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi

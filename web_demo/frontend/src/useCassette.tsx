@@ -5,6 +5,7 @@ import type { Asset, ChatEvent, Connection, Job, Lang, Message, UploadProgress }
 
 const POLL_BASE = 3000;
 const POLL_MAX = 15000;
+const IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
 export interface CassetteApi {
   t: Translate;
@@ -113,6 +114,7 @@ function useCassette(): CassetteApi {
   const localSeq = useRef(0);
   const booted = useRef(false);
   const cleanupSent = useRef(false);
+  const expired = useRef(false);
 
   useEffect(() => {
     sessionRef.current = sessionId;
@@ -130,6 +132,15 @@ function useCassette(): CassetteApi {
 
   const dismiss = useCallback((id: string) => {
     setMessages((prev) => prev.filter((message) => String(message.id) !== id));
+  }, []);
+
+  const cleanupCurrentSession = useCallback((reason = "") => {
+    const sid = sessionRef.current;
+    if (!sid || cleanupSent.current) return false;
+    cleanupSent.current = true;
+    sessionStorage.removeItem("omc_web_session");
+    api.cleanupSession(sid, reason);
+    return true;
   }, []);
 
   const ingestEvents = useCallback((events: ChatEvent[]) => {
@@ -159,6 +170,8 @@ function useCassette(): CassetteApi {
       const result = await api.createSession(languageRef.current);
       lastEventId.current = 0;
       setMessages([]);
+      cleanupSent.current = false;
+      expired.current = false;
       setSessionId(result.session_id);
       sessionRef.current = result.session_id;
       sessionStorage.setItem("omc_web_session", result.session_id);
@@ -213,14 +226,42 @@ function useCassette(): CassetteApi {
   // Best-effort session cleanup when the tab goes away.
   useEffect(() => {
     const handler = () => {
-      const sid = sessionRef.current;
-      if (!sid || cleanupSent.current) return;
-      cleanupSent.current = true;
-      api.cleanupSession(sid);
+      cleanupCurrentSession("pagehide");
     };
     window.addEventListener("pagehide", handler);
     return () => window.removeEventListener("pagehide", handler);
-  }, []);
+  }, [cleanupCurrentSession]);
+
+  // Close idle pages so server-side Playwright sessions do not accumulate.
+  useEffect(() => {
+    let timer = 0;
+    const expire = () => {
+      if (expired.current) return;
+      expired.current = true;
+      cleanupCurrentSession("idle_timeout");
+      sessionRef.current = "";
+      setSessionId("");
+      setSending(false);
+      setUploadProgress(null);
+      setConnection("error");
+      window.alert(makeT(languageRef.current)("idleTimeout"));
+      window.setTimeout(() => {
+        window.close();
+      }, 0);
+    };
+    const reset = () => {
+      if (expired.current) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(expire, IDLE_TIMEOUT_MS);
+    };
+    const events = ["pointerdown", "keydown", "wheel", "touchstart", "scroll", "drop", "paste"] as const;
+    reset();
+    for (const event of events) window.addEventListener(event, reset, { passive: true });
+    return () => {
+      window.clearTimeout(timer);
+      for (const event of events) window.removeEventListener(event, reset);
+    };
+  }, [cleanupCurrentSession]);
 
   // Language switch is a pure state change: relabel via re-render, sync to the
   // server in the background, never refetch. No flash, no DOM teardown.
