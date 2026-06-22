@@ -4136,14 +4136,30 @@ def _summarize_exact_bgm_attempts(attempts: Any) -> list[dict[str, Any]]:
     for attempt in attempts[:6]:
         if not isinstance(attempt, dict):
             continue
-        result.append({
+        summary = {
             "mode": attempt.get("mode") or "",
             "query": attempt.get("query") or "",
             "candidate_count": attempt.get("candidate_count") or 0,
             "eligible_count": attempt.get("eligible_count") or 0,
             "downloadable_count": attempt.get("downloadable_count") if "downloadable_count" in attempt else "",
             "strict_title": bool(attempt.get("strict_title")),
-        })
+        }
+        failures = attempt.get("candidate_failures")
+        if isinstance(failures, list) and failures:
+            summary["candidate_failures"] = [
+                {
+                    "source": failure.get("source") or "",
+                    "track_id": failure.get("track_id") or "",
+                    "title": failure.get("title") or "",
+                    "artist": failure.get("artist") or "",
+                    "code": failure.get("code") or "",
+                    "details": failure.get("details") or {},
+                    "audio_url": failure.get("audio_url") or {},
+                }
+                for failure in failures[:5]
+                if isinstance(failure, dict)
+            ]
+        result.append(summary)
     return result
 
 

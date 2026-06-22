@@ -23,6 +23,8 @@ _DEFAULT_JOOX_BR = "4"
 _VALID_SOURCES = {"netease", "qq", "kuwo", "joox"}
 _SOURCE_PRIORITY = {"netease": 0, "qq": 1, "kuwo": 2, "joox": 3}
 _AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg"}
+_INVALID_AUDIO_URL_VALUES = {"", "none", "null", "undefined", "false"}
+_MAX_EXACT_BGM_DOWNLOAD_ATTEMPTS = 5
 
 
 @dataclass
@@ -146,8 +148,12 @@ class ExactBgmClient:
         for index, item in enumerate(payload[:limit], start=1):
             if not isinstance(item, dict):
                 continue
-            audio_url = _str(item.get("url"))
-            song_id = _query_param(audio_url, "id") or f"{security.safe_hash_id(query)}_{index}"
+            audio_url = _normalize_audio_url(item.get("url"))
+            song_id = (
+                _query_param(audio_url, "id")
+                or _str(item.get("id") or item.get("songid") or item.get("song_id"))
+                or f"{security.safe_hash_id(query)}_{index}"
+            )
             results.append(ExactBgmCandidate(
                 provider="musicsquare_exact",
                 source="netease",
@@ -249,14 +255,15 @@ class ExactBgmClient:
         return results
 
     def ensure_audio_url(self, candidate: ExactBgmCandidate) -> ExactBgmCandidate:
+        candidate.audio_url = _normalize_audio_url(candidate.audio_url)
         if candidate.audio_url:
             return candidate
         if candidate.source == "netease":
-            candidate.audio_url = _build_url(self.config.netease_base_url, {
+            candidate.audio_url = _normalize_audio_url(_build_url(self.config.netease_base_url, {
                 "server": "netease",
                 "type": "url",
                 "id": candidate.id,
-            })
+            }))
             return candidate
         if candidate.source == "qq":
             return self._load_qq_detail(candidate)
@@ -268,6 +275,7 @@ class ExactBgmClient:
 
     def download_candidate(self, candidate: ExactBgmCandidate, output_dir: Path) -> Path:
         candidate = self.ensure_audio_url(candidate)
+        candidate.audio_url = _normalize_audio_url(candidate.audio_url)
         if not candidate.audio_url:
             raise CassetteError("exact_bgm_audio_url_missing", "Exact BGM candidate did not include a playable audio URL")
         output_dir = _safe_output_dir(output_dir)
@@ -322,7 +330,7 @@ class ExactBgmClient:
         candidate.artist = _str(data.get("artist") or candidate.artist)
         candidate.album = _str(data.get("album") or candidate.album)
         candidate.cover = _str(data.get("pic") or candidate.cover)
-        candidate.audio_url = _str(data.get("url") or candidate.audio_url)
+        candidate.audio_url = _normalize_audio_url(data.get("url") or candidate.audio_url)
         candidate.raw = {**candidate.raw, "detail": data}
         candidate.source_strategies.append({"source": "kuwo", "query": candidate.query, "mode": "detail"})
         return candidate
@@ -367,6 +375,14 @@ class ExactBgmClient:
             raise CassetteError("exact_bgm_invalid_json", "Exact BGM API returned invalid JSON", {"source_url_host": urlparse(base_url).netloc}) from exc
 
     def _download_url(self, url: str, part_path: Path, *, seen_urls: set[str]) -> None:
+        raw_url = _str(url)
+        url = _normalize_audio_url(raw_url)
+        if not url:
+            raise CassetteError(
+                "exact_bgm_invalid_audio_url",
+                "Exact BGM download URL was not a valid http(s) URL",
+                {"url": _audio_url_log_snapshot(raw_url)},
+            )
         if url in seen_urls:
             raise CassetteError("exact_bgm_download_redirect_loop", "Exact BGM download URL redirected in a loop")
         seen_urls.add(url)
@@ -398,6 +414,12 @@ class ExactBgmClient:
                         fh.write(chunk)
         except HTTPError as exc:
             raise CassetteError("exact_bgm_download_http_error", "Exact BGM download failed", {"status": exc.code}) from exc
+        except ValueError as exc:
+            raise CassetteError(
+                "exact_bgm_invalid_audio_url",
+                "Exact BGM download URL was not a valid http(s) URL",
+                {"type": type(exc).__name__, "message": str(exc), "url": _audio_url_log_snapshot(raw_url)},
+            ) from exc
         except (URLError, TimeoutError, OSError) as exc:
             raise CassetteError("exact_bgm_download_failed", "Exact BGM download failed", {"type": type(exc).__name__}) from exc
 
@@ -438,7 +460,35 @@ def match_exact_bgm(
             "attempts": attempts,
         }
     selected_at = _now_iso()
-    local_file = active_client.download_candidate(selected, cfg.download_dir)
+    local_file = None
+    download_failures: list[dict[str, Any]] = []
+    download_candidates = _ordered_download_candidates(
+        selected,
+        candidates,
+        title=title,
+        artist=artist,
+    )
+    for candidate in download_candidates[:_MAX_EXACT_BGM_DOWNLOAD_ATTEMPTS]:
+        try:
+            local_file = active_client.download_candidate(candidate, cfg.download_dir)
+            selected = candidate
+            break
+        except CassetteError as exc:
+            if not _is_retryable_download_error(exc):
+                raise
+            failure = _candidate_failure_snapshot(candidate, exc)
+            download_failures.append(failure)
+            _record_candidate_failure(attempts, candidate, failure)
+    if local_file is None:
+        raise CassetteError(
+            "exact_bgm_download_failed",
+            "Exact BGM candidates could not be downloaded",
+            {
+                "attempts": attempts,
+                "download_failures": download_failures,
+                "download_attempt_limit": _MAX_EXACT_BGM_DOWNLOAD_ATTEMPTS,
+            },
+        )
     manifest_asset = manifest.ingest_internal_asset(
         str(local_file),
         session_id=session_id,
@@ -481,6 +531,7 @@ def match_exact_bgm(
         "selectedTrack": selected.to_dict(include_raw=False),
         "candidatePoolSnapshot": [item.snapshot() for item in candidates],
         "attempts": attempts,
+        "downloadFailures": download_failures,
         "manifest_asset": _scrub_manifest_asset(manifest_asset),
     }
 
@@ -520,10 +571,19 @@ def search_exact_song(
             candidate.query = query
             try:
                 candidate = client.ensure_audio_url(candidate)
-            except CassetteError:
+            except CassetteError as exc:
+                _record_candidate_failure(attempts, candidate, _candidate_failure_snapshot(candidate, exc))
                 continue
+            raw_audio_url = candidate.audio_url
+            candidate.audio_url = _normalize_audio_url(candidate.audio_url)
             if candidate.audio_url:
                 return _dedupe_candidates(all_eligible), candidate, attempts
+            failure = _candidate_failure_snapshot(
+                candidate,
+                CassetteError("exact_bgm_audio_url_missing", "Exact BGM candidate did not include a playable audio URL"),
+                audio_url=raw_audio_url,
+            )
+            _record_candidate_failure(attempts, candidate, failure)
         if candidates and eligible:
             attempts[-1]["downloadable_count"] = 0
     raise CassetteError(
@@ -620,7 +680,7 @@ def _pick_qq_audio_url(data: dict[str, Any]) -> tuple[str, str]:
         ("song_play_url_pq", "lossless"),
     ]
     for key, label in fields:
-        url = _str(data.get(key))
+        url = _normalize_audio_url(data.get(key))
         if url:
             return url, label
     return "", ""
@@ -631,10 +691,73 @@ def _pick_joox_audio_url(links: dict[str, Any]) -> tuple[str, str]:
         return "", ""
     order = ["MP3 320", "AAC 192", "OGG 192", "MP3 128", "AAC 96", "AAC 48", "无损FLAC", "Hi-Res无损", "母带无损"]
     for name in order:
-        url = _str(links.get(name))
+        url = _normalize_audio_url(links.get(name))
         if url:
             return url, name
     return "", ""
+
+
+def _ordered_download_candidates(
+    selected: ExactBgmCandidate,
+    candidates: list[ExactBgmCandidate],
+    *,
+    title: str,
+    artist: str = "",
+) -> list[ExactBgmCandidate]:
+    result = [selected]
+    seen = {f"{selected.source}:{selected.id}"}
+    require_artist = bool(artist.strip())
+    for candidate in _sort_exact_candidates(candidates, title=title, artist=artist, require_artist=require_artist):
+        key = f"{candidate.source}:{candidate.id}"
+        if key in seen:
+            continue
+        result.append(candidate)
+        seen.add(key)
+    return result
+
+
+def _is_retryable_download_error(exc: CassetteError) -> bool:
+    return exc.code in {
+        "exact_bgm_audio_url_missing",
+        "exact_bgm_invalid_audio_url",
+        "exact_bgm_download_empty",
+        "exact_bgm_download_failed",
+        "exact_bgm_download_http_error",
+        "exact_bgm_download_redirect_loop",
+        "exact_bgm_download_too_large",
+        "exact_bgm_download_unexpected_content_type",
+    }
+
+
+def _record_candidate_failure(
+    attempts: list[dict[str, Any]],
+    candidate: ExactBgmCandidate,
+    failure: dict[str, Any],
+) -> None:
+    for attempt in reversed(attempts):
+        if attempt.get("query") == candidate.query:
+            failures = attempt.setdefault("candidate_failures", [])
+            if isinstance(failures, list):
+                failures.append(failure)
+            return
+    if attempts:
+        failures = attempts[-1].setdefault("candidate_failures", [])
+        if isinstance(failures, list):
+            failures.append(failure)
+
+
+def _candidate_failure_snapshot(candidate: ExactBgmCandidate, exc: CassetteError, *, audio_url: Any | None = None) -> dict[str, Any]:
+    return {
+        "source": candidate.source,
+        "track_id": candidate.id,
+        "title": candidate.title,
+        "artist": candidate.artist,
+        "query": candidate.query,
+        "code": exc.code,
+        "message": str(exc),
+        "details": exc.details,
+        "audio_url": _audio_url_log_snapshot(candidate.audio_url if audio_url is None else audio_url),
+    }
 
 
 def _sort_exact_candidates(
@@ -778,14 +901,15 @@ def _query_param(raw_url: str, key: str) -> str:
 
 def _audio_url_from_text(text: str) -> str:
     stripped = (text or "").strip()
-    if stripped.startswith("http://") or stripped.startswith("https://"):
-        return stripped
+    normalized = _normalize_audio_url(stripped)
+    if normalized:
+        return normalized
     try:
         parsed = json.loads(stripped)
     except Exception:
         return ""
-    if isinstance(parsed, str) and parsed.startswith(("http://", "https://")):
-        return parsed
+    if isinstance(parsed, str):
+        return _normalize_audio_url(parsed)
     if not isinstance(parsed, dict):
         return ""
     candidates = [
@@ -795,10 +919,42 @@ def _audio_url_from_text(text: str) -> str:
         parsed.get("data") if isinstance(parsed.get("data"), str) else None,
     ]
     for candidate in candidates:
-        value = _str(candidate)
-        if value.startswith(("http://", "https://")):
+        value = _normalize_audio_url(candidate)
+        if value:
             return value
     return ""
+
+
+def _normalize_audio_url(value: Any) -> str:
+    raw = _str(value)
+    if raw.lower() in _INVALID_AUDIO_URL_VALUES:
+        return ""
+    if raw.startswith("//"):
+        raw = f"https:{raw}"
+    parsed = urlparse(raw)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return raw
+    return ""
+
+
+def _audio_url_log_snapshot(value: Any) -> dict[str, Any]:
+    raw = _str(value)
+    lowered = raw.lower()
+    if lowered in _INVALID_AUDIO_URL_VALUES:
+        return {"status": "missing" if not raw else "invalid_literal", "value": lowered}
+    parsed = urlparse(raw)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return {
+            "status": "valid",
+            "scheme": parsed.scheme,
+            "host": parsed.netloc,
+            "query_keys": sorted(parse_qs(parsed.query).keys())[:10],
+        }
+    return {
+        "status": "invalid_scheme",
+        "scheme": parsed.scheme,
+        "value": raw[:80],
+    }
 
 
 def _safe_output_dir(path: Path) -> Path:

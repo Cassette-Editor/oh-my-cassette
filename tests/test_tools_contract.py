@@ -700,6 +700,17 @@ def test_cassette_match_exact_bgm_logs_search_failure_details(cassette_env, monk
                         "eligible_count": 0,
                         "downloadable_count": 0,
                         "strict_title": True,
+                        "candidate_failures": [
+                            {
+                                "source": "netease",
+                                "track_id": "123",
+                                "title": "Chef Song",
+                                "artist": "Test Artist",
+                                "code": "exact_bgm_invalid_audio_url",
+                                "details": {"message": "unknown url type: 'None'"},
+                                "audio_url": {"status": "valid", "host": "api.example.test"},
+                            }
+                        ],
                     },
                 ],
             },
@@ -726,6 +737,8 @@ def test_cassette_match_exact_bgm_logs_search_failure_details(cassette_env, monk
     assert failed["attempts"][0]["query"] == "Chef Song Test Artist"
     assert failed["attempts"][0]["candidate_count"] == 3
     assert failed["attempts"][1]["downloadable_count"] == 0
+    assert failed["attempts"][1]["candidate_failures"][0]["code"] == "exact_bgm_invalid_audio_url"
+    assert failed["attempts"][1]["candidate_failures"][0]["details"]["message"] == "unknown url type: 'None'"
 
 
 def test_exact_bgm_selection_can_request_new_batch(cassette_env):
