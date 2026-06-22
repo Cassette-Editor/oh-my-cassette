@@ -156,13 +156,13 @@ function useCassette(): CassetteApi {
   const boot = useCallback(async () => {
     setConnection("connecting");
     try {
-      const previous = localStorage.getItem("omc_web_session") || "";
-      const result = await api.createSession(previous, languageRef.current);
+      const result = await api.createSession(languageRef.current);
       lastEventId.current = 0;
       setMessages([]);
       setSessionId(result.session_id);
       sessionRef.current = result.session_id;
-      localStorage.setItem("omc_web_session", result.session_id);
+      sessionStorage.setItem("omc_web_session", result.session_id);
+      localStorage.removeItem("omc_web_session");
       api.setServerLanguage(result.session_id, languageRef.current).catch(() => {});
       await refresh();
       setConnection("ok");
