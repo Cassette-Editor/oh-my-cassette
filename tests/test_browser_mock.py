@@ -278,6 +278,12 @@ def test_default_chat_selectors_prefer_current_remotion_testids():
     assert "[data-testid^='chat-input-textarea-']:visible" in browser._chat_input_candidates(browser.DEFAULT_CHAT_SELECTOR)[:2]
 
 
+def test_upload_ready_expected_count_ignores_audio_sidecar():
+    assert browser._upload_ready_expected_count(["clip.mp4", "bgm.mp3"]) == 1
+    assert browser._upload_ready_expected_count(["clip.mp4", "still.jpg", "bgm.wav"]) == 2
+    assert browser._upload_ready_expected_count(["voice.mp3"]) == 1
+
+
 def test_chinese_routine_and_completion_phrases_are_classified():
     routine = "执行计划 0/5 待确认。请确认是否继续执行。"
     complete = "任务完成，剪辑完成，可以导出。任务清单 5/5"

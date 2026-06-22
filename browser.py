@@ -1619,6 +1619,29 @@ def _upload_assets(page: Any, asset_paths: list[str], upload_selector: str) -> N
     raise RuntimeError("No programmatic file input found for Cassette asset upload")
 
 
+_AUDIO_UPLOAD_SUFFIXES = {
+    ".aac",
+    ".aif",
+    ".aiff",
+    ".amr",
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".ogg",
+    ".opus",
+    ".wav",
+    ".wma",
+}
+
+
+def _upload_ready_expected_count(asset_paths: list[str]) -> int:
+    paths = [str(path or "").strip() for path in asset_paths if str(path or "").strip()]
+    if not paths:
+        return 0
+    visual_paths = [path for path in paths if Path(path).suffix.lower() not in _AUDIO_UPLOAD_SUFFIXES]
+    return len(visual_paths) if visual_paths else len(paths)
+
+
 def _upload_status_text(page: Any) -> str:
     try:
         return page.locator("[data-testid='agent-upload-status']").first.inner_text(timeout=500).strip()
@@ -3314,8 +3337,9 @@ def run_cassette_browser_job(job: dict) -> dict:
 
         asset_paths = [p for p in job.get("asset_paths", []) if Path(p).exists()]
         if asset_paths:
+            upload_ready_expected_count = _upload_ready_expected_count(asset_paths)
             fingerprint_matches = _assets_already_uploaded(record, asset_paths)
-            live_page_assets_ready = fingerprint_matches and _agent_page_has_ready_assets(page, len(asset_paths))
+            live_page_assets_ready = fingerprint_matches and _agent_page_has_ready_assets(page, upload_ready_expected_count)
             if live_page_assets_ready:
                 begin_stage("upload")
                 record["asset_fingerprint"] = _asset_fingerprint(asset_paths)
@@ -3342,7 +3366,7 @@ def run_cassette_browser_job(job: dict) -> dict:
                 except PlaywrightTimeoutError:
                     pass
                 try:
-                    body = _wait_for_agent_upload_ready(page, job_id, len(asset_paths), _upload_timeout_sec(job))
+                    body = _wait_for_agent_upload_ready(page, job_id, upload_ready_expected_count, _upload_timeout_sec(job))
                     record["asset_fingerprint"] = _asset_fingerprint(asset_paths)
                     _record_stage_progress(job_id, body, outputs, "running", stage="upload", stage_elapsed_sec=stage_elapsed("upload"), attempt=int(stage_timings["upload"].get("attempts") or 1))
                     finish_stage("upload", "succeeded")

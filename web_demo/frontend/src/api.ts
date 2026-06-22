@@ -17,11 +17,11 @@ export interface SessionResponse {
   language: Lang;
 }
 
-export async function createSession(cleanupSessionId: string, language: Lang): Promise<SessionResponse> {
+export async function createSession(language: Lang): Promise<SessionResponse> {
   const response = await fetch("/api/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cleanup_session_id: cleanupSessionId, language }),
+    body: JSON.stringify({ language }),
   });
   if (!response.ok) throw new Error(`session request failed: ${response.status}`);
   return response.json();
