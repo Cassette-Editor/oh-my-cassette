@@ -23,7 +23,7 @@ from . import deepseek_client, logging_utils, session_store
 
 load_cassette_package()
 
-from cassette import jobs, manifest, security, tools  # noqa: E402
+from cassette import browser, jobs, manifest, security, tools  # noqa: E402
 from cassette.errors import CassetteError  # noqa: E402
 
 
@@ -666,7 +666,28 @@ def _remove_job_record(job_id: str) -> bool:
     return _safe_remove_file(jobs.get_jobs_dir() / f"{job_id}.json")
 
 
-def _cleanup_web_session(session_id: str) -> dict[str, Any]:
+def _close_web_browser_sessions(session_id: str, session_hash: str) -> tuple[int, int]:
+    closed = 0
+    attempts = 0
+    for key in dict.fromkeys([session_id, session_hash]):
+        if not key:
+            continue
+        attempts += 1
+        try:
+            if browser.close_browser_sessions_threaded(key):
+                closed += 1
+        except Exception as exc:
+            logging_utils.log_event(
+                "web_browser_session_cleanup_failed",
+                session_id=session_id,
+                session_hash=session_hash,
+                key=key,
+                error_type=type(exc).__name__,
+            )
+    return closed, attempts
+
+
+def _cleanup_web_session(session_id: str, reason: str = "") -> dict[str, Any]:
     try:
         valid_session_id = session_store.validate_session_id(session_id)
     except ValueError as exc:
@@ -674,6 +695,7 @@ def _cleanup_web_session(session_id: str) -> dict[str, Any]:
 
     session_hash = manifest.resolve_session_hash(session_id=valid_session_id)
     session_store.close_session(valid_session_id)
+    browser_sessions_closed, browser_session_cleanup_attempts = _close_web_browser_sessions(valid_session_id, session_hash)
 
     removed_uploads = _safe_remove_tree(_web_upload_root() / valid_session_id)
     removed_session_dir = False
@@ -722,6 +744,9 @@ def _cleanup_web_session(session_id: str) -> dict[str, Any]:
         "removed_jobs": removed_jobs,
         "cancelled_jobs": cancelled_jobs,
         "terminated_workers": terminated_workers,
+        "browser_sessions_closed": browser_sessions_closed,
+        "browser_session_cleanup_attempts": browser_session_cleanup_attempts,
+        "reason": reason,
     }
     logging_utils.log_event("web_session_cleanup", **result)
     return result
@@ -751,7 +776,7 @@ def create_session(payload: dict[str, Any] | None = Body(default=None)) -> dict[
     cleanup_session_id = str((payload or {}).get("cleanup_session_id") or "").strip()
     if cleanup_session_id:
         try:
-            cleanup_result = _cleanup_web_session(cleanup_session_id)
+            cleanup_result = _cleanup_web_session(cleanup_session_id, "session_replaced")
         except HTTPException:
             cleanup_result = {"ok": False, "error": "invalid_cleanup_session"}
     state = session_store.ensure_session()
@@ -764,8 +789,8 @@ def create_session(payload: dict[str, Any] | None = Body(default=None)) -> dict[
 
 
 @app.post("/api/sessions/{session_id}/cleanup")
-def cleanup_session(session_id: str) -> dict[str, Any]:
-    return _cleanup_web_session(session_id)
+def cleanup_session(session_id: str, reason: str = Query(default="")) -> dict[str, Any]:
+    return _cleanup_web_session(session_id, reason)
 
 
 @app.post("/api/sessions/{session_id}/language")

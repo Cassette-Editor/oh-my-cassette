@@ -475,17 +475,20 @@ def _close_browser_record(record: dict[str, Any]) -> None:
             pass
 
 
-def close_browser_sessions(session_key: str | None = None) -> None:
+def close_browser_sessions(session_key: str | None = None) -> bool:
     global _PLAYWRIGHT, _PLAYWRIGHT_THREAD_ID
+    closed = False
     if session_key:
         record = _BROWSER_SESSIONS.pop(session_key, None)
         if record:
             _close_browser_record(record)
-        return
+            closed = True
+        return closed
     for key in list(_BROWSER_SESSIONS):
         record = _BROWSER_SESSIONS.pop(key, None)
         if record:
             _close_browser_record(record)
+            closed = True
     if _PLAYWRIGHT is not None:
         try:
             _PLAYWRIGHT.stop()
@@ -493,6 +496,8 @@ def close_browser_sessions(session_key: str | None = None) -> None:
             pass
         _PLAYWRIGHT = None
         _PLAYWRIGHT_THREAD_ID = None
+        closed = True
+    return closed
 
 
 atexit.register(close_browser_sessions)
@@ -525,11 +530,10 @@ def run_cassette_browser_job_threaded(job: dict) -> dict:
     return _browser_worker().submit(run_cassette_browser_job, job).result()
 
 
-def close_browser_sessions_threaded(session_key: str | None = None) -> None:
+def close_browser_sessions_threaded(session_key: str | None = None) -> bool:
     if not _browser_worker_enabled() or _in_browser_worker() or _BROWSER_WORKER is None:
-        close_browser_sessions(session_key)
-        return
-    _browser_worker().submit(close_browser_sessions, session_key).result()
+        return close_browser_sessions(session_key)
+    return bool(_browser_worker().submit(close_browser_sessions, session_key).result())
 
 
 def _shutdown_browser_worker() -> None:

@@ -102,8 +102,9 @@ export async function setServerLanguage(sessionId: string, language: Lang): Prom
   });
 }
 
-export function cleanupSession(sessionId: string): void {
-  const url = `/api/sessions/${encodeURIComponent(sessionId)}/cleanup`;
+export function cleanupSession(sessionId: string, reason = ""): void {
+  const query = reason ? `?reason=${encodeURIComponent(reason)}` : "";
+  const url = `/api/sessions/${encodeURIComponent(sessionId)}/cleanup${query}`;
   if (navigator.sendBeacon) {
     navigator.sendBeacon(url, new Blob(["{}"], { type: "application/json" }));
     return;
