@@ -517,6 +517,51 @@ def test_web_jobs_reconcile_stale_running_web_job(cassette_env):
     assert any(event.get("job_id") == web_job["job_id"] and event.get("kind") == "error" for event in events)
 
 
+def test_web_session_creation_reconciles_global_stale_web_job(cassette_env, monkeypatch):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo import server
+
+    session_store.reset_all()
+    old_session_id = "web_global_stale_job"
+    old_session_hash = tools.manifest.resolve_session_hash(session_id=old_session_id)
+    web_job = jobs.create_job(
+        old_session_hash,
+        "web prompt",
+        "web instruction",
+        [],
+        {
+            "cassette_session_id": old_session_id,
+            "delivery": {"platform": "web", "chat_id": old_session_id},
+            "timeout_sec": 1,
+        },
+    )
+    web_job["status"] = "running"
+    web_job["started_at"] = "2020-01-01T00:00:00Z"
+    web_job["current_stage"] = "export"
+    jobs.save_job(web_job)
+    closed_keys = []
+    abandoned = []
+
+    def fake_close(key=None, timeout_sec=None):
+        closed_keys.append((key, timeout_sec))
+        return False
+
+    monkeypatch.setattr(server.browser, "close_browser_sessions_threaded", fake_close)
+    monkeypatch.setattr(server.browser, "abandon_browser_worker", lambda: abandoned.append(True) or True)
+    client = TestClient(server.app)
+
+    response = client.post("/api/sessions")
+
+    assert response.status_code == 200
+    saved_web_job = jobs.load_job(web_job["job_id"])
+    assert saved_web_job["status"] == "timed_out"
+    assert saved_web_job["errors"][-1]["code"] == "web_demo_job_timeout"
+    assert closed_keys == [(old_session_id, 2.0), (old_session_hash, 2.0)]
+    assert abandoned == [True]
+
+
 def test_web_session_creation_cleans_previous_web_session(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi
@@ -604,7 +649,8 @@ def test_web_cleanup_closes_browser_sessions(cassette_env, monkeypatch):
 
     session_store.reset_all()
     closed_keys = []
-    def fake_close(key=None):
+    def fake_close(key=None, timeout_sec=None):
+        del timeout_sec
         closed_keys.append(key)
         return key != "missing"
     monkeypatch.setattr(server.browser, "close_browser_sessions_threaded", fake_close)

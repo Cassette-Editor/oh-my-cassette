@@ -636,7 +636,17 @@ def _reconcile_stale_web_jobs_for_session(session_id: str) -> None:
             )
 
 
-def _reconcile_stale_web_jobs_on_startup() -> None:
+def _web_job_session_identifiers(job: dict) -> tuple[str, str]:
+    delivery = job.get("delivery") if isinstance(job.get("delivery"), dict) else {}
+    session_id = str(job.get("cassette_session_id") or "").strip()
+    if not session_id and _is_web_platform(delivery.get("platform")):
+        session_id = str(delivery.get("chat_id") or "").strip()
+    return session_id, str(job.get("session_hash") or "").strip()
+
+
+def _reconcile_stale_web_jobs_globally() -> int:
+    timed_out_count = 0
+    worker_abandon_attempted = False
     for path in sorted(jobs.get_jobs_dir().glob("cassette_*.json"), reverse=True):
         try:
             job = jobs.load_job(path.stem)
@@ -645,7 +655,38 @@ def _reconcile_stale_web_jobs_on_startup() -> None:
         delivery = job.get("delivery") if isinstance(job.get("delivery"), dict) else {}
         if not _is_web_platform(delivery.get("platform")):
             continue
-        _timeout_stale_web_job(job)
+        before = str(job.get("status") or "")
+        updated = _timeout_stale_web_job(job)
+        if before not in _ACTIVE_JOB_STATUSES or str(updated.get("status") or "") != "timed_out":
+            continue
+        timed_out_count += 1
+        session_id, session_hash = _web_job_session_identifiers(updated)
+        if not worker_abandon_attempted:
+            worker_abandon_attempted = True
+            try:
+                abandoned = bool(browser.abandon_browser_worker())
+            except Exception as exc:
+                abandoned = False
+                logging_utils.log_event(
+                    "web_browser_worker_abandon_failed",
+                    error_type=type(exc).__name__,
+                )
+            if abandoned:
+                logging_utils.log_event("web_browser_worker_abandoned", reason="stale_web_job_timeout")
+        closed, attempts = _close_web_browser_sessions(session_id, session_hash)
+        logging_utils.log_event(
+            "web_stale_job_browser_cleanup",
+            session_id=session_id,
+            session_hash=session_hash,
+            job_id=updated.get("job_id"),
+            browser_sessions_closed=closed,
+            browser_session_cleanup_attempts=attempts,
+        )
+    return timed_out_count
+
+
+def _reconcile_stale_web_jobs_on_startup() -> None:
+    _reconcile_stale_web_jobs_globally()
 
 
 def _terminate_worker_if_any(job: dict) -> bool:
@@ -666,6 +707,13 @@ def _remove_job_record(job_id: str) -> bool:
     return _safe_remove_file(jobs.get_jobs_dir() / f"{job_id}.json")
 
 
+def _browser_session_cleanup_timeout_sec() -> float:
+    try:
+        return max(0.5, float(os.getenv("WEB_BROWSER_SESSION_CLEANUP_TIMEOUT_SEC", "2")))
+    except ValueError:
+        return 2.0
+
+
 def _close_web_browser_sessions(session_id: str, session_hash: str) -> tuple[int, int]:
     closed = 0
     attempts = 0
@@ -674,7 +722,7 @@ def _close_web_browser_sessions(session_id: str, session_hash: str) -> tuple[int
             continue
         attempts += 1
         try:
-            if browser.close_browser_sessions_threaded(key):
+            if browser.close_browser_sessions_threaded(key, timeout_sec=_browser_session_cleanup_timeout_sec()):
                 closed += 1
         except Exception as exc:
             logging_utils.log_event(
@@ -772,6 +820,7 @@ def index():
 
 @app.post("/api/sessions")
 def create_session(payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    _reconcile_stale_web_jobs_globally()
     cleanup_result: dict[str, Any] | None = None
     cleanup_session_id = str((payload or {}).get("cleanup_session_id") or "").strip()
     if cleanup_session_id:
@@ -905,6 +954,7 @@ def send_message(
             "action": "skip",
             "result": {"action": "skip", "reason": "web_session_flow_busy", "session_id": session_id},
         }
+    _reconcile_stale_web_jobs_globally()
     _reconcile_stale_web_jobs_for_session(session_id)
     active_job = _active_web_job_for_session(session_id)
     if active_job:
@@ -974,6 +1024,7 @@ def get_assets(session_id: str = Query(...)) -> dict[str, Any]:
 def get_jobs(session_id: str = Query(...), limit: int = Query(10)) -> dict[str, Any]:
     session_id = _require_session(session_id)
     _reconcile_stale_web_jobs_for_session(session_id)
+    _reconcile_stale_web_jobs_globally()
     payload = _tool_payload(tools.cassette_job_status({"session_id": session_id, "limit": limit}))
     visible_jobs: list[dict[str, Any]] = []
     for job in ((payload.get("data") or {}).get("jobs") or []):

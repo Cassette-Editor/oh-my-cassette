@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -11,7 +12,7 @@ from cassette import browser, jobs
 from cassette import tools
 
 
-def test_fetch_cassette_model_options_uses_browser_worker(monkeypatch):
+def test_fetch_cassette_model_options_does_not_wait_for_browser_worker(monkeypatch):
     calls = []
 
     def fake_fetch(url=None, language="zh"):
@@ -26,11 +27,29 @@ def test_fetch_cassette_model_options_uses_browser_worker(monkeypatch):
     monkeypatch.setenv("CASSETTE_BROWSER_WORKER_THREAD", "true")
     monkeypatch.setattr(browser, "_fetch_cassette_model_options_direct", fake_fetch)
 
-    result = browser.fetch_cassette_model_options(language="zh")
+    browser._shutdown_browser_worker()
+    browser._shutdown_model_options_worker()
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+
+    def block_browser_worker():
+        worker_started.set()
+        release_worker.wait(timeout=5)
+
+    worker_future = browser._browser_worker().submit(block_browser_worker)
+    assert worker_started.wait(timeout=1)
+    started = time.monotonic()
+    try:
+        result = browser.fetch_cassette_model_options(language="zh")
+    finally:
+        release_worker.set()
+        worker_future.result(timeout=2)
+        browser._shutdown_browser_worker()
+        browser._shutdown_model_options_worker()
 
     assert result["models"][0]["label"] == "Kimi K2.6"
-    assert calls == [True]
-    browser._shutdown_browser_worker()
+    assert calls == [False]
+    assert time.monotonic() - started < 1
 
 
 def test_progress_summary_dedupes_assistant_reply():

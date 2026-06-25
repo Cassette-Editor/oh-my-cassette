@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import atexit
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 import os
 import re
 import threading
@@ -67,6 +67,9 @@ _BROWSER_SESSIONS: dict[str, dict[str, Any]] = {}
 _BROWSER_WORKER: ThreadPoolExecutor | None = None
 _BROWSER_WORKER_LOCK = threading.Lock()
 _BROWSER_WORKER_THREAD_ID: int | None = None
+_MODEL_OPTIONS_WORKER: ThreadPoolExecutor | None = None
+_MODEL_OPTIONS_WORKER_LOCK = threading.Lock()
+_MODEL_OPTIONS_WORKER_THREAD_ID: int | None = None
 _TERMINAL_JOB_STATUSES = {"succeeded", "failed", "needs_user", "timed_out", "cancelled"}
 
 
@@ -76,6 +79,10 @@ def _browser_reuse_enabled() -> bool:
 
 def _browser_worker_enabled() -> bool:
     return os.getenv("CASSETTE_BROWSER_WORKER_THREAD", "true").lower() not in {"0", "false", "no", "off"}
+
+
+def _model_options_worker_enabled() -> bool:
+    return os.getenv("CASSETTE_MODEL_OPTIONS_WORKER_THREAD", "true").lower() not in {"0", "false", "no", "off"}
 
 
 def _browser_session_key(job: dict) -> str:
@@ -473,6 +480,12 @@ def _close_browser_record(record: dict[str, Any]) -> None:
             target.close()
         except Exception:
             pass
+    isolated_playwright = record.get("isolated_playwright")
+    if isolated_playwright is not None:
+        try:
+            isolated_playwright.stop()
+        except Exception:
+            pass
 
 
 def close_browser_sessions(session_key: str | None = None) -> bool:
@@ -520,8 +533,29 @@ def _browser_worker() -> ThreadPoolExecutor:
         return _BROWSER_WORKER
 
 
+def _init_model_options_worker() -> None:
+    global _MODEL_OPTIONS_WORKER_THREAD_ID
+    _MODEL_OPTIONS_WORKER_THREAD_ID = threading.get_ident()
+
+
+def _model_options_worker() -> ThreadPoolExecutor:
+    global _MODEL_OPTIONS_WORKER
+    with _MODEL_OPTIONS_WORKER_LOCK:
+        if _MODEL_OPTIONS_WORKER is None:
+            _MODEL_OPTIONS_WORKER = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="cassette-model-options",
+                initializer=_init_model_options_worker,
+            )
+        return _MODEL_OPTIONS_WORKER
+
+
 def _in_browser_worker() -> bool:
     return _BROWSER_WORKER_THREAD_ID == threading.get_ident()
+
+
+def _in_model_options_worker() -> bool:
+    return _MODEL_OPTIONS_WORKER_THREAD_ID == threading.get_ident()
 
 
 def run_cassette_browser_job_threaded(job: dict) -> dict:
@@ -530,14 +564,19 @@ def run_cassette_browser_job_threaded(job: dict) -> dict:
     return _browser_worker().submit(run_cassette_browser_job, job).result()
 
 
-def close_browser_sessions_threaded(session_key: str | None = None) -> bool:
+def close_browser_sessions_threaded(session_key: str | None = None, timeout_sec: float | None = None) -> bool:
     if not _browser_worker_enabled() or _in_browser_worker() or _BROWSER_WORKER is None:
         return close_browser_sessions(session_key)
-    return bool(_browser_worker().submit(close_browser_sessions, session_key).result())
+    future = _browser_worker().submit(close_browser_sessions, session_key)
+    try:
+        return bool(future.result(timeout=timeout_sec))
+    except FuturesTimeoutError:
+        future.cancel()
+        return False
 
 
 def _shutdown_browser_worker() -> None:
-    global _BROWSER_WORKER
+    global _BROWSER_WORKER, _BROWSER_WORKER_THREAD_ID
     executor = _BROWSER_WORKER
     if executor is None:
         return
@@ -547,9 +586,41 @@ def _shutdown_browser_worker() -> None:
         pass
     executor.shutdown(wait=False)
     _BROWSER_WORKER = None
+    _BROWSER_WORKER_THREAD_ID = None
 
 
 atexit.register(_shutdown_browser_worker)
+
+
+def abandon_browser_worker() -> bool:
+    global _BROWSER_WORKER, _BROWSER_WORKER_THREAD_ID
+    with _BROWSER_WORKER_LOCK:
+        executor = _BROWSER_WORKER
+        if executor is None:
+            return False
+        _BROWSER_WORKER = None
+        _BROWSER_WORKER_THREAD_ID = None
+    try:
+        executor.shutdown(wait=False, cancel_futures=True)
+    except TypeError:
+        executor.shutdown(wait=False)
+    return True
+
+
+def _shutdown_model_options_worker() -> None:
+    global _MODEL_OPTIONS_WORKER, _MODEL_OPTIONS_WORKER_THREAD_ID
+    executor = _MODEL_OPTIONS_WORKER
+    if executor is None:
+        return
+    try:
+        executor.shutdown(wait=False, cancel_futures=True)
+    except TypeError:
+        executor.shutdown(wait=False)
+    _MODEL_OPTIONS_WORKER = None
+    _MODEL_OPTIONS_WORKER_THREAD_ID = None
+
+
+atexit.register(_shutdown_model_options_worker)
 
 
 def _playwright() -> Any:
@@ -694,7 +765,15 @@ def _prepare_agent_page_for_automation(page: Any, job_id: str, timeout_ms: int) 
         return auth, ui_ready
 
 
-def _new_browser_record(job: dict, headless: bool, launch_args: list[str], url: str, timeout_ms: int) -> dict[str, Any]:
+def _new_browser_record(
+    job: dict,
+    headless: bool,
+    launch_args: list[str],
+    url: str,
+    timeout_ms: int,
+    *,
+    isolated_playwright: bool = False,
+) -> dict[str, Any]:
     job_id = str(job.get("job_id") or "")
     connectivity_start = time.monotonic()
     if job_id:
@@ -718,7 +797,12 @@ def _new_browser_record(job: dict, headless: bool, launch_args: list[str], url: 
     if not connectivity.get("ok"):
         code = str(connectivity.get("code") or "cassette_unreachable")
         raise BrowserConnectivityError(code, "Cassette is not reachable; check network settings.")
-    pw = _playwright()
+    if isolated_playwright:
+        from playwright.sync_api import sync_playwright
+
+        pw = sync_playwright().start()
+    else:
+        pw = _playwright()
     browser = None
     try:
         browser = pw.chromium.launch(headless=headless, args=launch_args)
@@ -728,6 +812,11 @@ def _new_browser_record(job: dict, headless: bool, launch_args: list[str], url: 
         if browser is not None:
             try:
                 browser.close()
+            except Exception:
+                pass
+        if isolated_playwright:
+            try:
+                pw.stop()
             except Exception:
                 pass
         raise BrowserLaunchError(str(exc)) from exc
@@ -741,6 +830,7 @@ def _new_browser_record(job: dict, headless: bool, launch_args: list[str], url: 
         "uploaded_asset_fingerprints": (),
         "console_messages": [],
         "connectivity": connectivity,
+        "isolated_playwright": pw if isolated_playwright else None,
     }
     page.on("console", lambda msg: record["console_messages"].append(f"{msg.type}: {msg.text}"[:500]))
     try:
@@ -2916,7 +3006,7 @@ def _fetch_cassette_model_options_direct(url: str | None = None, language: str =
     launch_args = []
     if os.getenv("CASSETTE_NO_SANDBOX", "false").lower() in {"1", "true", "yes"}:
         launch_args.append("--no-sandbox")
-    record = _new_browser_record({"job_id": ""}, headless, launch_args, target_url, timeout_ms)
+    record = _new_browser_record({"job_id": ""}, headless, launch_args, target_url, timeout_ms, isolated_playwright=True)
     try:
         page = record["page"]
         try:
@@ -2949,10 +3039,28 @@ def _fetch_cassette_model_options_direct(url: str | None = None, language: str =
         _close_browser_record(record)
 
 
+def _model_options_result_timeout_sec() -> float:
+    configured = os.getenv("CASSETTE_MODEL_OPTIONS_WORKER_TIMEOUT_SEC", "").strip()
+    if configured:
+        try:
+            return max(1.0, float(configured))
+        except ValueError:
+            pass
+    try:
+        return max(1.0, float(os.getenv("CASSETTE_MODEL_OPTIONS_TIMEOUT_SEC", "30")) + 5.0)
+    except ValueError:
+        return 35.0
+
+
 def fetch_cassette_model_options(url: str | None = None, language: str = "zh") -> dict[str, Any]:
-    if not _browser_worker_enabled() or _in_browser_worker():
+    if not _model_options_worker_enabled() or _in_model_options_worker():
         return _fetch_cassette_model_options_direct(url=url, language=language)
-    return _browser_worker().submit(_fetch_cassette_model_options_direct, url, language).result()
+    future = _model_options_worker().submit(_fetch_cassette_model_options_direct, url, language)
+    try:
+        return future.result(timeout=_model_options_result_timeout_sec())
+    except FuturesTimeoutError as exc:
+        future.cancel()
+        raise RuntimeError("cassette_model_options_timeout") from exc
 
 
 def _select_cassette_model(page: Any, job: dict) -> dict:
