@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useApp } from "../useCassette";
 import type { Translate } from "../i18n";
 import type { Asset, Job } from "../types";
@@ -9,41 +10,60 @@ interface Props {
 
 export function SidePanel({ open, onClose }: Props) {
   const { t, assets, jobs, send } = useApp();
+  const paneRef = useRef<HTMLElement>(null);
+
+  // When closed, the panel is off-screen but still in the DOM for its slide
+  // transition — `inert` keeps it out of the tab order and the a11y tree.
+  useEffect(() => {
+    const el = paneRef.current;
+    if (el) el.inert = !open;
+  }, [open]);
+
   return (
-    <aside className={`side-pane ${open ? "open" : ""}`} data-tour="sidepanel" aria-label={t("statusAria")}>
-      <button type="button" className="drawer-close" onClick={onClose} aria-label={t("statusClose")}>
-        ✕
-      </button>
+    <aside
+      ref={paneRef}
+      className={`side-pane ${open ? "open" : ""}`}
+      data-tour="sidepanel"
+      aria-label={t("statusAria")}
+    >
+      <div className="side-pane-head">
+        <h2>{t("status")}</h2>
+        <button type="button" className="drawer-close" onClick={onClose} aria-label={t("statusClose")}>
+          ✕
+        </button>
+      </div>
 
-      <section>
-        <div className="section-title">
-          <h2>{t("assetsTitle")}</h2>
-          <button type="button" onClick={() => void send("/check_assets")}>
-            {t("check")}
-          </button>
-        </div>
-        <div className="asset-list">
-          {assets && assets.length === 0 && <EmptyCard text={t("emptyAssets")} />}
-          {assets?.map((asset, index) => (
-            <AssetCard key={asset.asset_id || index} asset={asset} t={t} />
-          ))}
-        </div>
-      </section>
+      <div className="side-pane-body">
+        <section>
+          <div className="section-title">
+            <h2>{t("assetsTitle")}</h2>
+            <button type="button" onClick={() => void send("/check_assets")}>
+              {t("check")}
+            </button>
+          </div>
+          <div className="asset-list">
+            {assets && assets.length === 0 && <EmptyCard text={t("emptyAssets")} />}
+            {assets?.map((asset, index) => (
+              <AssetCard key={asset.asset_id || index} asset={asset} t={t} />
+            ))}
+          </div>
+        </section>
 
-      <section>
-        <div className="section-title">
-          <h2>{t("jobsTitle")}</h2>
-          <button type="button" title={t("pauseTitle")} onClick={() => void send("/cut")}>
-            {t("pause")}
-          </button>
-        </div>
-        <div className="job-list">
-          {jobs && jobs.length === 0 && <EmptyCard text={t("emptyJobs")} />}
-          {jobs?.map((job, index) => (
-            <JobCard key={job.job_id || index} job={job} t={t} />
-          ))}
-        </div>
-      </section>
+        <section>
+          <div className="section-title">
+            <h2>{t("jobsTitle")}</h2>
+            <button type="button" title={t("pauseTitle")} onClick={() => void send("/cut")}>
+              {t("pause")}
+            </button>
+          </div>
+          <div className="job-list">
+            {jobs && jobs.length === 0 && <EmptyCard text={t("emptyJobs")} />}
+            {jobs?.map((job, index) => (
+              <JobCard key={job.job_id || index} job={job} t={t} />
+            ))}
+          </div>
+        </section>
+      </div>
     </aside>
   );
 }
