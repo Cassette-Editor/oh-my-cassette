@@ -4,15 +4,16 @@ import { Messages } from "./Messages";
 import { Composer } from "./Composer";
 
 export function ChatPane() {
-  const { t, upload } = useApp();
+  const { t, upload, messages } = useApp();
   const [dragging, setDragging] = useState(false);
   const depth = useRef(0);
+  const isEmpty = messages.length === 0;
 
   const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types || []).includes("Files");
 
   return (
     <section
-      className={`chat-pane ${dragging ? "dragover" : ""}`}
+      className={`chat-pane ${isEmpty ? "is-empty" : "is-active"} ${dragging ? "dragover" : ""}`}
       aria-label={t("messagesAria")}
       onDragEnter={(event) => {
         if (!hasFiles(event)) return;
@@ -39,6 +40,7 @@ export function ChatPane() {
       }}
     >
       <Messages />
+
       <div className="drop-hint" aria-hidden="true">
         <svg className="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -46,7 +48,23 @@ export function ChatPane() {
         </svg>
         <span>{t("dropHint")}</span>
       </div>
-      <Composer />
+
+      <div className="composer-dock">
+        {isEmpty && (
+          <div className="hero">
+            <svg className="hero-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="2.25" y="5.25" width="19.5" height="13.5" rx="3" stroke="currentColor" strokeWidth="1.5" />
+              <circle cx="8" cy="12" r="2.4" stroke="currentColor" strokeWidth="1.5" />
+              <circle cx="16" cy="12" r="2.4" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M10.4 12h3.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M7 18.75l1.6-2.4h6.8l1.6 2.4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+            <h2 className="hero-title">{t("emptyTitle")}</h2>
+            <p className="hero-sub">{t("emptyBody")}</p>
+          </div>
+        )}
+        <Composer />
+      </div>
     </section>
   );
 }

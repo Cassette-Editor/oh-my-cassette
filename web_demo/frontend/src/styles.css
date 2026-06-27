@@ -1,6 +1,7 @@
-/* Cassette web demo — dark grading-room theme.
+/* Cassette web demo — dark grading-room theme, chat-agent layout.
    Tokens mirror DESIGN.md: cool near-black room, amber reserved for state,
-   coral→lemon spectrum reserved for the AI presence. */
+   coral→lemon spectrum reserved for the AI presence. The conversation is the
+   stage; assets / jobs / work-logs live in an on-demand status slide-over. */
 :root {
   --grade-black: #07080b;
   --panel: #101216;
@@ -15,7 +16,7 @@
   --ink-faint: #61626b;
 
   /* Scrollbar — cool-gray thumb on a transparent track, quiet at rest so the
-     footage/preview stays the loudest thing on screen, brighter on interaction. */
+     conversation stays the loudest thing on screen, brighter on interaction. */
   --scroll-thumb: #3c3d46;
   --scroll-thumb-hover: #54555f;
   --scroll-thumb-active: #62636d;
@@ -38,6 +39,8 @@
   --r-sm: 4px;
   --r-md: 8px;
   --r-lg: 12px;
+  --r-xl: 18px;
+  --r-bubble: 20px;
   --r-full: 9999px;
 
   --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -48,6 +51,11 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 
   --shadow-lg: 0 10px 24px -6px rgb(0 0 0 / 0.55), 0 4px 8px -4px rgb(0 0 0 / 0.4);
+  --shadow-panel: -16px 0 40px -12px rgb(0 0 0 / 0.5);
+
+  /* Chat-agent measures */
+  --thread: 768px;       /* readable conversation column */
+  --avatar: 30px;        /* assistant identity disc */
 
   --z-banner: 20;
   --z-dropzone: 30;
@@ -76,6 +84,7 @@ body {
   font-size: 0.9375rem;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   overflow-x: hidden;
 }
 
@@ -86,9 +95,7 @@ body {
 /* ---- Scrollbars ----
    Theme the native scrollbar to the grading-room palette so it stops reading as
    a bright OS chrome element on the near-black surface. Native behaviour is kept
-   intact — this is colour/size only, not a custom affordance. Firefox + modern
-   Chromium read the standards-track properties (inherited from :root); Safari and
-   WebKit/older Chromium read the ::-webkit-scrollbar pseudo-elements. */
+   intact — this is colour/size only, not a custom affordance. */
 :root {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
@@ -103,8 +110,6 @@ body {
 }
 ::-webkit-scrollbar-thumb {
   background-color: var(--scroll-thumb);
-  /* Transparent border + padding-box clip leaves a gutter, so the thumb reads as
-     a slim floating bar with breathing room rather than a full-width slab. */
   border: 3px solid transparent;
   background-clip: padding-box;
   border-radius: var(--r-full);
@@ -141,7 +146,7 @@ button {
   cursor: pointer;
   white-space: nowrap;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
-    color var(--dur) var(--ease), opacity var(--dur) var(--ease);
+    color var(--dur) var(--ease), opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
 
 button:hover {
@@ -176,15 +181,33 @@ a:hover {
   text-decoration: underline;
 }
 
+/* Ghost header buttons — no resting chrome, accent neutral on hover. */
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-secondary);
+}
+.btn-ghost:hover {
+  background: var(--elevated);
+  border-color: var(--hairline);
+  color: var(--ink);
+}
+.btn-icon {
+  width: 38px;
+  padding: 0;
+}
+
 /* ---- Shell ---- */
 .app-shell {
   height: 100dvh;
   display: grid;
   grid-template-rows: auto auto 1fr;
+  /* Pin the single column to the viewport so a wide top bar can never stretch
+     the shell past 100vw (which would drag the composer off-screen on phones). */
+  grid-template-columns: minmax(0, 1fr);
 }
-/* Explicit placement so the workspace always owns the 1fr track, even when the
-   connection banner is absent (otherwise the remaining children auto-place into
-   the auto tracks and leave the 1fr track empty — a blank void below the fold). */
+/* Explicit placement so the workspace always owns the 1fr track even when the
+   connection banner is absent. */
 .connection-banner {
   grid-row: 1;
 }
@@ -237,13 +260,14 @@ a:hover {
   border-color: var(--ink-secondary);
 }
 
+/* ---- Top bar ---- */
 .topbar {
-  min-height: 64px;
+  min-height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 20px;
+  padding: 10px 18px;
   border-bottom: 1px solid var(--hairline);
   background: rgba(16, 18, 22, 0.82);
   backdrop-filter: blur(14px);
@@ -254,6 +278,7 @@ a:hover {
   align-items: center;
   gap: 11px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 .brand-mark {
   width: 30px;
@@ -268,10 +293,13 @@ a:hover {
   margin: 0;
 }
 .topbar h1 {
-  font-size: 1.25rem;
+  font-size: 1.1875rem;
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .topbar p {
   margin-top: 2px;
@@ -287,8 +315,8 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
   gap: 8px;
+  flex: 0 0 auto;
 }
 
 .language-toggle {
@@ -298,7 +326,7 @@ a:hover {
   overflow: hidden;
 }
 .language-toggle button {
-  min-width: 42px;
+  min-width: 40px;
   min-height: 38px;
   border: 0;
   border-radius: 0;
@@ -308,7 +336,7 @@ a:hover {
 .language-toggle button + button {
   border-left: 1px solid var(--hairline);
 }
-/* Active state uses colour only — no weight change, so the glyph width (and the
+/* Active state uses colour only — no weight change, so glyph width (and the
    toggle) never shifts when the active segment changes. */
 .language-toggle button.active {
   color: var(--grade-black);
@@ -318,91 +346,109 @@ a:hover {
   background: var(--amber);
 }
 
+/* Status toggle — opens the assets / jobs / work-log slide-over. */
 .status-toggle {
-  display: none;
+  position: relative;
+  gap: 7px;
+}
+.status-toggle .status-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  background: var(--elevated);
+  border: 1px solid var(--hairline-strong);
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1;
 }
 
 /* ---- Workspace ---- */
 .workspace {
+  position: relative;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
   overflow: hidden;
 }
 
+/* ---- Chat pane: empty (centered) ↔ active (docked) ---- */
 .chat-pane {
   position: relative;
+  height: 100%;
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: 1fr auto;
+  display: flex;
+  flex-direction: column;
   container-type: inline-size;
 }
 
 .messages {
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  padding: 24px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px 24px 8px;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+.thread {
+  width: 100%;
+  max-width: var(--thread);
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  scroll-behavior: smooth;
+  gap: 22px;
 }
 
-.message {
-  max-width: min(720px, 86cqi);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-lg);
-  padding: 11px 14px;
-  background: var(--surface);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+/* Empty state: hide the (empty) scroll area and center the welcome + composer. */
+.chat-pane.is-empty {
+  justify-content: center;
+}
+.chat-pane.is-empty .messages {
+  display: none;
+}
+
+/* ---- Message rows ---- */
+.msg {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
   animation: msg-in var(--dur-slow) var(--ease);
 }
-.message.user {
-  align-self: flex-end;
-  background: var(--elevated);
-  border-color: var(--hairline-strong);
-}
-.message.assistant {
-  align-self: flex-start;
-}
-.message.error {
-  align-self: flex-start;
-  border-color: rgba(220, 40, 40, 0.5);
-  background: rgba(220, 40, 40, 0.12);
-}
-.error-row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-}
-.error-icon {
-  color: var(--destructive);
-  font-size: 1rem;
-  line-height: 1.4;
-  flex: 0 0 auto;
-}
-.retry-inline {
-  margin-top: 10px;
-  min-height: 32px;
-  padding: 0 12px;
-  font-size: 0.8125rem;
+.msg-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.62;
 }
 
-.message.thinking {
-  padding: 14px 16px;
-  box-shadow: 0 0 18px rgba(250, 102, 92, 0.16);
-}
-.thinking-ring {
+/* Assistant identity disc */
+.avatar {
   position: relative;
+  flex: 0 0 auto;
+  width: var(--avatar);
+  height: var(--avatar);
+  border-radius: var(--r-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--elevated);
+  border: 1px solid var(--hairline);
+  color: var(--amber);
 }
-.thinking-ring::before {
+.avatar svg {
+  width: 18px;
+  height: 18px;
+}
+/* The AI presence: a slow conic ring around the disc while the agent works. */
+.avatar.is-thinking::before {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -2px;
   border-radius: inherit;
-  padding: 1.5px;
+  padding: 2px;
   background: conic-gradient(
     from var(--agent-angle),
     var(--coral),
@@ -420,11 +466,64 @@ a:hover {
   animation: agent-spin 4s linear infinite;
   pointer-events: none;
 }
+
+/* Assistant: plain text flowing in the column (no bubble). */
+.msg.assistant .msg-content {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding-top: 3px;
+}
+
+/* User: a compact bubble aligned to the right. */
+.msg.user {
+  justify-content: flex-end;
+}
+.msg.user .msg-bubble {
+  max-width: 82%;
+  padding: 10px 15px;
+  border-radius: var(--r-bubble);
+  border-top-right-radius: var(--r-md);
+  background: var(--elevated);
+  border: 1px solid var(--hairline-strong);
+}
+
+/* Error / system notice — a clearly-flagged alert card spanning the column.
+   This is where connection / send / upload failures surface in the log. */
+.msg.error {
+  align-items: stretch;
+}
+.msg.error .msg-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid rgba(220, 40, 40, 0.5);
+  background: rgba(220, 40, 40, 0.1);
+  border-radius: var(--r-lg);
+  padding: 12px 14px;
+}
+.error-row {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+.error-icon {
+  color: #f06464;
+  font-size: 1rem;
+  line-height: 1.5;
+  flex: 0 0 auto;
+}
+.retry-inline {
+  margin-top: 10px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 0.8125rem;
+}
+
+/* Thinking dots */
 .typing {
   display: inline-flex;
   gap: 5px;
   align-items: center;
-  height: 1.2em;
+  height: 1.3em;
 }
 .typing i {
   width: 6px;
@@ -442,8 +541,10 @@ a:hover {
   background: var(--coral-glow);
 }
 
+/* Upload progress lives in an assistant row */
 .upload-progress {
-  width: min(360px, 78%);
+  width: 100%;
+  max-width: 360px;
 }
 .upload-progress-head {
   display: flex;
@@ -469,6 +570,7 @@ a:hover {
   transition: width var(--dur) var(--ease);
 }
 
+/* Attachments */
 .attachment {
   display: block;
   margin-top: 10px;
@@ -486,73 +588,175 @@ a:hover {
   font-weight: 600;
 }
 
-/* ---- Composer ---- */
-.composer {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    "chips chips chips"
-    "upload input send";
-  gap: 10px;
-  padding: 14px;
-  border-top: 1px solid var(--hairline);
-  background: var(--panel);
+/* ---- Welcome hero (empty state) ---- */
+.hero {
+  max-width: var(--thread);
+  margin: 0 auto 20px;
+  text-align: center;
+  animation: msg-in var(--dur-slow) var(--ease);
 }
+.hero-mark {
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 16px;
+  color: var(--amber);
+  filter: drop-shadow(0 0 20px rgba(244, 147, 37, 0.28));
+}
+.hero-title {
+  margin: 0;
+  font-size: clamp(1.45rem, 4.2vw, 1.8rem);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+.hero-sub {
+  margin: 10px auto 0;
+  max-width: 46ch;
+  color: var(--ink-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+/* ---- Composer ---- */
+.composer-dock {
+  flex: 0 0 auto;
+  padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+}
+.chat-pane.is-active .composer-dock {
+  position: relative;
+  border-top: 1px solid var(--hairline);
+  background: var(--grade-black);
+}
+/* Soft fade so messages dissolve into the dock as they scroll under it. */
+.chat-pane.is-active .composer-dock::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -28px;
+  height: 28px;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--grade-black), transparent);
+}
+
+.composer {
+  width: 100%;
+  max-width: var(--thread);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .command-chips {
-  grid-area: chips;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
+.chat-pane.is-empty .command-chips {
+  justify-content: center;
+}
 .command-chips button {
-  min-height: 28px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 0 12px;
   border-radius: var(--r-full);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   color: var(--ink-secondary);
 }
-#uploadBtn {
-  grid-area: upload;
-  min-width: 6rem;
+.command-chips button:hover {
+  color: var(--ink);
 }
-#sendBtn {
-  grid-area: send;
-  min-width: 6rem;
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--grade-black);
-  font-weight: 600;
+
+/* The input box — a single rounded surface holding the field + inline actions. */
+.composer-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 8px 8px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.25);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-#sendBtn:hover {
-  background: var(--ink-secondary);
-  border-color: var(--ink-secondary);
+.composer-box:hover {
+  border-color: var(--hairline-strong);
 }
-#sendBtn:disabled {
-  background: var(--elevated);
-  border-color: var(--hairline);
-  color: var(--ink-muted);
+.composer-box:focus-within {
+  border-color: var(--hairline-strong);
+  box-shadow: 0 0 0 1px var(--hairline-strong), 0 1px 0 rgb(0 0 0 / 0.25);
 }
 .composer textarea {
-  grid-area: input;
   width: 100%;
-  min-height: 44px;
-  max-height: 140px;
-  resize: vertical;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-  background: var(--grade-black);
-  padding: 10px 12px;
-  transition: border-color var(--dur) var(--ease);
-}
-.composer textarea:hover {
-  border-color: var(--hairline-strong);
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  padding: 7px 4px 0;
+  min-height: 28px;
+  max-height: 200px;
+  line-height: 1.5;
+  overflow-y: auto;
 }
 ::placeholder {
   color: var(--ink-muted);
   opacity: 1;
 }
 
+.composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.composer-bar .icon-btn,
+.composer-bar .send-btn {
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+}
+.composer-bar .icon-btn {
+  background: transparent;
+  color: var(--ink-secondary);
+}
+.composer-bar .icon-btn:hover {
+  background: var(--elevated);
+  color: var(--ink);
+}
+.composer-bar .icon-btn .icon,
+.composer-bar .send-btn .icon {
+  width: 18px;
+  height: 18px;
+}
+.send-btn {
+  background: var(--ink);
+  color: var(--grade-black);
+}
+.send-btn:hover:not(:disabled) {
+  background: var(--ink-secondary);
+}
+.send-btn:disabled {
+  background: var(--elevated);
+  color: var(--ink-faint);
+  cursor: not-allowed;
+}
+.send-btn .spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-full);
+  border: 2px solid rgba(247, 247, 248, 0.25);
+  border-top-color: var(--ink);
+  animation: spin 0.7s linear infinite;
+}
+
+/* Drag-and-drop hint overlays the whole pane */
 .drop-hint {
   position: absolute;
   inset: 12px;
@@ -572,23 +776,78 @@ a:hover {
   display: flex;
 }
 
-/* ---- Side pane / status drawer ---- */
+/* ---- Status slide-over (assets / jobs / work logs) ---- */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drawer-backdrop);
+  background: rgba(4, 5, 7, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) ease;
+}
+.drawer-backdrop.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .side-pane {
-  min-height: 0;
-  min-width: 0;
-  overflow: auto;
-  border-left: 1px solid var(--hairline);
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100dvh;
+  width: min(384px, 92vw);
+  z-index: var(--z-drawer);
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
+  border-left: 1px solid var(--hairline);
+  box-shadow: var(--shadow-panel);
+  transform: translateX(100%);
+  transition: transform var(--dur-slow) var(--ease);
+  will-change: transform;
+}
+.side-pane.open {
+  transform: translateX(0);
+}
+
+.side-pane-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 16px 20px;
+  border-bottom: 1px solid var(--hairline);
+}
+.side-pane-head h2 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.drawer-close {
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  border-radius: var(--r-full);
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-secondary);
+}
+.drawer-close:hover {
+  background: var(--elevated);
+  border-color: var(--hairline);
+  color: var(--ink);
+}
+
+.side-pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
-}
-.drawer-close {
-  display: none;
-}
-.drawer-backdrop {
-  display: none;
+  gap: 24px;
 }
 
 .section-title {
@@ -604,12 +863,15 @@ a:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.9375rem;
+  font-size: 0.8125rem;
   font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
 }
 .section-title button {
   flex: 0 0 auto;
-  min-width: 4.5rem;
+  min-width: 4.25rem;
   min-height: 30px;
   padding: 0 11px;
   font-size: 0.8125rem;
@@ -631,7 +893,7 @@ a:hover {
   color: var(--ink-muted);
   font-size: 0.8125rem;
   text-align: center;
-  padding: 16px 12px;
+  padding: 18px 12px;
   border-style: dashed;
 }
 .card-title {
@@ -773,10 +1035,6 @@ dialog::backdrop {
 }
 
 /* ---- Onboarding tour ---- */
-/* A guided first-run overlay. The container itself never blocks: only its
-   backdrop captures clicks, the spotlight is purely visual, and the card holds
-   the controls. The dim is emitted entirely by the spotlight's outer shadow so
-   the highlighted target stays at full app brightness. */
 .onb {
   position: fixed;
   inset: 0;
@@ -803,7 +1061,6 @@ dialog::backdrop {
     width var(--dur-slow) var(--ease), height var(--dur-slow) var(--ease);
   animation: onb-fade var(--dur-slow) var(--ease);
 }
-/* Breathing amber bloom, kept separate from the position transition above. */
 .onb-spotlight::after {
   content: "";
   position: absolute;
@@ -917,15 +1174,12 @@ dialog::backdrop {
   .onb-card {
     right: auto;
     left: 24px;
-    /* Cap so the card always clears the 340px side panel (plus margins). */
-    width: min(760px, calc(100vw - 388px));
+    width: min(620px, calc(100vw - 48px));
+    padding: 20px 22px;
+    gap: 18px;
   }
   .onb-card.anchor-bottom {
     bottom: 24px;
-  }
-  .onb-card {
-    padding: 20px 22px;
-    gap: 18px;
   }
 }
 
@@ -971,14 +1225,6 @@ dialog::backdrop {
     opacity: 1;
   }
 }
-@keyframes drawer-in {
-  from {
-    transform: translateY(100%);
-  }
-  to {
-    transform: translateY(0);
-  }
-}
 @keyframes onb-fade {
   from {
     opacity: 0;
@@ -1018,11 +1264,11 @@ dialog::backdrop {
   }
 }
 
-/* Desktop: reserve the wider (English) label so the top-bar controls keep a
-   constant size when the locale switches — no reflow, no jiggle. */
+/* Desktop: reserve a constant width for the locale-toggle labels so the top-bar
+   controls keep a constant size when the locale switches — no reflow, no jiggle. */
 @media (min-width: 861px) {
   .topbar-actions > button {
-    min-width: 5.5rem;
+    min-width: max-content;
   }
 }
 
@@ -1030,107 +1276,88 @@ dialog::backdrop {
 @media (max-width: 860px) {
   .topbar {
     min-height: 0;
-    padding: max(10px, env(safe-area-inset-top)) 14px 10px;
+    padding: max(10px, env(safe-area-inset-top)) 12px 10px;
     gap: 10px;
   }
   .topbar h1 {
-    font-size: 1.15rem;
+    font-size: 1rem;
   }
   .topbar-actions {
-    gap: 6px;
+    gap: 4px;
   }
-  .topbar-actions > button {
-    padding: 0 11px;
+  .language-toggle button {
+    min-width: 32px;
+    padding: 0 6px;
   }
+  /* Collapse the Status control to a uniform icon button on the smallest bar. */
   .status-toggle {
-    display: inline-flex;
+    width: 38px;
+    padding: 0;
   }
-
-  .workspace {
-    grid-template-columns: minmax(0, 1fr);
+  .status-toggle .status-label,
+  .status-toggle .status-count {
+    display: none;
   }
 
   .messages {
-    padding: 14px;
+    padding: 16px 14px 6px;
   }
-
-  .composer {
-    grid-template-columns: minmax(74px, auto) minmax(0, 1fr);
-    grid-template-areas:
-      "chips chips"
-      "input input"
-      "upload send";
-    gap: 8px;
+  .composer-dock {
     padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   }
   .composer textarea {
-    min-height: 64px;
-    font-size: 16px;
+    font-size: 16px; /* iOS: avoid input-zoom */
   }
-  .composer button,
+  .command-chips button,
   .settings input {
     font-size: 16px;
   }
 
-  .drawer-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: var(--z-drawer-backdrop);
-    background: rgba(4, 5, 7, 0.5);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity var(--dur) ease;
-  }
-  .drawer-backdrop.show {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
+  /* Status panel becomes a bottom sheet */
   .side-pane {
-    position: fixed;
+    top: auto;
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: var(--z-drawer);
+    width: auto;
+    height: auto;
     max-height: 82dvh;
     border-left: 0;
     border-top: 1px solid var(--hairline);
     border-top-left-radius: var(--r-lg);
     border-top-right-radius: var(--r-lg);
     box-shadow: var(--shadow-lg);
-    padding: 16px 16px calc(18px + env(safe-area-inset-bottom));
     transform: translateY(100%);
     transition: transform var(--dur-slow) var(--ease);
   }
   .side-pane.open {
     transform: translateY(0);
   }
-  .side-pane::before {
+  .side-pane-head {
+    padding: 14px 14px 14px 18px;
+  }
+  .side-pane-head::before {
     content: "";
-    display: block;
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    transform: translateX(-50%);
     width: 36px;
     height: 4px;
     border-radius: var(--r-full);
     background: var(--hairline-strong);
-    margin: 0 auto 14px;
   }
-  .drawer-close {
-    display: inline-flex;
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    min-height: 32px;
-    width: 32px;
-    padding: 0;
-    border-radius: var(--r-full);
-    color: var(--ink-secondary);
+  .side-pane-head {
+    position: relative;
+    padding-top: 18px;
+  }
+  .side-pane-body {
+    padding: 16px 16px calc(18px + env(safe-area-inset-bottom));
   }
 }
 
 @media (max-width: 380px) {
   .topbar-actions {
-    flex-wrap: wrap;
-    justify-content: flex-end;
+    gap: 5px;
   }
 }

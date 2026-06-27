@@ -24,12 +24,11 @@ const STEPS: StepDef[] = [
   { target: "upload", titleKey: "onbUploadTitle", bodyKey: "onbUploadBody", pad: 8 },
   { target: "composer", titleKey: "onbComposeTitle", bodyKey: "onbComposeBody", pad: 8 },
   {
-    target: "sidepanel",
-    mobileTarget: "status-toggle",
+    target: "status-toggle",
     titleKey: "onbStatusTitle",
     bodyKey: "onbStatusBody",
     mobileBodyKey: "onbStatusBodyMobile",
-    pad: 10,
+    pad: 8,
   },
 ];
 
