@@ -14,30 +14,55 @@ export function Messages() {
 
   return (
     <div className="messages" ref={scrollRef} role="log" aria-live="polite" aria-relevant="additions">
-      {messages.map((message) => (
-        <MessageItem key={String(message.id)} message={message} t={t} dismiss={dismiss} />
-      ))}
-      {uploadProgress && (
-        <article className="message assistant thinking thinking-ring upload-progress" aria-label={uploadProgress.label}>
-          <div className="upload-progress-head">
-            <span>{uploadProgress.label}</span>
-            <span>{uploadProgress.percent}%</span>
-          </div>
-          <div className="upload-progress-bar" aria-hidden="true">
-            <span style={{ width: `${uploadProgress.percent}%` }} />
-          </div>
-        </article>
-      )}
-      {!uploadProgress && sending && (
-        <article className="message assistant thinking thinking-ring" aria-label={t("thinking")}>
-          <span className="typing">
-            <i />
-            <i />
-            <i />
-          </span>
-        </article>
-      )}
+      <div className="thread">
+        {messages.map((message) => (
+          <MessageItem key={String(message.id)} message={message} t={t} dismiss={dismiss} />
+        ))}
+
+        {uploadProgress && (
+          <article className="msg assistant" aria-label={uploadProgress.label}>
+            <AssistantAvatar thinking />
+            <div className="msg-content">
+              <div className="upload-progress">
+                <div className="upload-progress-head">
+                  <span>{uploadProgress.label}</span>
+                  <span className="mono">{uploadProgress.percent}%</span>
+                </div>
+                <div className="upload-progress-bar" aria-hidden="true">
+                  <span style={{ width: `${uploadProgress.percent}%` }} />
+                </div>
+              </div>
+            </div>
+          </article>
+        )}
+
+        {!uploadProgress && sending && (
+          <article className="msg assistant thinking" aria-label={t("thinking")}>
+            <AssistantAvatar thinking />
+            <div className="msg-content">
+              <span className="typing">
+                <i />
+                <i />
+                <i />
+              </span>
+            </div>
+          </article>
+        )}
+      </div>
     </div>
+  );
+}
+
+function AssistantAvatar({ thinking = false }: { thinking?: boolean }) {
+  return (
+    <span className={`avatar ${thinking ? "is-thinking" : ""}`} aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none">
+        <rect x="2.5" y="6" width="19" height="12" rx="2.4" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="8.5" cy="12" r="2" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="15.5" cy="12" r="2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M10.5 12h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    </span>
   );
 }
 
@@ -53,34 +78,52 @@ function MessageItem({
   if (isErrorMessage(message)) {
     const retry = isLocalError(message) ? message.retry : undefined;
     return (
-      <article className="message error" role="alert">
-        <div className="error-row">
-          <span className="error-icon" aria-hidden="true">
-            ⚠
-          </span>
-          <div>{message.text}</div>
+      <article className="msg error" role="alert">
+        <div className="msg-content">
+          <div className="error-row">
+            <span className="error-icon" aria-hidden="true">
+              ⚠
+            </span>
+            <div className="msg-text">{message.text}</div>
+          </div>
+          {retry && (
+            <button
+              type="button"
+              className="retry-inline"
+              onClick={() => {
+                dismiss(String(message.id));
+                retry();
+              }}
+            >
+              {t("retry")}
+            </button>
+          )}
         </div>
-        {retry && (
-          <button
-            type="button"
-            className="retry-inline"
-            onClick={() => {
-              dismiss(String(message.id));
-              retry();
-            }}
-          >
-            {t("retry")}
-          </button>
-        )}
       </article>
     );
   }
 
   const event = message as ChatEvent;
+  const role = event.role || "assistant";
+
+  if (role === "user") {
+    return (
+      <article className="msg user">
+        <div className="msg-bubble">
+          <div className="msg-text">{event.text || ""}</div>
+          {event.has_attachment && event.attachment_url && <Attachment event={event} t={t} />}
+        </div>
+      </article>
+    );
+  }
+
   return (
-    <article className={`message ${event.role || "assistant"}`}>
-      <div>{event.text || ""}</div>
-      {event.has_attachment && event.attachment_url && <Attachment event={event} t={t} />}
+    <article className="msg assistant">
+      <AssistantAvatar />
+      <div className="msg-content">
+        <div className="msg-text">{event.text || ""}</div>
+        {event.has_attachment && event.attachment_url && <Attachment event={event} t={t} />}
+      </div>
     </article>
   );
 }
