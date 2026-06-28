@@ -53,6 +53,8 @@ export interface MutationResult {
   detail?: string;
 }
 
+const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+
 export async function postMessage(sessionId: string, text: string, language: Lang, clientEventId = ""): Promise<MutationResult> {
   const response = await fetch("/api/messages", {
     method: "POST",
@@ -76,6 +78,7 @@ export async function uploadFiles(
     for (const file of files) form.append("files", file);
     const request = new XMLHttpRequest();
     request.open("POST", "/api/uploads");
+    request.timeout = UPLOAD_TIMEOUT_MS;
     request.upload.onprogress = (event) => {
       if (!event.lengthComputable || !onProgress) return;
       onProgress(Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100))));
@@ -90,6 +93,7 @@ export async function uploadFiles(
     };
     request.onerror = () => resolve({ ok: false, detail: "upload network error" });
     request.onabort = () => resolve({ ok: false, detail: "upload aborted" });
+    request.ontimeout = () => resolve({ ok: false, detail: `upload timed out after ${Math.round(UPLOAD_TIMEOUT_MS / 1000)} seconds` });
     request.send(form);
   });
 }
