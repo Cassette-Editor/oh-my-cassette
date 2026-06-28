@@ -4,7 +4,7 @@ import { useApp } from "../useCassette";
 const COMMANDS = ["/edit", "/refine", "/music", "/cut"];
 
 export function Composer() {
-  const { t, send, upload, sending } = useApp();
+  const { t, send, upload, sending, uploading } = useApp();
   const [text, setText] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -88,9 +88,12 @@ export function Composer() {
             className="icon-btn"
             data-tour="upload"
             type="button"
-            title={t("uploadTitle")}
-            aria-label={t("upload")}
-            onClick={() => fileRef.current?.click()}
+            title={uploading ? t("uploadInProgress") : t("uploadTitle")}
+            aria-label={uploading ? t("uploadInProgress") : t("upload")}
+            disabled={uploading}
+            onClick={() => {
+              if (!uploading) fileRef.current?.click();
+            }}
           >
             <svg className="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />

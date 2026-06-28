@@ -53,7 +53,7 @@ export interface MutationResult {
   detail?: string;
 }
 
-const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+const UPLOAD_TIMEOUT_MS = 60 * 60 * 1000;
 
 export async function postMessage(sessionId: string, text: string, language: Lang, clientEventId = ""): Promise<MutationResult> {
   const response = await fetch("/api/messages", {

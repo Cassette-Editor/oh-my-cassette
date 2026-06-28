@@ -4,7 +4,7 @@ import { Messages } from "./Messages";
 import { Composer } from "./Composer";
 
 export function ChatPane() {
-  const { t, upload, messages } = useApp();
+  const { t, upload, messages, uploading } = useApp();
   const [dragging, setDragging] = useState(false);
   const depth = useRef(0);
   const isEmpty = messages.length === 0;
@@ -18,13 +18,14 @@ export function ChatPane() {
       onDragEnter={(event) => {
         if (!hasFiles(event)) return;
         event.preventDefault();
+        if (uploading) return;
         depth.current += 1;
         setDragging(true);
       }}
       onDragOver={(event) => {
         if (!hasFiles(event)) return;
         event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
+        event.dataTransfer.dropEffect = uploading ? "none" : "copy";
       }}
       onDragLeave={(event) => {
         if (!hasFiles(event)) return;

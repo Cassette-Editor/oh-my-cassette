@@ -17,6 +17,7 @@ export interface CassetteApi {
   assets: Asset[] | null;
   jobs: Job[] | null;
   sending: boolean;
+  uploading: boolean;
   uploadProgress: UploadProgress | null;
   send: (text: string) => Promise<void>;
   upload: (files: File[]) => Promise<void>;
@@ -105,6 +106,7 @@ function useCassette(): CassetteApi {
   const [assets, setAssets] = useState<Asset[] | null>(null);
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [sending, setSending] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
   const lastEventId = useRef(0);
@@ -115,6 +117,7 @@ function useCassette(): CassetteApi {
   const booted = useRef(false);
   const cleanupSent = useRef(false);
   const expired = useRef(false);
+  const uploadingRef = useRef(false);
 
   useEffect(() => {
     sessionRef.current = sessionId;
@@ -242,6 +245,8 @@ function useCassette(): CassetteApi {
       sessionRef.current = "";
       setSessionId("");
       setSending(false);
+      uploadingRef.current = false;
+      setUploading(false);
       setUploadProgress(null);
       setConnection("error");
       window.alert(makeT(languageRef.current)("idleTimeout"));
@@ -301,11 +306,17 @@ function useCassette(): CassetteApi {
   const upload = useCallback(
     async (files: File[]) => {
       if (!files.length) return;
+      if (uploadingRef.current) {
+        pushError(makeT(languageRef.current)("uploadInProgress"));
+        return;
+      }
       const sid = sessionRef.current;
       if (!sid) {
         pushError(makeT(languageRef.current)("connectionError"), () => void boot());
         return;
       }
+      uploadingRef.current = true;
+      setUploading(true);
       const clientEventId = `local-upload-${Date.now()}-${(localSeq.current += 1)}`;
       const names = files.map((file) => file.name).filter(Boolean);
       const label = names.slice(0, 3).join(", ") + (names.length > 3 ? ` +${names.length - 3}` : "");
@@ -319,9 +330,18 @@ function useCassette(): CassetteApi {
         if (!result.ok) throw new Error(result.detail);
         await refresh();
       } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error || "");
+        const normalized = detail.toLowerCase();
+        const message = normalized.includes("timed out")
+          ? makeT(languageRef.current)("uploadTimedOut")
+          : normalized.includes("network") || normalized.includes("aborted") || normalized.includes("parsing the body")
+            ? makeT(languageRef.current)("uploadInterrupted")
+            : makeT(languageRef.current)("uploadFailed");
         console.error("upload failed:", error);
-        pushError(makeT(languageRef.current)("uploadFailed"), () => void upload(files));
+        pushError(message, () => void upload(files));
       } finally {
+        uploadingRef.current = false;
+        setUploading(false);
         setUploadProgress((current) => (current?.id === clientEventId ? null : current));
       }
     },
@@ -358,6 +378,7 @@ function useCassette(): CassetteApi {
     assets,
     jobs,
     sending,
+    uploading,
     uploadProgress,
     send,
     upload,
