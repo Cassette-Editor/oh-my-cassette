@@ -14,9 +14,11 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .cassette_loader import load_cassette_package
 from . import deepseek_client, logging_utils, session_store
@@ -38,6 +40,40 @@ app = FastAPI(title="Oh My Cassette Web Demo")
 # (e.g. for tests) before `npm run build` has produced frontend/dist.
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+def _jsonable_detail(detail: Any) -> Any:
+    return json.loads(json.dumps(detail, ensure_ascii=False, default=str))
+
+
+def _log_upload_request_rejected(request: Request, status_code: int, detail: Any, reason: str) -> None:
+    if request.method != "POST" or str(request.url.path) != "/api/uploads":
+        return
+    logging_utils.log_event(
+        "web_upload_request_rejected",
+        method=request.method,
+        path=str(request.url.path),
+        status_code=status_code,
+        reason=reason,
+        detail=_jsonable_detail(detail),
+        client=getattr(request.client, "host", ""),
+        content_length=request.headers.get("content-length") or "",
+        content_type=request.headers.get("content-type") or "",
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    detail = _jsonable_detail(exc.detail)
+    _log_upload_request_rejected(request, int(exc.status_code), detail, "http_exception")
+    return JSONResponse({"detail": detail}, status_code=exc.status_code, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    detail = _jsonable_detail(exc.errors())
+    _log_upload_request_rejected(request, 422, detail, "request_validation")
+    return JSONResponse({"detail": detail}, status_code=422)
 
 
 @app.middleware("http")

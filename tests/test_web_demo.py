@@ -217,6 +217,27 @@ def test_web_api_upload_records_assets(cassette_env):
     assert any(event.get("client_event_id") == "local-upload-test" for event in events)
 
 
+def test_web_api_upload_parse_failure_logs_detail(cassette_env, monkeypatch):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo import server
+
+    captured = []
+    monkeypatch.setattr(server.logging_utils, "log_event", lambda event, **fields: captured.append((event, fields)))
+    client = TestClient(server.app)
+
+    response = client.post("/api/uploads", content=b"not multipart", headers={"Content-Type": "multipart/form-data"})
+
+    assert response.status_code == 400
+    rejected = [fields for event, fields in captured if event == "web_upload_request_rejected"]
+    assert rejected
+    assert rejected[-1]["status_code"] == 400
+    assert rejected[-1]["reason"] == "http_exception"
+    assert "boundary" in str(rejected[-1]["detail"]).lower()
+    assert rejected[-1]["content_type"] == "multipart/form-data"
+
+
 def test_web_api_language_switch_changes_local_reply(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi
