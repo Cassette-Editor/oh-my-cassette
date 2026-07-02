@@ -8,14 +8,14 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket AI Co-editor fo
 
 <p align="center">
   <img src="https://img.shields.io/badge/Version-0.1.0-blue.svg" alt="Version">
-  <a href="https://github.com/DAGroup-PKU/oh-my-cassette/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/DAGroup-PKU/oh-my-cassette?style=flat-square" alt="License">
+  <a href="https://github.com/epc314/oh-my-cassette/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/epc314/oh-my-cassette?style=flat-square" alt="License">
   </a>
-  <a href="https://github.com/DAGroup-PKU/oh-my-cassette/stargazers">
-    <img src="https://img.shields.io/github/stars/DAGroup-PKU/oh-my-cassette?style=flat-square&logo=github" alt="Stars">
+  <a href="https://github.com/epc314/oh-my-cassette/stargazers">
+    <img src="https://img.shields.io/github/stars/epc314/oh-my-cassette?style=flat-square&logo=github" alt="Stars">
   </a>
-  <a href="https://github.com/DAGroup-PKU/oh-my-cassette/fork">
-    <img src="https://img.shields.io/github/forks/DAGroup-PKU/oh-my-cassette?style=flat-square&logo=github" alt="Forks">
+  <a href="https://github.com/epc314/oh-my-cassette/fork">
+    <img src="https://img.shields.io/github/forks/epc314/oh-my-cassette?style=flat-square&logo=github" alt="Forks">
   </a>
   <img src="https://img.shields.io/badge/Python-3.10+-purple.svg" alt="Python">
   <a href="https://trycassette.online">
@@ -193,7 +193,7 @@ The web demo is a single FastAPI service that keeps the existing Cassette gatewa
 1. Clone the repository and create a dedicated web environment:
 
 ```bash
-git clone https://github.com/DAGroup-PKU/oh-my-cassette.git
+git clone https://github.com/epc314/oh-my-cassette.git
 cd oh-my-cassette
 
 python3 -m venv .venv-web
@@ -337,7 +337,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## Install
 
 ```bash
-git clone https://github.com/DAGroup-PKU/oh-my-cassette.git
+git clone https://github.com/epc314/oh-my-cassette.git
 cd oh-my-cassette
 python3 scripts/install_plugin.py
 ```
