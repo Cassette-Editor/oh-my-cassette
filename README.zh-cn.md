@@ -8,14 +8,14 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 
 <p align="center">
   <img src="https://img.shields.io/badge/Version-0.1.0-blue.svg" alt="版本">
-  <a href="https://github.com/DAGroup-PKU/oh-my-cassette/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/DAGroup-PKU/oh-my-cassette?style=flat-square" alt="许可证">
+  <a href="https://github.com/epc314/oh-my-cassette/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/epc314/oh-my-cassette?style=flat-square" alt="许可证">
   </a>
-  <a href="https://github.com/DAGroup-PKU/oh-my-cassette/stargazers">
-    <img src="https://img.shields.io/github/stars/DAGroup-PKU/oh-my-cassette?style=flat-square&logo=github" alt="Stars">
+  <a href="https://github.com/epc314/oh-my-cassette/stargazers">
+    <img src="https://img.shields.io/github/stars/epc314/oh-my-cassette?style=flat-square&logo=github" alt="Stars">
   </a>
-  <a href="https://github.com/DAGroup-PKU/oh-my-cassette/fork">
-    <img src="https://img.shields.io/github/forks/DAGroup-PKU/oh-my-cassette?style=flat-square&logo=github" alt="Forks">
+  <a href="https://github.com/epc314/oh-my-cassette/fork">
+    <img src="https://img.shields.io/github/forks/epc314/oh-my-cassette?style=flat-square&logo=github" alt="Forks">
   </a>
   <img src="https://img.shields.io/badge/Python-3.10+-purple.svg" alt="Python">
   <a href="https://trycassette.online">
@@ -188,7 +188,7 @@ Web Demo 是一个单进程 FastAPI 服务：它保留 Oh My Cassette 现有 gat
 1. 克隆仓库并创建独立的网页演示环境：
 
 ```bash
-git clone https://github.com/DAGroup-PKU/oh-my-cassette.git
+git clone https://github.com/epc314/oh-my-cassette.git
 cd oh-my-cassette
 
 python3 -m venv .venv-web
@@ -331,7 +331,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## 安装
 
 ```bash
-git clone https://github.com/DAGroup-PKU/oh-my-cassette.git
+git clone https://github.com/epc314/oh-my-cassette.git
 cd oh-my-cassette
 python3 scripts/install_plugin.py
 ```
