@@ -3396,6 +3396,23 @@ def run_cassette_browser_job(job: dict) -> dict:
     page = None
     created_for_one_shot = False
 
+    def close_browser_on_terminal_requested() -> bool:
+        if job.get("close_browser_on_terminal"):
+            return True
+        try:
+            persisted = jobs.load_job(job_id)
+        except Exception:
+            return False
+        return bool(persisted.get("close_browser_on_terminal"))
+
+    def close_current_browser_session() -> None:
+        if not record:
+            return
+        if _browser_reuse_enabled():
+            if close_browser_sessions(_browser_session_key(job)):
+                return
+        _close_browser_record(record)
+
     def discard_reusable_browser_session() -> None:
         if record and _browser_reuse_enabled():
             close_browser_sessions(_browser_session_key(job))
@@ -3880,5 +3897,7 @@ def run_cassette_browser_job(job: dict) -> dict:
         discard_reusable_browser_session()
         return finalize(result, current_stage, "failed")
     finally:
-        if record and not _browser_reuse_enabled() and created_for_one_shot:
+        if record and close_browser_on_terminal_requested():
+            close_current_browser_session()
+        elif record and not _browser_reuse_enabled() and created_for_one_shot:
             _close_browser_record(record)

@@ -348,6 +348,35 @@ def test_web_cut_clears_pending_llm_flow(cassette_env, monkeypatch):
     assert any("已请求停止当前 Cassette 流程或剪辑任务" in event.get("text", "") for event in events)
 
 
+def test_web_cut_marks_active_job_browser_for_cleanup(cassette_env):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+    job = jobs.create_job(
+        session_hash,
+        "prompt",
+        "instruction",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "web", "chat_id": session_id}},
+    )
+    job["status"] = "running"
+    jobs.save_job(job)
+
+    response = client.post("/api/messages", json={"session_id": session_id, "text": "/cut"})
+
+    assert response.status_code == 200
+    saved_job = jobs.load_job(job["job_id"])
+    assert saved_job["status"] == "cancel_requested"
+    assert saved_job["close_browser_on_terminal"] is True
+    assert saved_job["browser_cleanup_reason"] == "web_cut"
+
+
 def test_web_rejects_message_while_job_active(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi
@@ -714,4 +743,38 @@ def test_web_cleanup_cancels_active_web_job_without_deleting_record(cassette_env
 
     assert response.status_code == 200
     assert job_path.exists()
-    assert jobs.load_job(job["job_id"])["status"] == "cancel_requested"
+    saved_job = jobs.load_job(job["job_id"])
+    assert saved_job["status"] == "cancel_requested"
+    assert saved_job["close_browser_on_terminal"] is True
+    assert saved_job["browser_cleanup_reason"] == "web_session_cleanup:cleanup"
+
+
+def test_web_cancel_job_marks_browser_for_cleanup(cassette_env):
+    fastapi = pytest.importorskip("fastapi")
+    del fastapi
+    from fastapi.testclient import TestClient
+    from web_demo.server import app
+
+    session_store.reset_all()
+    client = TestClient(app)
+    session_id = "web_cancel_cleanup"
+    session_store.ensure_session(session_id)
+    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
+    job = jobs.create_job(
+        session_hash,
+        "prompt",
+        "instruction",
+        [],
+        {"cassette_session_id": session_id, "delivery": {"platform": "web", "chat_id": session_id}},
+    )
+    job["status"] = "running"
+    jobs.save_job(job)
+
+    response = client.post(f"/api/jobs/{job['job_id']}/cancel", json={"session_id": session_id})
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    saved_job = jobs.load_job(job["job_id"])
+    assert saved_job["status"] == "cancel_requested"
+    assert saved_job["close_browser_on_terminal"] is True
+    assert saved_job["browser_cleanup_reason"] == "web_job_cancel_api"

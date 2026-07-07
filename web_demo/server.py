@@ -540,6 +540,14 @@ def _active_web_job_for_session(session_id: str) -> dict | None:
     return None
 
 
+def _request_web_job_cancel(job_id: str, reason: str) -> dict:
+    return jobs.request_cancel(
+        job_id,
+        close_browser_on_terminal=True,
+        browser_cleanup_reason=reason,
+    )
+
+
 def _is_cut_command(text: str) -> bool:
     try:
         return tools._forced_cut_instruction(text) is not None
@@ -558,7 +566,7 @@ def _handle_web_cut(session_id: str) -> dict[str, Any]:
         job_id = str(active_job.get("job_id") or "")
         if job_id:
             try:
-                jobs.request_cancel(job_id)
+                _request_web_job_cancel(job_id, "web_cut")
             except Exception:
                 pass
     active = bool(flow_cancelled or pending_cancelled or active_job)
@@ -800,7 +808,10 @@ def _cleanup_web_session(session_id: str, reason: str = "") -> dict[str, Any]:
         status = str(job.get("status") or "")
         if status in _ACTIVE_JOB_STATUSES:
             try:
-                jobs.request_cancel(str(job.get("job_id") or path.stem))
+                _request_web_job_cancel(
+                    str(job.get("job_id") or path.stem),
+                    f"web_session_cleanup:{reason or 'cleanup'}",
+                )
                 cancelled_jobs += 1
             except Exception:
                 pass
@@ -1082,7 +1093,12 @@ def get_jobs(session_id: str = Query(...), limit: int = Query(10)) -> dict[str, 
 def cancel_job(job_id: str, payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     session_id = _require_session(str(payload.get("session_id") or ""))
     _require_web_job(session_id, job_id)
-    result = _tool_payload(tools.cassette_cancel_job({"job_id": job_id}))
+    job = _request_web_job_cancel(job_id, "web_job_cancel_api")
+    result = {
+        "ok": True,
+        "job_id": job["job_id"],
+        "data": {"job_id": job["job_id"], "status": job["status"]},
+    }
     session_store.add_event(
         session_id,
         role="assistant",

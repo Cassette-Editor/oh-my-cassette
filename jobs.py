@@ -163,8 +163,8 @@ def list_jobs(session_hash: str | None = None, limit: int = 10) -> list[dict]:
     return items
 
 
-def request_cancel(job_id: str) -> dict:
-    return update_job(job_id, status="cancel_requested")
+def request_cancel(job_id: str, **fields: Any) -> dict:
+    return update_job(job_id, status="cancel_requested", **fields)
 
 
 def is_cancel_requested(job_id: str) -> bool:
