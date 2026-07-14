@@ -35,6 +35,9 @@ web_demo/logs/
 AGENTS.md
 .serena/
 .codex/
+.claude/
+.impeccable/
+.github/skills/
 cassette_hermes_codex_development_plan.md
 
 # OS/editor
