@@ -557,6 +557,8 @@ Run the local Cassette E2E harness:
 
 By default the plugin drives the Cassette web UI with Playwright (`CASSETTE_TRANSPORT=browser`). An experimental API transport (`CASSETTE_TRANSPORT=api`) instead calls the Cassette server APIs directly (auth → media upload → LangGraph agent run → render-from-stored-project export), avoiding DOM scraping. It is **off by default** — install and usage are unchanged. It reuses your existing `CASSETTE_AUTH_EMAIL`/`CASSETTE_AUTH_PASSWORD`; the API origin defaults to the deployed Cassette (override with `CASSETTE_API_URL` only for self-hosted deployments). The account must have full API access (for `/api/projects` and `/api/export`); a `403`/`forbidden` error reported by the transport indicates it does not.
 
+Uploaded media is linked to the agent run by session id (the upload `x-session-id` equals the run's `mediaSessionId`), and the run carries the same full session/project/run context the editor sends. Cancellation (`/cut`) is honored mid-run, agent timeouts report `timed_out`, and a run whose queue never starts fails fast as `agent_run_not_started` (tunable via `CASSETTE_API_RUN_START_TIMEOUT_SEC`) instead of hanging until the job timeout. The transport requires the Cassette backend's LangGraph run queue to be actively draining runs.
+
 The same E2E flow can run on either transport, and a parity harness diffs the two outcomes (terminal status, deliverable-output count, error-code set):
 
 ```bash

@@ -20,10 +20,14 @@ It returns the SAME result dict shape as browser.run_cassette_browser_job_thread
 (status / outputs / questions / errors / quality / final_screenshot) so jobs/notifier/
 _scrub_job/_job_report are unaffected. Selected via CASSETTE_TRANSPORT=api (default browser).
 
-NOTE: auth / upload / export / download / result-synthesis are coded against verified
-server contracts. The LangGraph run/interrupt wire format (run input, sessionContext config,
-resume command shapes) is the surface that must be confirmed during live bring-up — it is
-isolated in _run_agent / _resume_value and centralized in _LG_* path builders for that reason.
+Wire format is coded against the Cassette server source (remotion-canvas-hotfix): the run's
+config.configurable carries the full sessionContext + projectContext + runContext.connectionState
+the editor sends; uploaded media is linked to the run by session id (sessionContext.mediaSessionId
+== the upload x-session-id), NOT by ids in the run input; tool interrupts (editor_navigate) resume
+KEYED by toolCall.id while typed interrupts resume bare; export renders the stored project by that
+same session id. A run is executed by the upstream LangGraph queue worker: if it never leaves
+'pending' (queue not draining) the transport fails fast with 'agent_run_not_started' rather than
+hanging until the job timeout.
 """
 from __future__ import annotations
 
@@ -73,6 +77,13 @@ _SUPPORTED_AGENT_MODEL_IDS = frozenset({
 })
 _DEFAULT_THINKING = "low"  # matches cassette-config DEFAULT_THINKING / per-model defaultThinking
 
+# Quality subkeys that _result computes from the current outcome — never carry these forward from a
+# prior job's quality (they would clobber the fresh values with stale ones).
+_RESULT_COMPUTED_QUALITY_KEYS = frozenset({
+    "transport", "completion_observed", "export_completed", "export_pending",
+    "output_link_count", "local_output_count", "risk",
+})
+
 
 class ApiTransportError(RuntimeError):
     def __init__(self, code: str, message: str, *, details: dict | None = None):
@@ -80,6 +91,15 @@ class ApiTransportError(RuntimeError):
         self.code = code
         self.message = message
         self.details = details or {}
+
+
+class _JobCancelled(Exception):
+    """Raised inside a poll loop when jobs.is_cancel_requested(job_id) flips to True.
+
+    Cancellation is cooperative in this plugin (jobs.request_cancel just sets status=cancel_requested);
+    the runner must notice and stop. run_job catches this and returns a terminal 'cancelled' result so
+    the downstream terminal save does not overwrite the cancel with the run's own status.
+    """
 
 
 def _env(name: str) -> str:
@@ -148,19 +168,56 @@ class ApiTransport:
         self._token = None
 
     def export(self, job: dict, decision: dict[str, Any] | None = None) -> dict:
+        # Re-drive/collect the export for a Hermes-reviewed completion. Seed from the job so the
+        # accumulated questions/errors and prior quality survive (mirrors browser.export_reviewed_
+        # completion_job); the review decision is recorded in quality.completion_review.
         job_id = str(job.get("job_id") or "")
         session_id = _session_id(job)
+        decision = decision or {}
         outputs: list[dict] = []
-        errors: list[dict] = []
+        questions = list(job.get("questions") or [])
+        errors = list(job.get("errors") or [])
+        prior_quality = dict(job.get("quality") or {})
+        export_deadline = time.monotonic() + self._export_timeout(job)
         try:
             self._authenticate()
-            outputs = self._export_project(session_id, job_id)
+            outputs = self._export_project(session_id, job_id, deadline=export_deadline)
+        except _JobCancelled:
+            return self._result(
+                _CANCELLED, questions=questions, errors=errors,
+                completion_observed=bool(prior_quality.get("completion_observed")),
+                export_completed=False, risk="medium",
+                extra_quality={k: v for k, v in prior_quality.items() if k not in _RESULT_COMPUTED_QUALITY_KEYS},
+                final_screenshot=job.get("final_screenshot"),
+            )
         except ApiTransportError as exc:
             errors.append(self._error(exc))
         except Exception as exc:  # noqa: BLE001 — never let export crash the job record
             errors.append(self._error(exc))
-        status = _SUCCEEDED if outputs else _FAILED
-        return self._result(status, outputs=outputs, errors=errors)
+        # Carry forward only the DESCRIPTIVE prior-quality keys; the outcome keys _result computes
+        # (export_pending/completion_observed/risk/…) must reflect THIS export, not the stale run.
+        carried = {k: v for k, v in prior_quality.items() if k not in _RESULT_COMPUTED_QUALITY_KEYS}
+        review_quality = {
+            "completion_source": "hermes_completion_review",
+            "completion_review": {
+                "decision": str(decision.get("decision") or "export"),
+                "reason": str(decision.get("reason") or "")[:500],
+            },
+            "progress_summary": str(decision.get("summary") or prior_quality.get("progress_summary") or "")[:700] or None,
+            "current_stage": prior_quality.get("current_stage") or None,
+        }
+        return self._result(
+            _SUCCEEDED if outputs else _FAILED,
+            outputs=outputs,
+            questions=questions,
+            errors=errors,
+            completion_observed=bool(outputs) or bool(prior_quality.get("completion_observed")),
+            export_completed=bool(outputs),
+            export_pending=not outputs,
+            risk="low" if outputs else "high",
+            extra_quality={**carried, **review_quality},
+            final_screenshot=job.get("final_screenshot"),
+        )
 
     def run_job(self, job: dict) -> dict:
         job_id = str(job.get("job_id") or "")
@@ -174,39 +231,57 @@ class ApiTransport:
         try:
             if not _api_base():
                 raise ApiTransportError("api_base_missing", "CASSETTE_API_URL is not configured for the API transport")
+            self._raise_if_cancelled(job_id)
             self._authenticate()
 
             media_file_ids: list[str] = []
             for path in asset_paths:
-                media_file_ids.append(self._upload_asset(path, session_id, deadline))
+                media_file_ids.append(self._upload_asset(path, session_id, deadline, job_id))
 
             thread_id = self._create_thread(session_id, job)
-            run_status, run_questions = self._run_agent(thread_id, session_id, prompt, job, deadline)
+            run_status, run_questions = self._run_agent(thread_id, session_id, prompt, job, deadline, media_file_ids)
             questions.extend(run_questions)
 
-            if run_status == _CANCELLED:
-                return self._result(_CANCELLED, questions=questions, errors=errors,
-                                    completion_observed=True, export_completed=False, risk="medium")
             if run_status == _NEEDS_USER:
                 return self._result(_NEEDS_USER, questions=questions, errors=errors,
-                                    completion_observed=True, export_completed=False, risk="medium")
+                                    completion_observed=True, export_completed=False, risk="medium",
+                                    extra_quality={"progress_summary": self._questions_summary(questions)})
+            if run_status == _TIMED_OUT:
+                errors.append({"code": "agent_run_timeout", "message": "Agent run did not finish before the job timeout", "details": {}})
+                return self._result(_TIMED_OUT, questions=questions, errors=errors,
+                                    completion_observed=False, export_completed=False, risk="medium")
             if run_status != _SUCCEEDED:
                 errors.append({"code": "agent_run_incomplete", "message": f"Agent run ended with status '{run_status}'", "details": {}})
                 return self._result(_FAILED, questions=questions, errors=errors,
                                     completion_observed=True, export_completed=False, risk="high")
 
-            outputs = self._export_project(session_id, job_id, deadline=deadline)
-            status = _SUCCEEDED if outputs else _SUCCEEDED  # edit done even if export yielded no link
+            # Agent edit committed server-side. Export is a separate step: if it fails, the edit still
+            # happened, so report 'succeeded' with export_pending rather than masking it as a failure
+            # (mirrors browser.py's "succeeded but export pending" story consumed by _job_report).
+            try:
+                outputs = self._export_project(session_id, job_id, deadline=deadline)
+            except _JobCancelled:
+                raise
+            except ApiTransportError as exc:
+                errors.append(self._error(exc))
+                return self._result(_SUCCEEDED, questions=questions, errors=errors,
+                                    completion_observed=True, export_completed=False, export_pending=True, risk="medium",
+                                    extra_quality={"progress_summary": "Cassette edit committed; the export did not complete in time."})
             has_local = any(o.get("local_path") for o in outputs)
             return self._result(
-                status,
+                _SUCCEEDED,
                 outputs=outputs,
                 questions=questions,
                 errors=errors,
                 completion_observed=True,
                 export_completed=bool(outputs),
+                export_pending=not outputs,
                 risk="low" if has_local else "medium",
             )
+        except _JobCancelled:
+            return self._result(_CANCELLED, questions=questions, errors=errors,
+                                completion_observed=False, export_completed=False, risk="medium",
+                                extra_quality={"progress_summary": "Cassette job was cancelled before it finished."})
         except ApiTransportError as exc:
             errors.append(self._error(exc))
             return self._result(_FAILED, questions=questions, errors=errors,
@@ -234,43 +309,58 @@ class ApiTransport:
         self._is_full_user = bool(body.get("isFullUser"))
 
     # ── media upload ────────────────────────────────────────────────────────
-    def _upload_asset(self, path: str, session_id: str, deadline: float) -> str:
+    def _upload_asset(self, path: str, session_id: str, deadline: float, job_id: str = "") -> str:
+        self._raise_if_cancelled(job_id)
         file_path = Path(path)
         if not file_path.exists():
             raise ApiTransportError("asset_missing", f"Asset not found on disk: {path}")
         file_name = file_path.name
         mime, _ = mimetypes.guess_type(file_name)
         mime = mime or "application/octet-stream"
-        headers = {"x-session-id": session_id}
+        # The editor scopes uploads by BOTH x-session-id (media catalog the agent reads) and
+        # x-project-id (project<->asset binding used by export). Send the same id for both so the
+        # uploaded media is visible to the agent run AND bound to the project that gets exported.
+        headers = {"x-session-id": session_id, "x-project-id": session_id}
 
         _, init = self._request("POST", "/api/media/upload/init",
                                 json_body={"fileName": file_name, "mimeType": mime}, headers=headers, expect=200)
         if not isinstance(init, dict) or not init.get("uploadUrl") or not init.get("key"):
             raise ApiTransportError("upload_init_failed", f"upload/init returned an unexpected body for {file_name}")
         key = str(init["key"])
+        upload_content_type = str(init.get("uploadContentType") or mime)
         storage_backend = str(init.get("storageBackend") or "r2")
+        upload_attempt_id = init.get("uploadAttemptId")
 
-        self._put_bytes(str(init["uploadUrl"]), file_path.read_bytes(), mime)
+        self._put_bytes(str(init["uploadUrl"]), file_path.read_bytes(), upload_content_type)
 
+        complete_body = {"key": key, "fileName": file_name, "mimeType": mime,
+                         "storageBackend": storage_backend, "metadata": {}}
+        if upload_attempt_id:
+            complete_body["uploadAttemptId"] = upload_attempt_id
         _, complete = self._request("POST", "/api/media/upload/complete",
-                                    json_body={"key": key, "fileName": file_name, "mimeType": mime,
-                                               "storageBackend": storage_backend, "metadata": {}},
-                                    headers=headers, expect=200)
+                                    json_body=complete_body, headers=headers, expect=200)
         if not isinstance(complete, dict) or not complete.get("mediaFileId"):
             raise ApiTransportError("upload_complete_failed", f"upload/complete returned no mediaFileId for {file_name}")
 
         media_file_id = str(complete["mediaFileId"])
         if str(mime).startswith("video/") and complete.get("uploadStatus") != "completed":
-            self._poll_upload_completed(key, session_id, deadline)
+            self._poll_upload_completed(key, session_id, deadline, job_id)
         return media_file_id
 
-    def _poll_upload_completed(self, key: str, session_id: str, deadline: float) -> None:
-        headers = {"x-session-id": session_id}
+    def _poll_upload_completed(self, key: str, session_id: str, deadline: float, job_id: str = "") -> None:
+        # The status endpoint returns 200 + uploadStatus 'completed' when finalized, 202 +
+        # 'processing' while in flight, and 409 + 'failed' on error — so do not force expect=200.
+        headers = {"x-session-id": session_id, "x-project-id": session_id}
         query = "?" + urlencode({"key": key})
         while time.monotonic() < deadline:
-            _, body = self._request("GET", "/api/media/upload/status" + query, headers=headers, expect=200)
-            if isinstance(body, dict) and body.get("uploadStatus") == "completed":
+            self._raise_if_cancelled(job_id)
+            status_code, body = self._request("GET", "/api/media/upload/status" + query, headers=headers)
+            upload_status = str((body or {}).get("uploadStatus") or "") if isinstance(body, dict) else ""
+            if upload_status == "completed":
                 return
+            if upload_status == "failed" or status_code == 409:
+                raise ApiTransportError("upload_processing_failed",
+                                        str((body or {}).get("error") or f"Media processing failed for key {key}"))
             time.sleep(self._poll_interval())
         raise ApiTransportError("upload_processing_timeout", f"Media processing did not complete for key {key}")
 
@@ -295,33 +385,79 @@ class ApiTransport:
         }
         _, body = self._request("POST", "/api/langgraph/threads",
                                 json_body={"metadata": metadata, "if_exists": "do_nothing"}, expect=200)
-        thread_id = isinstance(body, dict) and (body.get("thread_id") or body.get("threadId"))
+        thread_id = (body.get("thread_id") or body.get("threadId")) if isinstance(body, dict) else None
         if not thread_id:
             raise ApiTransportError("thread_create_failed", "LangGraph thread create returned no thread_id")
         return str(thread_id)
 
     def _session_context(self, session_id: str, job: dict, prompt: str) -> dict:
+        # Mirrors CassetteAgentSessionContext (buildCurrentSessionContext in the editor). All of
+        # projectId/mediaSessionId/chatSessionId/threadId collapse onto one id in the real editor
+        # (BROWSER_SESSION_ID == getCurrentProjectId()), so the plugin uses the single session id.
         return {
-            "projectId": session_id,
-            "mediaSessionId": session_id,
             "chatSessionId": session_id,
             "threadId": session_id,
+            "mediaSessionId": session_id,
+            "projectId": session_id,
             "mode": "auto",
             "turnStrategy": "default",
             "turnKind": "conversation",
+            "reinitMode": None,
+            "editorSnapshot": None,
+            "mentionedTimelineEntities": None,
+            "queryImageIds": None,
             "modelId": self._resolve_model_id(job),
             "thinkingConfig": self._resolve_thinking_config(job),
             "locale": job.get("cassette_language") or None,
             "currentUserRequest": prompt,
+            "stoppedTurn": None,
+        }
+
+    @staticmethod
+    def _project_context() -> dict:
+        # A headless run starts from an empty project (no prior editor state); the graph builds it.
+        return {
+            "cassetteContext": "",
+            "revision": 0,
+            "sourceKind": None,
+            "updatedAt": None,
+            "status": "missing",
+        }
+
+    def _run_context(self, session_context: dict, turn_id: str) -> dict:
+        # Mirrors buildConfigurable().runContext — the connectionState the graph uses to load the
+        # session media catalog and commit edits to the project keyed by projectId.
+        return {
+            "connectionState": {
+                "threadId": session_context["threadId"],
+                "sessionId": session_context["mediaSessionId"],
+                "chatSessionId": session_context["chatSessionId"],
+                "mediaSessionId": session_context["mediaSessionId"],
+                "projectId": session_context["projectId"],
+                "activeMode": session_context["mode"],
+                "queryImageIds": None,
+                "locale": session_context["locale"],
+                "modelId": session_context["modelId"],
+                "thinkingConfig": session_context["thinkingConfig"],
+                "currentTurnId": turn_id,
+            },
+            "executionBudget": None,
+            "contextCompactionPolicy": None,
+            "agentGateRequirements": None,
         }
 
     @staticmethod
     def _resolve_model_id(job: dict) -> str:
+        # model_selection carries a UI *label* under 'model' (not an id), so only forward it when it
+        # already names a product model id (or an explicit 'model_id'/'modelId'); otherwise use the
+        # env override or the editor's default. The default IS the UI default, so an unmapped label
+        # runs the same model the browser/UI would default to rather than an arbitrary one.
         ms = job.get("model_selection") or {}
-        candidate = str(ms.get("modelId") or ms.get("model") or "").strip()
+        candidate = str(ms.get("model_id") or ms.get("modelId") or ms.get("model") or "").strip()
         if candidate in _SUPPORTED_AGENT_MODEL_IDS:
             return candidate
-        return _env("CASSETTE_API_MODEL_ID") or DEFAULT_AGENT_MODEL_ID
+        env_model = _env("CASSETTE_API_MODEL_ID")
+        return env_model if env_model in _SUPPORTED_AGENT_MODEL_IDS else DEFAULT_AGENT_MODEL_ID
 
     @staticmethod
     def _resolve_thinking_config(job: dict) -> str:
@@ -335,11 +471,26 @@ class ApiTransport:
         raw = str(ms.get("thinkingConfig") or ms.get("thinking_level") or "").strip().lower()
         return raw if raw in valid else _DEFAULT_THINKING
 
-    def _run_agent(self, thread_id: str, session_id: str, prompt: str, job: dict, deadline: float) -> tuple[str, list[dict]]:
-        """Start the run, satisfy interrupts headlessly, return (terminal_status, questions)."""
+    def _run_agent(self, thread_id: str, session_id: str, prompt: str, job: dict, deadline: float,
+                   media_file_ids: list[str] | None = None) -> tuple[str, list[dict]]:
+        """Start the run, satisfy interrupts headlessly, return (terminal_status, questions).
+
+        Uploaded media is NOT passed as ids — the cassette-chat graph reads the session-scoped media
+        catalog keyed by sessionContext.mediaSessionId (== the upload x-session-id). media_file_ids is
+        accepted only so callers can log/verify what was uploaded."""
+        job_id = str(job.get("job_id") or "")
+        turn_id = f"{job_id or session_id}-turn"
+        session_context = self._session_context(session_id, job, prompt)
         config = {
+            # recursion_limit is what the upstream LangGraph server reads; the editor also sends the
+            # camelCase duplicate, harmless to include for parity.
             "recursion_limit": self._recursion_limit(),
-            "configurable": {"sessionContext": self._session_context(session_id, job, prompt)},
+            "recursionLimit": self._recursion_limit(),
+            "configurable": {
+                "sessionContext": session_context,
+                "projectContext": self._project_context(),
+                "runContext": self._run_context(session_context, turn_id),
+            },
         }
         run_body = {
             "assistant_id": "cassette-chat",
@@ -351,14 +502,18 @@ class ApiTransport:
         questions: list[dict] = []
 
         while True:
-            status = self._await_run(thread_id, run_id, deadline)
+            status = self._await_run(thread_id, run_id, deadline, job_id)
             if status == "interrupted":
                 interrupts = self._pending_interrupts(thread_id)
                 if not interrupts:
                     # Interrupted with nothing pending == treat as needing user.
                     return _NEEDS_USER, questions
-                resume_value, needs_user_questions = self._resume_value(interrupts)
-                questions.extend(needs_user_questions)
+                resume_value, new_questions, needs_user = self._resume_value(interrupts)
+                questions.extend(new_questions)
+                if needs_user:
+                    # A genuine user question was raised (e.g. ask_user) with no auto-reply configured:
+                    # leave the thread interrupted and hand back to the Hermes/user review loop.
+                    return _NEEDS_USER, questions
                 run_id = self._post_run(thread_id, {
                     "assistant_id": "cassette-chat",
                     "command": {"resume": resume_value},
@@ -388,19 +543,46 @@ class ApiTransport:
 
     def _post_run(self, thread_id: str, body: dict) -> str:
         _, resp = self._request("POST", f"/api/langgraph/threads/{thread_id}/runs", json_body=body, expect=200)
-        run_id = isinstance(resp, dict) and (resp.get("run_id") or resp.get("runId"))
+        run_id = (resp.get("run_id") or resp.get("runId")) if isinstance(resp, dict) else None
         if not run_id:
             raise ApiTransportError("run_create_failed", "LangGraph run create returned no run_id")
         return str(run_id)
 
-    def _await_run(self, thread_id: str, run_id: str, deadline: float) -> str:
+    def _await_run(self, thread_id: str, run_id: str, deadline: float, job_id: str = "") -> str:
+        # Fail fast if the run never leaves 'pending' — a healthy LangGraph worker moves a run to
+        # 'running' within seconds, so a run stuck 'pending' means the run queue is not being drained
+        # (worker down/misconfigured). Without this the job would hang until the full job timeout.
+        start = time.monotonic()
+        start_timeout = self._run_start_timeout()
+        ever_started = False
         while time.monotonic() < deadline:
+            if self._cancelled(job_id):
+                self._cancel_run(thread_id, run_id)
+                raise _JobCancelled()
             _, body = self._request("GET", f"/api/langgraph/threads/{thread_id}/runs/{run_id}", expect=200)
             status = str((body or {}).get("status") or "") if isinstance(body, dict) else ""
             if status in _LG_TERMINAL:
                 return status
+            if status and status != "pending":
+                ever_started = True
+            if not ever_started and (time.monotonic() - start) > start_timeout:
+                raise ApiTransportError(
+                    "agent_run_not_started",
+                    f"Agent run stayed '{status or 'pending'}' for {int(start_timeout)}s without starting — "
+                    "the Cassette agent run queue is not draining (backend worker unavailable).",
+                    details={"run_id": run_id, "status": status or "pending"},
+                )
             time.sleep(self._poll_interval())
         return "timeout"
+
+    def _cancel_run(self, thread_id: str, run_id: str) -> None:
+        """Best-effort server-side cancel of an in-flight LangGraph run (so it actually stops,
+        not just locally abandoned). Failures are swallowed — the job is already terminating."""
+        try:
+            self._request("POST", f"/api/langgraph/threads/{thread_id}/runs/{run_id}/cancel?action=interrupt",
+                          json_body={})
+        except Exception:  # noqa: BLE001
+            pass
 
     def _pending_interrupts(self, thread_id: str) -> list[dict]:
         _, state = self._request("GET", f"/api/langgraph/threads/{thread_id}/state", expect=200)
@@ -408,22 +590,29 @@ class ApiTransport:
         if not isinstance(state, dict):
             return out
         for task in state.get("tasks") or []:
+            if not isinstance(task, dict):
+                continue
             for interrupt in (task.get("interrupts") or []):
                 value = interrupt.get("value") if isinstance(interrupt, dict) else None
                 if isinstance(value, dict):
                     out.append({"id": interrupt.get("id"), "value": value})
-        # Some LangGraph versions surface interrupts on the top-level __interrupt__ channel.
-        for interrupt in (state.get("values", {}) or {}).get("__interrupt__", []) if isinstance(state.get("values"), dict) else []:
+        # Some LangGraph versions surface interrupts on the top-level __interrupt__ channel. Guard
+        # against an explicit null (values["__interrupt__"] == None) which .get(..., []) would return.
+        for interrupt in ((state.get("values") or {}).get("__interrupt__") or []):
             if isinstance(interrupt, dict) and isinstance(interrupt.get("value"), dict):
                 out.append({"id": interrupt.get("id"), "value": interrupt["value"]})
         return out
 
-    def _resume_value(self, interrupts: list[dict]) -> tuple[Any, list[dict]]:
-        """Build the resume payload. Headless tool interrupts (editor_navigate) resume KEYED by
-        toolCall.id; typed interrupts (ask_user/edit_plan_review/mode_switch/init_questions) resume
-        with a BARE object. This keyed-vs-bare distinction is the load-bearing headless rule."""
+    def _resume_value(self, interrupts: list[dict]) -> tuple[Any, list[dict], bool]:
+        """Build the resume payload. Returns (resume_value, questions, needs_user).
+
+        Headless tool interrupts (editor_navigate) resume KEYED by toolCall.id; typed interrupts
+        (edit_plan_review/mode_switch/init_questions) resume with a BARE object. A genuine ``ask_user``
+        question hands control back to the user (needs_user=True) unless CASSETTE_API_DEFAULT_ASK_USER_REPLY
+        is set, matching the browser path which only auto-handles *routine* interactions and surfaces real
+        questions as needs_user. A typed interrupt is resolved before any batched tool acks so its bare
+        payload is never shadowed by the keyed map (LangGraph resumes one interrupt at a time)."""
         questions: list[dict] = []
-        # Headless tool interrupts can be batched; collect a keyed map.
         keyed: dict[str, Any] = {}
         for item in interrupts:
             value = item["value"]
@@ -436,33 +625,43 @@ class ApiTransport:
                     # the headless run never hangs.
                     keyed[str(call_id)] = {"result": dict(_NAVIGATE_NOOP_RESULT)}
                 continue
-            # Typed interrupt — resume bare. Take the first one (LangGraph resumes one at a time).
+            # Typed interrupt — resume bare. Resolve it first so its payload wins over any keyed acks.
             if kind == "edit_plan_review":
-                return {"action": "approve"}, questions
+                return {"action": "approve"}, questions, False
             if kind == "mode_switch":
-                return {"action": "switch_mode", "selectedMode": "auto"}, questions
-            if kind == "ask_user":
-                questions.append({"type": "ask_user", "prompt": value.get("prompt") or value.get("question") or ""})
-                return {"action": "respond", "userResponse": _env("CASSETTE_API_DEFAULT_ASK_USER_REPLY") or "Please proceed using your best judgment."}, questions
+                return {"action": "switch_mode", "selectedMode": "auto"}, questions, False
             if kind == "init_questions":
-                return {}, questions
+                return {}, questions, False
+            if kind == "ask_user":
+                text = str(value.get("prompt") or value.get("question") or "")[:500]
+                auto_reply = _env("CASSETTE_API_DEFAULT_ASK_USER_REPLY")
+                if auto_reply:
+                    questions.append({"question": text, "requires_user": False,
+                                      "reason": "cassette_agent_question", "answer": auto_reply})
+                    return {"action": "respond", "userResponse": auto_reply}, questions, False
+                questions.append({"question": text, "requires_user": True,
+                                  "reason": "cassette_agent_question", "answer": ""})
+                return None, questions, True
         if keyed:
-            return keyed, questions
+            return keyed, questions, False
         # Unknown interrupt shape — resume empty rather than hang.
-        return {}, questions
+        return {}, questions, False
 
     # ── export ────────────────────────────────────────────────────────────────
     def _export_project(self, session_id: str, job_id: str, deadline: float | None = None) -> list[dict]:
         if deadline is None:
             deadline = time.monotonic() + 600.0
-        _, created = self._request("POST", f"/api/export/projects/{session_id}/jobs", json_body={}, expect=202)
-        export_job_id = isinstance(created, dict) and created.get("jobId")
+        from urllib.parse import quote
+        _, created = self._request("POST", f"/api/export/projects/{quote(str(session_id), safe='')}/jobs",
+                                   json_body={}, expect=202)
+        export_job_id = created.get("jobId") if isinstance(created, dict) else None
         if not export_job_id:
             raise ApiTransportError("export_create_failed", "Export create returned no jobId")
         export_job_id = str(export_job_id)
 
         file_url: str | None = None
         while time.monotonic() < deadline:
+            self._raise_if_cancelled(job_id)
             _, body = self._request("GET", f"/api/export/jobs/{export_job_id}", expect=200)
             status = str((body or {}).get("status") or "") if isinstance(body, dict) else ""
             if status == "done":
@@ -514,6 +713,7 @@ class ApiTransport:
         headers: dict[str, str] | None = None,
         authed: bool = True,
         expect: int | None = None,
+        timeout: float | None = None,
         _retried: bool = False,
     ) -> tuple[int, Any]:
         url = _api_base() + path
@@ -526,7 +726,7 @@ class ApiTransport:
             req_headers = self._auth_headers(req_headers)
         request = Request(url, data=data, method=method, headers=req_headers)
         try:
-            with urlopen(request, timeout=_http_timeout()) as response:
+            with urlopen(request, timeout=timeout or _http_timeout()) as response:
                 status = response.status
                 raw = response.read()
         except HTTPError as exc:
@@ -537,7 +737,7 @@ class ApiTransport:
                 self._token = None
                 self._authenticate()
                 return self._request(method, path, json_body=json_body, headers=headers,
-                                     authed=authed, expect=expect, _retried=True)
+                                     authed=authed, expect=expect, timeout=timeout, _retried=True)
         except URLError as exc:
             raise ApiTransportError("network_error", f"{method} {path} failed: {exc.reason}") from exc
 
@@ -569,24 +769,30 @@ class ApiTransport:
         errors: list[dict] | None = None,
         completion_observed: bool = False,
         export_completed: bool = False,
+        export_pending: bool = False,
         risk: str = "medium",
+        extra_quality: dict[str, Any] | None = None,
+        final_screenshot: Any | None = None,
     ) -> dict:
         outputs = outputs or []
+        quality = {
+            "transport": "api",
+            "completion_observed": completion_observed,
+            "export_completed": export_completed,
+            "export_pending": export_pending,
+            "output_link_count": len(outputs),
+            "local_output_count": sum(1 for o in outputs if isinstance(o, dict) and o.get("local_path")),
+            "risk": risk,
+        }
+        if extra_quality:
+            quality.update({k: v for k, v in extra_quality.items() if v is not None})
         return {
             "status": status,
             "outputs": outputs,
             "questions": questions or [],
             "errors": errors or [],
-            "quality": {
-                "transport": "api",
-                "completion_observed": completion_observed,
-                "export_completed": export_completed,
-                "export_pending": False,
-                "output_link_count": len(outputs),
-                "local_output_count": sum(1 for o in outputs if isinstance(o, dict) and o.get("local_path")),
-                "risk": risk,
-            },
-            "final_screenshot": None,
+            "quality": quality,
+            "final_screenshot": final_screenshot,
         }
 
     @staticmethod
@@ -596,11 +802,55 @@ class ApiTransport:
         return {"code": "internal_error", "message": str(exc), "details": {"type": type(exc).__name__}}
 
     @staticmethod
+    def _cancelled(job_id: str) -> bool:
+        # Cooperative cancellation: the browser path polls jobs.is_cancel_requested during its waits
+        # (browser.py); the API path must do the same so /cut and the web cancel actually stop the run.
+        if not job_id:
+            return False
+        try:
+            from . import jobs
+            return bool(jobs.is_cancel_requested(job_id))
+        except Exception:  # noqa: BLE001 — never let a cancel probe crash the run
+            return False
+
+    def _raise_if_cancelled(self, job_id: str) -> None:
+        if self._cancelled(job_id):
+            raise _JobCancelled()
+
+    @staticmethod
+    def _questions_summary(questions: list[dict]) -> str | None:
+        for q in questions:
+            if isinstance(q, dict) and q.get("question"):
+                return str(q["question"])[:700]
+        return None
+
+    @staticmethod
     def _job_timeout(job: dict) -> float:
         try:
             return max(60.0, float(job.get("timeout_sec") or 1800))
         except (TypeError, ValueError):
             return 1800.0
+
+    @staticmethod
+    def _export_timeout(job: dict) -> float:
+        # A reviewed-completion export gets its own budget (env override, else the job timeout),
+        # so it never inherits an already-exhausted run deadline.
+        raw = _env("CASSETTE_EXPORT_TIMEOUT_SEC")
+        if raw:
+            try:
+                return max(60.0, float(raw))
+            except ValueError:
+                pass
+        return ApiTransport._job_timeout(job)
+
+    @staticmethod
+    def _run_start_timeout() -> float:
+        # How long a run may stay 'pending' before we declare the queue stalled. Generous by default
+        # to tolerate cold starts; override with CASSETTE_API_RUN_START_TIMEOUT_SEC.
+        try:
+            return max(30.0, float(_env("CASSETTE_API_RUN_START_TIMEOUT_SEC") or "120"))
+        except ValueError:
+            return 120.0
 
     @staticmethod
     def _poll_interval() -> float:

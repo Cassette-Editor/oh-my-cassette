@@ -175,3 +175,44 @@ def test_notifier_delivery_parity_on_local_path(cassette_env, tmp_path):
         outputs=[{"text": "v", "href": "h", "download": "v", "local_path": str(real), "kind": "video"}],
     )
     assert notifier._exported_media_paths(api_real) == [str(real)]
+
+
+def _fake_result(via: str) -> dict:
+    return {"status": "succeeded", "_via": via, "outputs": [], "questions": [],
+            "errors": [], "quality": {}, "final_screenshot": None}
+
+
+def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeypatch):
+    from cassette import worker
+    monkeypatch.setenv("CASSETTE_TRANSPORT", "api")
+    monkeypatch.setattr(worker.notifier, "notify_terminal_job", lambda job: {"delivered": False})
+
+    seen: dict = {}
+
+    class _Recording:
+        def run_job(self, job):
+            seen["job_id"] = job.get("job_id")
+            return _fake_result("api")
+
+    monkeypatch.setattr(worker.transport, "get_transport", lambda: _Recording())
+    monkeypatch.setattr(worker.browser, "run_cassette_browser_job",
+                        lambda job: (_ for _ in ()).throw(AssertionError("browser path ran under api transport")))
+
+    jb = _make_job()
+    out = worker.run(jb["job_id"])
+    assert seen["job_id"] == jb["job_id"]
+    assert out["status"] == "succeeded" and out["_via"] == "api"
+
+
+def test_worker_detached_path_stays_on_browser_by_default(cassette_env, monkeypatch):
+    from cassette import worker
+    monkeypatch.delenv("CASSETTE_TRANSPORT", raising=False)
+    monkeypatch.setattr(worker.notifier, "notify_terminal_job", lambda job: {})
+    monkeypatch.setattr(worker.browser, "run_cassette_browser_job", lambda job: _fake_result("browser"))
+    # The browser path must NOT construct the API transport at all.
+    monkeypatch.setattr(worker.transport, "get_transport",
+                        lambda: (_ for _ in ()).throw(AssertionError("api transport built on browser path")))
+
+    jb = _make_job()
+    out = worker.run(jb["job_id"])
+    assert out["_via"] == "browser"
