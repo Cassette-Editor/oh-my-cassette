@@ -182,6 +182,43 @@ def _fake_result(via: str) -> dict:
             "errors": [], "quality": {}, "final_screenshot": None}
 
 
+@pytest.mark.parametrize("label,expected", [
+    ("DeepSeek V4 Flash", "deepseek/deepseek-v4-flash"),
+    ("DeepSeek V4 Pro", "deepseek/deepseek-v4-pro"),
+    ("GPT-5.4 Mini", "openai/gpt-5.4-mini"),
+    ("deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro"),  # already an id
+    ("", "deepseek/deepseek-v4-flash"),                         # no choice -> default
+])
+def test_api_model_label_maps_to_id(label, expected):
+    # The user's UI model *label* is honored (mapped to an agent model id), not dropped for the default.
+    assert ApiTransport._resolve_model_id({"model_selection": {"model": label}}) == expected
+
+
+def test_api_model_selection_required_fails_on_unmappable_label(monkeypatch):
+    from cassette.api_transport import ApiTransportError
+    monkeypatch.delenv("CASSETTE_REQUIRE_MODEL_SELECTION", raising=False)  # default true
+    monkeypatch.delenv("CASSETTE_API_MODEL_ID", raising=False)
+    with pytest.raises(ApiTransportError) as exc:
+        ApiTransport._resolve_model_id({"model_selection": {"model": "Totally Unknown Model"}})
+    assert exc.value.code == "model_selection_failed"
+    monkeypatch.setenv("CASSETTE_REQUIRE_MODEL_SELECTION", "off")
+    assert ApiTransport._resolve_model_id({"model_selection": {"model": "Totally Unknown Model"}}) == "deepseek/deepseek-v4-flash"
+
+
+def test_api_resume_value_classifies_and_records_interrupts():
+    t = ApiTransport()
+    # A tool interrupt (editor_navigate) resumes KEYED by toolCall.id.
+    rv, qs, needs = t._resume_value([{"id": "i1", "value": {"type": "tool", "toolCall": {"id": "call-9"}}}])
+    assert needs is False and isinstance(rv, dict) and "call-9" in rv
+    # A routine plan review is auto-approved with an audit record.
+    rv, qs, needs = t._resume_value([{"id": "i2", "value": {"type": "edit_plan_review"}}])
+    assert needs is False and rv == {"action": "approve"}
+    assert qs and qs[0]["reason"] == "routine_plan_approval" and qs[0]["requires_user"] is False
+    # A routine ask_user is auto-answered and the run continues (not halted).
+    rv, qs, needs = t._resume_value([{"id": "i3", "value": {"type": "ask_user", "prompt": "which font looks best?"}}])
+    assert needs is False and rv["action"] == "respond"
+
+
 def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeypatch):
     from cassette import worker
     monkeypatch.setenv("CASSETTE_TRANSPORT", "api")
