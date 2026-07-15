@@ -17,7 +17,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from . import browser, exact_bgm, jamendo, jobs, manifest, notifier, prompt as prompt_mod, security
+from . import browser, exact_bgm, jamendo, jobs, manifest, notifier, prompt as prompt_mod, security, transport
 from .errors import CassetteError
 from .security import redact_for_log, safe_hash_id
 
@@ -657,7 +657,7 @@ def _finish_background_cassette_job(job_id: str) -> None:
             jobs.save_job(job)
             return
         job = jobs.update_job(job_id, status="running", started_at=jobs.now_iso(), worker_kind="thread")
-        result = browser.run_cassette_browser_job_threaded(job)
+        result = transport.get_transport().run_job(job)
         job = jobs.merge_persisted_runtime_fields(job)
         job.update(result)
         job["status"] = result.get("status", "failed")
@@ -746,7 +746,7 @@ def cassette_run_job(args: dict, **kwargs) -> str:
         job["status"] = "running"
         job["started_at"] = job.get("started_at") or jobs.now_iso()
         jobs.save_job(job)
-        result = browser.run_cassette_browser_job_threaded(job)
+        result = transport.get_transport().run_job(job)
         job = jobs.merge_persisted_runtime_fields(job)
         job.update(result)
         job["status"] = result.get("status", "failed")
@@ -877,7 +877,7 @@ def cassette_review_completion(args: dict, **kwargs) -> str:
         job = jobs.load_job(job_id)
         review = {"decision": decision, "reason": reason, "summary": summary}
         if decision == "export":
-            result = browser.export_reviewed_completion_job_threaded(job, review)
+            result = transport.get_transport().export(job, review)
             job = jobs.merge_persisted_runtime_fields(job)
             job.update(result)
             job["status"] = result.get("status", "failed")
@@ -927,7 +927,9 @@ def cassette_cancel_job(args: dict, **kwargs) -> str:
 
 
 def check_playwright() -> bool:
-    return browser.check_playwright()
+    # Transport-readiness gate: under the browser transport this checks Playwright;
+    # under the API transport it checks that the API base URL + credentials are configured.
+    return transport.get_transport().check_available()
 
 
 def _mime_to_media_type(mime: str, path: str) -> str:
@@ -4063,7 +4065,7 @@ def handle_cut_command(raw_args: str = "") -> str:
 
 
 def close_cassette_browser_sessions(**kwargs) -> None:
-    browser.close_browser_sessions_threaded()
+    transport.get_transport().close_sessions()
 
 
 def _compact_user_text(raw: str, max_chars: int = 700) -> str:

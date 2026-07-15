@@ -33,6 +33,15 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_e2e)
 
 
+@pytest.fixture(autouse=True)
+def _default_browser_transport(monkeypatch):
+    # The plugin ships with CASSETTE_TRANSPORT=api as the default. Pin the suite to the browser path
+    # (what most tests were written against) so they exercise the Playwright entrypoints; tests that
+    # target the API transport override this by setting CASSETTE_TRANSPORT=api (or delete it to assert
+    # the shipped default).
+    monkeypatch.setenv("CASSETTE_TRANSPORT", "browser")
+
+
 @pytest.fixture
 def cassette_env(tmp_path, monkeypatch):
     asset_root = tmp_path / "asset-root"
