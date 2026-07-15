@@ -38,6 +38,9 @@ def _serve(handler_cls, monkeypatch, extra_rec=None):
     monkeypatch.setenv("CASSETTE_AUTH_EMAIL", "e@x.io")
     monkeypatch.setenv("CASSETTE_AUTH_PASSWORD", "pw")
     monkeypatch.setenv("CASSETTE_API_POLL_INTERVAL_SEC", "1")
+    # Exercise the full run_job pipeline (auth→upload→run→export) in one call; the completion-review
+    # gate (the browser-parity default) has its own dedicated test that unsets this.
+    monkeypatch.setenv("CASSETTE_API_AUTO_EXPORT", "1")
     return server
 
 
@@ -167,6 +170,7 @@ def mock_api(monkeypatch):
     monkeypatch.setenv("CASSETTE_AUTH_EMAIL", "e@x.io")
     monkeypatch.setenv("CASSETTE_AUTH_PASSWORD", "pw")
     monkeypatch.setenv("CASSETTE_API_POLL_INTERVAL_SEC", "1")
+    monkeypatch.setenv("CASSETTE_API_AUTO_EXPORT", "1")  # full-pipeline tests; gate test unsets this
     try:
         yield server
     finally:
@@ -228,6 +232,64 @@ def test_api_transport_run_job_end_to_end(cassette_env, mock_api, tmp_path):
     assert rec["export_session"] == "sess"
     # The run waited for media readiness before starting the agent (empty/blank-export guard).
     assert rec["media_ready_polls"] >= 1
+
+
+def test_api_transport_dedupes_uploads_in_reused_session(cassette_env, mock_api, tmp_path):
+    """A reused gateway session that edits then refines must not re-upload the same asset (which would
+    accumulate duplicate media in the project) — matching the browser path's per-session dedupe."""
+    asset = tmp_path / "clip.mp4"
+    asset.write_bytes(b"x" * 64)
+    base = {"session_hash": "reuse", "cassette_session_id": "reuse",
+            "prompt": "edit", "asset_paths": [str(asset)], "timeout_sec": 60}
+    ApiTransport().run_job({**base, "job_id": "job-a"})
+    first_inits = mock_api.rec["init_count"]
+    assert first_inits == 1
+    ApiTransport().run_job({**base, "job_id": "job-b"})
+    # The second job reused the already-uploaded asset — no new upload/init.
+    assert mock_api.rec["init_count"] == first_inits
+
+
+def test_api_transport_records_run_progress(cassette_env, mock_api, tmp_path):
+    """The run writes stage/telemetry into the job record (current_stage, stage_timings,
+    progress_events) so status polls and _job_report are not frozen and empty."""
+    asset = Path(cassette_env["source_root"]) / "clip.mp4"
+    asset.write_bytes(b"x" * 32)
+    job = jobs.create_job(session_hash="prog", prompt="edit", instruction=None,
+                          asset_paths=[str(asset)], options={"cassette_session_id": "prog"})
+    job["asset_paths"] = [str(asset)]
+    job["prompt"] = "edit"
+    ApiTransport().run_job(job)
+    saved = jobs.load_job(job["job_id"])
+    assert saved.get("current_stage")          # a live stage was recorded
+    assert saved.get("progress_events")        # at least one structured progress event
+    assert isinstance(saved.get("stage_timings"), dict) and saved["stage_timings"]
+
+
+def test_api_transport_completion_review_gate(cassette_env, mock_api, monkeypatch, tmp_path):
+    """By default (browser parity) a successful agent run does NOT auto-export — it returns needs_user
+    with completion_review_required so the Hermes supervisor decides; cassette_review_completion then
+    drives ApiTransport.export()."""
+    monkeypatch.delenv("CASSETTE_API_AUTO_EXPORT", raising=False)
+    asset = tmp_path / "clip.mp4"
+    asset.write_bytes(b"x" * 64)
+    job = {
+        "job_id": "job-review-gate", "session_hash": "sess", "cassette_session_id": "sess",
+        "prompt": "make a short captioned video", "asset_paths": [str(asset)], "timeout_sec": 60,
+    }
+    result = ApiTransport().run_job(job)
+    # The run committed the edit but export is gated on Hermes review.
+    assert result["status"] == "needs_user"
+    assert result["quality"]["completion_review_required"] is True
+    assert any(q.get("reason") == "completion_requires_hermes_review" for q in result["questions"])
+    assert not any(p.startswith("/api/export/projects/") for _, p in mock_api.rec["requests"])
+
+    # The reviewed export then renders + downloads the video.
+    job.update(result)
+    export_result = ApiTransport().export(job, {"decision": "export", "reason": "looks complete"})
+    assert export_result["status"] == "succeeded", export_result["errors"]
+    assert export_result["outputs"] and Path(export_result["outputs"][0]["local_path"]).read_bytes() == EXPORT_BYTES
+    assert export_result["quality"]["completion_source"] == "hermes_completion_review"
+    assert mock_api.rec["export_session"] == "sess"
 
 
 def test_api_transport_forbidden_surfaces_full_access_hint(cassette_env, monkeypatch):

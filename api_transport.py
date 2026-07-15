@@ -75,7 +75,50 @@ _SUPPORTED_AGENT_MODEL_IDS = frozenset({
     "deepseek/deepseek-v4-pro",
     "openai/gpt-5.4-mini",
 })
+# The plugin's model_selection stores a UI *label* (browser.py scrapes only the label, not the id),
+# so map the label -> agent model id to honor the user's model choice on the api path. Labels are
+# locale-independent brand names (cassette-config MODEL_OPTIONS i18n; identical in zh and en).
+_MODEL_LABEL_TO_ID = {
+    "deepseekv4flash": "deepseek/deepseek-v4-flash",
+    "deepseekv4pro": "deepseek/deepseek-v4-pro",
+    "gpt54mini": "openai/gpt-5.4-mini",
+}
 _DEFAULT_THINKING = "low"  # matches cassette-config DEFAULT_THINKING / per-model defaultThinking
+
+
+def _require_model_selection() -> bool:
+    # Default true (matches browser.py): a chosen-but-unresolvable model fails the job rather than
+    # silently running the default.
+    return _env("CASSETTE_REQUIRE_MODEL_SELECTION").lower() not in {"0", "false", "no", "off"}
+
+
+def _export_on_complete(job: dict) -> bool:
+    # Mirrors browser._export_on_complete: whether a finished edit should be exported. Default true.
+    raw = _env("CASSETTE_EXPORT_ON_COMPLETE") or str(job.get("export_on_complete", "true"))
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _auto_export() -> bool:
+    # Opt-in: export directly on api-success instead of routing through the Hermes completion review.
+    # This is NOT browser-parity (the browser always routes completion through the supervisor).
+    return _env("CASSETTE_API_AUTO_EXPORT").lower() in {"1", "true", "yes", "on"}
+
+
+def _model_id_from_label(label: str) -> str | None:
+    """Map a scraped model display label (e.g. 'DeepSeek V4 Pro') to its agent model id."""
+    norm = "".join(ch for ch in str(label).lower() if ch.isalnum())
+    if not norm:
+        return None
+    if norm in _MODEL_LABEL_TO_ID:
+        return _MODEL_LABEL_TO_ID[norm]
+    # Token fallback, robust to label drift / localization.
+    if "flash" in norm:
+        return "deepseek/deepseek-v4-flash"
+    if "deepseek" in norm and "pro" in norm:
+        return "deepseek/deepseek-v4-pro"
+    if "gpt" in norm or "mini" in norm:
+        return "openai/gpt-5.4-mini"
+    return None
 
 # Quality subkeys that _result computes from the current outcome — never carry these forward from a
 # prior job's quality (they would clobber the fresh values with stale ones).
@@ -157,6 +200,13 @@ class ApiTransport:
     def __init__(self) -> None:
         self._token: str | None = None
         self._is_full_user: bool = False
+        # Progress state (reset per run in _init_progress; defaults keep helpers safe on the export path).
+        self._job: dict | None = None
+        self._stage_timings: dict[str, dict] = {}
+        self._current_stage: str = ""
+        self._last_event: float = 0.0
+        self._last_heartbeat: float = 0.0
+        self._run_started: float = 0.0
 
     # ── public Transport surface ──────────────────────────────────────────────
     def check_available(self) -> bool:
@@ -179,6 +229,8 @@ class ApiTransport:
         errors = list(job.get("errors") or [])
         prior_quality = dict(job.get("quality") or {})
         export_deadline = time.monotonic() + self._export_timeout(job)
+        self._init_progress(job)
+        self._enter_stage(job_id, "export", "Rendering the reviewed export")
         try:
             self._authenticate()
             outputs = self._export_project(session_id, job_id, deadline=export_deadline)
@@ -204,7 +256,7 @@ class ApiTransport:
                 "reason": str(decision.get("reason") or "")[:500],
             },
             "progress_summary": str(decision.get("summary") or prior_quality.get("progress_summary") or "")[:700] or None,
-            "current_stage": prior_quality.get("current_stage") or None,
+            "current_stage": "export",
         }
         return self._result(
             _SUCCEEDED if outputs else _FAILED,
@@ -216,7 +268,7 @@ class ApiTransport:
             export_pending=not outputs,
             risk="low" if outputs else "high",
             extra_quality={**carried, **review_quality},
-            final_screenshot=job.get("final_screenshot"),
+            final_screenshot=self._export_thumbnail(outputs) or job.get("final_screenshot"),
         )
 
     def run_job(self, job: dict) -> dict:
@@ -227,6 +279,7 @@ class ApiTransport:
         questions: list[dict] = []
         errors: list[dict] = []
         deadline = time.monotonic() + self._job_timeout(job)
+        self._init_progress(job)
 
         try:
             if not _api_base():
@@ -235,15 +288,20 @@ class ApiTransport:
             self._authenticate()
 
             media_file_ids: list[str] = []
-            for path in asset_paths:
-                media_file_ids.append(self._upload_asset(path, session_id, deadline, job_id))
+            if asset_paths:
+                self._enter_stage(job_id, "upload", "Uploading media to Cassette")
+                media_file_ids = self._upload_assets(asset_paths, session_id, deadline, job_id)
 
             # Media derivatives (analysis evidence/embeddings for the agent, render-source for the
             # export) are generated asynchronously after upload. Starting the run early makes the
             # agent commit an empty edit ("succeeds" but exports a blank 1-frame video); exporting
             # early fails with "render-source is missing". Wait for full readiness first.
-            self._await_media_ready(session_id, media_file_ids, deadline, job_id)
+            if media_file_ids:
+                self._enter_stage(job_id, "media_ready", "Processing uploaded media")
+                self._await_media_ready(session_id, media_file_ids, deadline, job_id)
 
+            self._notify_model_selection(job, self._resolve_model_id(job), self._resolve_thinking_config(job))
+            self._enter_stage(job_id, "agent", "Cassette agent is editing")
             thread_id = self._create_thread(session_id, job)
             run_status, run_questions = self._run_agent(thread_id, session_id, prompt, job, deadline, media_file_ids)
             questions.extend(run_questions)
@@ -261,9 +319,35 @@ class ApiTransport:
                 return self._result(_FAILED, questions=questions, errors=errors,
                                     completion_observed=True, export_completed=False, risk="high")
 
-            # Agent edit committed server-side. Export is a separate step: if it fails, the edit still
-            # happened, so report 'succeeded' with export_pending rather than masking it as a failure
-            # (mirrors browser.py's "succeeded but export pending" story consumed by _job_report).
+            edit_summary = self._latest_agent_summary(thread_id) or "Cassette reports the requested edit is complete."
+
+            # The agent committed the edit. Mirror the browser path: unless auto-export is opted into,
+            # hand completion to the Hermes supervisor for semantic review (export/continue/needs_user/
+            # failed) via a needs_user gate that cassette_review_completion -> ApiTransport.export()
+            # resolves. Only auto-export when CASSETTE_API_AUTO_EXPORT is set (the api-success signal is
+            # authoritative) — that path is NOT browser-parity and is documented as such.
+            if _export_on_complete(job) and not _auto_export():
+                questions.append({
+                    "question": edit_summary[:500],
+                    "requires_user": False,
+                    "reason": "completion_requires_hermes_review",
+                    "answer": ("The latest Cassette reply needs Hermes supervisor semantic review before deciding "
+                               "whether to export, continue, fail, or ask the user."),
+                })
+                return self._result(_NEEDS_USER, questions=questions, errors=errors,
+                                    completion_observed=False, export_completed=False, risk="medium",
+                                    extra_quality={"completion_review_required": True,
+                                                   "completion_source": "cassette_agent_success",
+                                                   "progress_summary": edit_summary, "current_stage": "agent"})
+            if not _export_on_complete(job):
+                # Export not requested for this job — finish without rendering (browser parity).
+                return self._result(_SUCCEEDED, questions=questions, errors=errors, completion_observed=True,
+                                    export_completed=False, export_pending=False, risk="medium",
+                                    extra_quality={"progress_summary": edit_summary, "current_stage": "agent"})
+
+            # Auto-export (opt-in). If it fails, the edit still happened, so report 'succeeded' with
+            # export_pending rather than masking it as a failure (consumed by _job_report).
+            self._enter_stage(job_id, "export", "Rendering the export")
             try:
                 outputs = self._export_project(session_id, job_id, deadline=deadline)
             except _JobCancelled:
@@ -272,7 +356,8 @@ class ApiTransport:
                 errors.append(self._error(exc))
                 return self._result(_SUCCEEDED, questions=questions, errors=errors,
                                     completion_observed=True, export_completed=False, export_pending=True, risk="medium",
-                                    extra_quality={"progress_summary": "Cassette edit committed; the export did not complete in time."})
+                                    extra_quality={"progress_summary": edit_summary or "Cassette edit committed; the export did not complete in time.",
+                                                   "current_stage": "export"})
             has_local = any(o.get("local_path") for o in outputs)
             return self._result(
                 _SUCCEEDED,
@@ -283,6 +368,8 @@ class ApiTransport:
                 export_completed=bool(outputs),
                 export_pending=not outputs,
                 risk="low" if has_local else "medium",
+                extra_quality={"progress_summary": edit_summary or None, "current_stage": "export"},
+                final_screenshot=self._export_thumbnail(outputs),
             )
         except _JobCancelled:
             return self._result(_CANCELLED, questions=questions, errors=errors,
@@ -412,6 +499,7 @@ class ApiTransport:
                     last_phase = str(s.get("readinessPhase") or last_phase)
             if wanted <= ready:
                 return
+            self._tick(job_id, "Processing uploaded media (" + (last_phase or "analyzing") + ")")
             time.sleep(self._poll_interval())
         raise ApiTransportError(
             "media_analysis_timeout",
@@ -427,6 +515,102 @@ class ApiTransport:
     @staticmethod
     def _export_ready(status: dict) -> bool:
         return bool(status.get("exportReady") or status.get("renderStatus") == "completed")
+
+    # ── upload (with incremental dedupe, parity with browser _asset_paths_needing_upload) ──
+    def _upload_assets(self, asset_paths: list[str], session_id: str, deadline: float, job_id: str = "") -> list[str]:
+        """Upload each asset once. Skips assets already uploaded in this session (a reused gateway
+        session that edits then refines would otherwise accumulate duplicate media in the project),
+        matching the browser path's per-session uploaded-asset cache."""
+        cache = self._load_upload_cache(session_id)
+        batch: dict[str, str] = {}
+        ids: list[str] = []
+        changed = False
+        for path in asset_paths:
+            fp = self._asset_fingerprint(path)
+            if fp and fp in batch:
+                ids.append(batch[fp])
+                continue
+            if fp and fp in cache:
+                batch[fp] = cache[fp]
+                ids.append(cache[fp])
+                continue
+            media_id = self._upload_asset(path, session_id, deadline, job_id)
+            ids.append(media_id)
+            if fp:
+                batch[fp] = media_id
+                cache[fp] = media_id
+                changed = True
+        if changed:
+            self._save_upload_cache(session_id, cache)
+        return ids
+
+    @staticmethod
+    def _asset_fingerprint(path: str) -> str:
+        # Gateway media filenames are content-digest based (manifest.py), so name+size is a stable key.
+        try:
+            p = Path(path)
+            return p.name + ":" + str(p.stat().st_size)
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _upload_cache_path(session_id: str) -> Path:
+        safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(session_id))[:96] or "default"
+        base = Path(os.getenv("CASSETTE_ASSET_ROOT", str(get_asset_root()))) / "api_uploads"
+        base.mkdir(parents=True, exist_ok=True)
+        return base / (safe + ".json")
+
+    def _load_upload_cache(self, session_id: str) -> dict[str, str]:
+        try:
+            return json.loads(self._upload_cache_path(session_id).read_text("utf-8")) or {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_upload_cache(self, session_id: str, cache: dict[str, str]) -> None:
+        try:
+            self._upload_cache_path(session_id).write_text(json.dumps(cache), "utf-8")
+        except OSError:
+            pass
+
+    def _latest_agent_summary(self, thread_id: str) -> str:
+        """Latest assistant message text from the thread state — a real edit summary for the terminal
+        report/notification (the browser path derives this from the chat panel)."""
+        try:
+            _, state = self._request("GET", f"/api/langgraph/threads/{thread_id}/state", expect=200)
+            messages = ((state or {}).get("values") or {}).get("messages") or []
+            for message in reversed(messages):
+                if not isinstance(message, dict):
+                    continue
+                if (message.get("type") or message.get("role")) not in ("ai", "assistant"):
+                    continue
+                content = message.get("content")
+                if isinstance(content, list):
+                    content = " ".join(str(c.get("text", "")) if isinstance(c, dict) else str(c) for c in content)
+                content = str(content or "").strip()
+                if content:
+                    return content[:700]
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
+    def _export_thumbnail(self, outputs: list[dict]) -> str | None:
+        """Best-effort still frame from the exported mp4 — the api path has no browser to screenshot,
+        so this gives final_screenshot consumers (web demo, terminal image) a real visual artifact."""
+        if _env("CASSETTE_API_EXPORT_THUMBNAIL").lower() in {"0", "false", "no", "off"}:
+            return None
+        try:
+            path = next((o.get("local_path") for o in (outputs or [])
+                         if isinstance(o, dict) and o.get("local_path")), None)
+            if not path or not Path(path).exists():
+                return None
+            import subprocess
+            ffmpeg = _env("CASSETTE_FFMPEG_BIN") or "ffmpeg"
+            target = Path(path).with_suffix(".thumb.jpg")
+            subprocess.run([ffmpeg, "-v", "error", "-y", "-ss", "0.5", "-i", path,
+                            "-frames:v", "1", str(target)], capture_output=True, timeout=30)
+            return str(target) if target.exists() and target.stat().st_size > 0 else None
+        except Exception:  # noqa: BLE001
+            return None
 
     def _put_bytes(self, url: str, data: bytes, mime: str) -> None:
         request = Request(url, data=data, method="PUT", headers={"Content-Type": mime})
@@ -512,16 +696,32 @@ class ApiTransport:
 
     @staticmethod
     def _resolve_model_id(job: dict) -> str:
-        # model_selection carries a UI *label* under 'model' (not an id), so only forward it when it
-        # already names a product model id (or an explicit 'model_id'/'modelId'); otherwise use the
-        # env override or the editor's default. The default IS the UI default, so an unmapped label
-        # runs the same model the browser/UI would default to rather than an arbitrary one.
+        # Honor the user's model choice. model_selection stores a UI label under 'model' (browser.py
+        # captures only the label); an explicit id ('model_id'/'modelId') wins if present, otherwise
+        # map the label -> id so the api path runs the SAME model the browser path would select.
+        # Fall back to the env override or the editor default only when nothing maps.
         ms = job.get("model_selection") or {}
-        candidate = str(ms.get("model_id") or ms.get("modelId") or ms.get("model") or "").strip()
-        if candidate in _SUPPORTED_AGENT_MODEL_IDS:
-            return candidate
+        explicit = str(ms.get("model_id") or ms.get("modelId") or "").strip()
+        if explicit in _SUPPORTED_AGENT_MODEL_IDS:
+            return explicit
+        label = str(ms.get("model") or "").strip()
+        if label in _SUPPORTED_AGENT_MODEL_IDS:  # already an id
+            return label
+        mapped = _model_id_from_label(label) if label else None
+        if mapped in _SUPPORTED_AGENT_MODEL_IDS:
+            return mapped
         env_model = _env("CASSETTE_API_MODEL_ID")
-        return env_model if env_model in _SUPPORTED_AGENT_MODEL_IDS else DEFAULT_AGENT_MODEL_ID
+        if env_model in _SUPPORTED_AGENT_MODEL_IDS:
+            return env_model
+        # A model was explicitly chosen but could not be mapped: fail loudly when selection is
+        # required (browser parity — browser.py raises rather than silently running the default).
+        if label and _require_model_selection():
+            raise ApiTransportError(
+                "model_selection_failed",
+                f"Could not map the selected Cassette model '{label}' to a supported model id; "
+                "set CASSETTE_API_MODEL_ID or disable CASSETTE_REQUIRE_MODEL_SELECTION.",
+            )
+        return DEFAULT_AGENT_MODEL_ID
 
     @staticmethod
     def _resolve_thinking_config(job: dict) -> str:
@@ -533,7 +733,11 @@ class ApiTransport:
             return override
         ms = job.get("model_selection") or {}
         raw = str(ms.get("thinkingConfig") or ms.get("thinking_level") or "").strip().lower()
-        return raw if raw in valid else _DEFAULT_THINKING
+        if raw in valid:
+            return raw
+        # Honor the browser path's CASSETTE_DEFAULT_THINKING_LEVEL default before the hard-coded one.
+        env_default = _env("CASSETTE_DEFAULT_THINKING_LEVEL").lower()
+        return env_default if env_default in valid else _DEFAULT_THINKING
 
     def _run_agent(self, thread_id: str, session_id: str, prompt: str, job: dict, deadline: float,
                    media_file_ids: list[str] | None = None) -> tuple[str, list[dict]]:
@@ -570,7 +774,11 @@ class ApiTransport:
             if status == "interrupted":
                 interrupts = self._pending_interrupts(thread_id)
                 if not interrupts:
-                    # Interrupted with nothing pending == treat as needing user.
+                    # Interrupted with nothing pending == treat as needing user. Carry a summary so the
+                    # terminal message is not a bare headline (parity with the browser needs_user path).
+                    summary = self._latest_agent_summary(thread_id) or "Cassette paused and needs input to continue."
+                    questions.append({"question": summary[:500], "requires_user": True,
+                                      "reason": "cassette_agent_question", "answer": ""})
                     return _NEEDS_USER, questions
                 resume_value, new_questions, needs_user = self._resume_value(interrupts)
                 questions.extend(new_questions)
@@ -629,6 +837,7 @@ class ApiTransport:
                 return status
             if status and status != "pending":
                 ever_started = True
+            self._tick(job_id, "Cassette agent is editing (" + (status or "running") + ")")
             if not ever_started and (time.monotonic() - start) > start_timeout:
                 raise ApiTransportError(
                     "agent_run_not_started",
@@ -645,6 +854,13 @@ class ApiTransport:
         try:
             self._request("POST", f"/api/langgraph/threads/{thread_id}/runs/{run_id}/cancel?action=interrupt",
                           json_body={})
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _cancel_export(self, export_job_id: str) -> None:
+        """Best-effort server-side cancel of an in-flight export/render job on cancellation."""
+        try:
+            self._request("POST", f"/api/export/jobs/{export_job_id}/cancel", json_body={})
         except Exception:  # noqa: BLE001
             pass
 
@@ -690,21 +906,41 @@ class ApiTransport:
                     keyed[str(call_id)] = {"result": dict(_NAVIGATE_NOOP_RESULT)}
                 continue
             # Typed interrupt — resume bare. Resolve it first so its payload wins over any keyed acks.
+            # Each auto-handled interrupt leaves an audit record (requires_user=False), matching the
+            # browser path's routine-approval question entries.
             if kind == "edit_plan_review":
+                questions.append({"question": "Cassette requested plan approval.", "requires_user": False,
+                                  "reason": "routine_plan_approval", "answer": "Auto-approved the edit plan."})
                 return {"action": "approve"}, questions, False
             if kind == "mode_switch":
+                questions.append({"question": "Cassette requested a mode switch.", "requires_user": False,
+                                  "reason": "routine_mode_switch", "answer": "Auto-switched to auto mode."})
                 return {"action": "switch_mode", "selectedMode": "auto"}, questions, False
             if kind == "init_questions":
+                questions.append({"question": "Cassette asked initialization questions.", "requires_user": False,
+                                  "reason": "routine_init_questions", "answer": "Proceeded with defaults."})
                 return {}, questions, False
             if kind == "ask_user":
-                text = str(value.get("prompt") or value.get("question") or "")[:500]
+                text = str(value.get("prompt") or value.get("question") or "")
+                # Classify like the browser path (classify_cassette_question): a *routine* ambiguity
+                # is auto-answered with a safe default and the run continues; only a genuine user
+                # choice or a missing-required-asset returns needs_user (carrying the specific reason).
+                from . import prompt as _prompt
+                classification = _prompt.classify_cassette_question(text)
+                reason = classification.get("reason") or "cassette_agent_question"
+                default_answer = classification.get("answer") or ""
                 auto_reply = _env("CASSETTE_API_DEFAULT_ASK_USER_REPLY")
-                if auto_reply:
-                    questions.append({"question": text, "requires_user": False,
-                                      "reason": "cassette_agent_question", "answer": auto_reply})
+                if not classification.get("requires_user"):
+                    reply = auto_reply or default_answer or "Please proceed using your best judgment."
+                    questions.append({"question": text[:500], "requires_user": False,
+                                      "reason": reason, "answer": reply})
+                    return {"action": "respond", "userResponse": reply}, questions, False
+                if auto_reply:  # operator opted into unattended auto-answering even real questions
+                    questions.append({"question": text[:500], "requires_user": False,
+                                      "reason": reason, "answer": auto_reply})
                     return {"action": "respond", "userResponse": auto_reply}, questions, False
-                questions.append({"question": text, "requires_user": True,
-                                  "reason": "cassette_agent_question", "answer": ""})
+                questions.append({"question": text[:500], "requires_user": True,
+                                  "reason": reason, "answer": default_answer})
                 return None, questions, True
         if keyed:
             return keyed, questions, False
@@ -725,7 +961,9 @@ class ApiTransport:
 
         file_url: str | None = None
         while time.monotonic() < deadline:
-            self._raise_if_cancelled(job_id)
+            if self._cancelled(job_id):
+                self._cancel_export(export_job_id)  # stop the server-side Lambda render, not just abandon it
+                raise _JobCancelled()
             _, body = self._request("GET", f"/api/export/jobs/{export_job_id}", expect=200)
             status = str((body or {}).get("status") or "") if isinstance(body, dict) else ""
             if status == "done":
@@ -733,6 +971,9 @@ class ApiTransport:
                 break
             if status == "error":
                 raise ApiTransportError("export_failed", str((body or {}).get("error") or "Export job failed"))
+            pct = (body or {}).get("progressPercent") if isinstance(body, dict) else None
+            self._tick(job_id, "Rendering the export (" + (status or "rendering")
+                       + (f" {pct}%" if pct is not None else "") + ")")
             time.sleep(self._poll_interval())
         if not file_url:
             raise ApiTransportError("export_timeout", "Export job did not complete in time")
@@ -760,6 +1001,127 @@ class ApiTransport:
             raise ApiTransportError("export_download_failed", f"Export download failed (HTTP {exc.code})") from exc
         except URLError as exc:
             raise ApiTransportError("export_download_failed", f"Export download failed: {exc.reason}") from exc
+
+    # ── progress telemetry (parity with the browser path's job-record updates) ──
+    def _init_progress(self, job: dict) -> None:
+        # Fresh per run_job (get_transport() returns a new instance per call).
+        self._job = job
+        self._stage_timings: dict[str, dict] = {}
+        self._current_stage = ""
+        now = time.monotonic()
+        self._last_event = 0.0        # force an event on the first stage
+        self._last_heartbeat = now    # first heartbeat waits one full interval
+        self._run_started = now
+
+    def _enter_stage(self, job_id: str, stage: str, summary: str) -> None:
+        """Mark the start of a phase: finalize the previous stage timing, write current_stage +
+        stage_timings + an immediate progress event, matching browser.begin_stage/finish_stage."""
+        iso = self._now_iso()
+        if self._current_stage and self._current_stage in self._stage_timings:
+            prev = self._stage_timings[self._current_stage]
+            prev.setdefault("status", "succeeded")
+            prev["finished_at"] = iso
+        self._current_stage = stage
+        entry = self._stage_timings.get(stage) or {"attempts": 0, "started_at": iso, "started_mono": time.monotonic()}
+        entry["attempts"] = int(entry.get("attempts", 0)) + 1
+        entry["status"] = "running"
+        entry.setdefault("started_at", iso)
+        entry.setdefault("started_mono", time.monotonic())
+        entry["duration_sec"] = round(time.monotonic() - entry["started_mono"], 1)
+        self._stage_timings[stage] = entry
+        self._last_event = 0.0  # always emit an event at a stage boundary
+        self._tick(job_id, summary, force_event=True)
+
+    def _tick(self, job_id: str, summary: str, status: str = "running", outputs: list | None = None,
+              force_event: bool = False) -> None:
+        """Called from phase boundaries and inside the poll loops. Appends a bounded progress_events
+        entry on the event interval and sends a TEXT progress heartbeat on the snapshot interval (the
+        api path has no browser, so the screenshot heartbeat becomes a text heartbeat)."""
+        if not job_id:
+            return
+        now = time.monotonic()
+        if self._current_stage in self._stage_timings:
+            self._stage_timings[self._current_stage]["duration_sec"] = round(
+                now - self._stage_timings[self._current_stage].get("started_mono", now), 1)
+        if force_event or (now - self._last_event) >= self._event_interval():
+            self._last_event = now
+            self._append_event(job_id, summary, status, outputs)
+        if (now - self._last_heartbeat) >= self._heartbeat_interval():
+            self._last_heartbeat = now
+            self._send_heartbeat(summary)
+
+    def _append_event(self, job_id: str, summary: str, status: str, outputs: list | None) -> None:
+        try:
+            from . import jobs
+            events = list(jobs.load_job(job_id).get("progress_events") or [])[-9:]
+            events.append({
+                "at": self._now_iso(),
+                "status": status,
+                "summary": str(summary)[:500],
+                "stage": self._current_stage,
+                "output_link_count": len(outputs or []),
+            })
+            jobs.update_job(job_id, progress_events=events, current_stage=self._current_stage,
+                            stage_timings=self._public_stage_timings())
+        except Exception:  # noqa: BLE001 — progress recording must never break the run
+            pass
+
+    def _send_heartbeat(self, summary: str) -> None:
+        job = getattr(self, "_job", None)
+        if not isinstance(job, dict):
+            return
+        delivery = job.get("delivery") or {}
+        if not delivery.get("chat_id"):
+            return
+        try:
+            from . import notifier
+            elapsed = int(time.monotonic() - getattr(self, "_run_started", time.monotonic()))
+            stage = self._current_stage or "running"
+            message = f"Cassette job in progress — {stage} ({elapsed}s elapsed)."
+            if summary:
+                message += f"\n{str(summary)[:300]}"
+            notifier.notify_gateway_text(delivery, message, reason="cassette_progress")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _public_stage_timings(self) -> dict:
+        return {k: {kk: vv for kk, vv in v.items() if kk != "started_mono"}
+                for k, v in self._stage_timings.items()}
+
+    def _notify_model_selection(self, job: dict, model_id: str, thinking: str) -> None:
+        # Mirror browser.py: deliver the 'Cassette model selected' gateway notice and persist it.
+        job_id = str(job.get("job_id") or "")
+        selection = job.get("model_selection") or {}
+        if not job_id or (selection.get("source") == "session_preference"):
+            return
+        try:
+            from . import jobs, notifier
+            enriched = dict(job)
+            enriched["model_selection"] = {**selection, "resolved_model_id": model_id, "resolved_thinking": thinking}
+            result = notifier.notify_model_selection(enriched)
+            if result:
+                jobs.update_job(job_id, model_selection_notification=result)
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _now_iso() -> str:
+        from . import jobs
+        return jobs.now_iso()
+
+    @staticmethod
+    def _event_interval() -> float:
+        try:
+            return max(5.0, float(os.getenv("CASSETTE_PROGRESS_INTERVAL_SEC", "30")))
+        except ValueError:
+            return 30.0
+
+    @staticmethod
+    def _heartbeat_interval() -> float:
+        try:
+            return max(30.0, float(os.getenv("CASSETTE_PROGRESS_SNAPSHOT_SEC", "180")))
+        except ValueError:
+            return 180.0
 
     # ── http + result helpers ──────────────────────────────────────────────────
     def _auth_headers(self, headers: dict[str, str]) -> dict[str, str]:
@@ -909,10 +1271,12 @@ class ApiTransport:
 
     @staticmethod
     def _media_ready_timeout() -> float:
-        # How long to wait for uploaded media to become analysis-ready. Generous — scene analysis +
-        # embeddings take real time for longer clips. Override with CASSETTE_API_MEDIA_READY_TIMEOUT_SEC.
+        # How long to wait for uploaded media to become fully ready. Generous — analysis + embeddings +
+        # render-source take real time for longer clips. Prefer CASSETTE_API_MEDIA_READY_TIMEOUT_SEC,
+        # then the browser path's CASSETTE_UPLOAD_TIMEOUT_SEC, then a default.
+        raw = _env("CASSETTE_API_MEDIA_READY_TIMEOUT_SEC") or _env("CASSETTE_UPLOAD_TIMEOUT_SEC")
         try:
-            return max(30.0, float(_env("CASSETTE_API_MEDIA_READY_TIMEOUT_SEC") or "300"))
+            return max(30.0, float(raw or "300"))
         except ValueError:
             return 300.0
 
