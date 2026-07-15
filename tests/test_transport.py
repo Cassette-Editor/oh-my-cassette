@@ -14,17 +14,20 @@ def _isolate_hermes_env(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_ENV_FILE", str(tmp_path / "absent.env"))
 
 
-def test_default_transport_is_browser(monkeypatch):
+def test_default_transport_is_api(monkeypatch):
+    # The shipped default is the API transport; only an explicit 'browser' selects Playwright.
     monkeypatch.delenv("CASSETTE_TRANSPORT", raising=False)
-    assert selected_transport() == "browser"
-    assert isinstance(get_transport(), BrowserTransport)
+    assert selected_transport() == "api"
+    assert isinstance(get_transport(), ApiTransport)
 
 
 @pytest.mark.parametrize(
     "value,is_api",
-    [("api", True), ("API", True), (" Api ", True), ("browser", False), ("", False), ("weird", False)],
+    [("api", True), ("API", True), (" Api ", True), ("browser", False), ("BROWSER", False),
+     (" browser ", False), ("", True), ("weird", True)],
 )
 def test_transport_selection_is_env_driven(monkeypatch, value, is_api):
+    # Only 'browser' (any case, trimmed) selects the browser path; everything else defaults to api.
     monkeypatch.setenv("CASSETTE_TRANSPORT", value)
     t = get_transport()
     assert isinstance(t, ApiTransport if is_api else BrowserTransport)
@@ -241,9 +244,9 @@ def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeyp
     assert out["status"] == "succeeded" and out["_via"] == "api"
 
 
-def test_worker_detached_path_stays_on_browser_by_default(cassette_env, monkeypatch):
+def test_worker_detached_path_uses_browser_when_selected(cassette_env, monkeypatch):
     from cassette import worker
-    monkeypatch.delenv("CASSETTE_TRANSPORT", raising=False)
+    monkeypatch.setenv("CASSETTE_TRANSPORT", "browser")  # explicit opt-out of the api default
     monkeypatch.setattr(worker.notifier, "notify_terminal_job", lambda job: {})
     monkeypatch.setattr(worker.browser, "run_cassette_browser_job", lambda job: _fake_result("browser"))
     # The browser path must NOT construct the API transport at all.

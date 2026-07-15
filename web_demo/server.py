@@ -25,7 +25,7 @@ from . import deepseek_client, logging_utils, session_store
 
 load_cassette_package()
 
-from cassette import browser, jobs, manifest, security, tools  # noqa: E402
+from cassette import browser, jobs, manifest, security, tools, transport  # noqa: E402
 from cassette.errors import CassetteError  # noqa: E402
 
 
@@ -705,7 +705,7 @@ def _reconcile_stale_web_jobs_globally() -> int:
             continue
         timed_out_count += 1
         session_id, session_hash = _web_job_session_identifiers(updated)
-        if not worker_abandon_attempted:
+        if not worker_abandon_attempted and transport.selected_transport() == transport.TRANSPORT_BROWSER:
             worker_abandon_attempted = True
             try:
                 abandoned = bool(browser.abandon_browser_worker())
@@ -759,6 +759,10 @@ def _browser_session_cleanup_timeout_sec() -> float:
 
 
 def _close_web_browser_sessions(session_id: str, session_hash: str) -> tuple[int, int]:
+    # Under the API transport there is no Playwright session to close — skip so we never spin up a
+    # browser worker just to clean up nothing.
+    if transport.selected_transport() != transport.TRANSPORT_BROWSER:
+        return (0, 0)
     closed = 0
     attempts = 0
     for key in dict.fromkeys([session_id, session_hash]):

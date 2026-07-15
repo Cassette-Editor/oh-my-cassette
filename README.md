@@ -553,9 +553,14 @@ Run the local Cassette E2E harness:
   --instruction "Make a short captioned video under 10 seconds."
 ```
 
-#### Cassette transport (experimental)
+#### Cassette transport
 
-By default the plugin drives the Cassette web UI with Playwright (`CASSETTE_TRANSPORT=browser`). An experimental API transport (`CASSETTE_TRANSPORT=api`) instead calls the Cassette server APIs directly (auth → media upload → LangGraph agent run → render-from-stored-project export), avoiding DOM scraping. It is **off by default** — install and usage are unchanged. It reuses your existing `CASSETTE_AUTH_EMAIL`/`CASSETTE_AUTH_PASSWORD`; the API origin defaults to the deployed Cassette (override with `CASSETTE_API_URL` only for self-hosted deployments). The account must have full API access (for `/api/projects` and `/api/export`); a `403`/`forbidden` error reported by the transport indicates it does not.
+The plugin can reach Cassette two ways, selected by `CASSETTE_TRANSPORT`, and **both are fully supported** — pick whichever fits your deployment:
+
+- **`api` (default)** — calls the Cassette server APIs directly (auth → media upload → LangGraph agent run → render-from-stored-project export), no browser. This is the default because it avoids the reliability weakness of DOM scraping and needs no Playwright/Chromium. It reuses your existing `CASSETTE_AUTH_EMAIL`/`CASSETTE_AUTH_PASSWORD`; the API origin defaults to the deployed Cassette (override with `CASSETTE_API_URL` only for self-hosted). **Requirement:** the account must have full API access (for `/api/projects` and `/api/export`) — a `403`/`forbidden` error reported by the transport indicates it does not, in which case set `CASSETTE_TRANSPORT=browser`.
+- **`browser`** — drives the Cassette web UI with Playwright (the original, battle-tested path). Set `CASSETTE_TRANSPORT=browser` to use it. Requires Playwright/Chromium installed. Behavior is byte-identical to the pre-transport-seam plugin.
+
+Switching is a single env var and nothing downstream changes: both transports return the identical job-result dict, so notifications, delivery, and reporting are the same either way.
 
 Uploaded media is linked to the agent run by session id (the upload `x-session-id` equals the run's `mediaSessionId`), and the run carries the same full session/project/run context the editor sends. Before starting the run, the transport waits for uploaded media to be fully processed — analysis evidence/embeddings (which the agent reads) and the render-source derivative (which the export needs) — so it never commits an empty edit or hits an "render-source is missing" export (tunable via `CASSETTE_API_MEDIA_READY_TIMEOUT_SEC`). Cancellation (`/cut`) is honored mid-run, agent timeouts report `timed_out`, and a run whose queue never starts fails fast as `agent_run_not_started` (tunable via `CASSETTE_API_RUN_START_TIMEOUT_SEC`) instead of hanging until the job timeout. The transport requires the Cassette backend's LangGraph run queue to be draining runs and its media render-source pipeline to be healthy.
 
