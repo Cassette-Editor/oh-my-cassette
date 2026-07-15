@@ -238,6 +238,12 @@ class ApiTransport:
             for path in asset_paths:
                 media_file_ids.append(self._upload_asset(path, session_id, deadline, job_id))
 
+            # Media derivatives (analysis evidence/embeddings for the agent, render-source for the
+            # export) are generated asynchronously after upload. Starting the run early makes the
+            # agent commit an empty edit ("succeeds" but exports a blank 1-frame video); exporting
+            # early fails with "render-source is missing". Wait for full readiness first.
+            self._await_media_ready(session_id, media_file_ids, deadline, job_id)
+
             thread_id = self._create_thread(session_id, job)
             run_status, run_questions = self._run_agent(thread_id, session_id, prompt, job, deadline, media_file_ids)
             questions.extend(run_questions)
@@ -363,6 +369,64 @@ class ApiTransport:
                                         str((body or {}).get("error") or f"Media processing failed for key {key}"))
             time.sleep(self._poll_interval())
         raise ApiTransportError("upload_processing_timeout", f"Media processing did not complete for key {key}")
+
+    def _await_media_ready(self, session_id: str, media_file_ids: list[str], deadline: float,
+                           job_id: str = "") -> None:
+        """Wait until every uploaded media file is fully processed before starting the agent run.
+
+        GET /api/media/operations/status?ids= reports per-file readiness: aiReady/analysisReady (the
+        agent's session catalog is filtered to analysis-ready media) and exportReady/renderStatus (the
+        render-source derivative the export needs). Both derivatives are async; running before they
+        finish yields an empty edit or an "render-source is missing" export failure. Bounded by a
+        media-ready timeout and the job deadline; a hard processing failure or timeout is surfaced
+        (a clear error beats a blank video)."""
+        wanted = {str(m) for m in media_file_ids if m}
+        if not wanted:
+            return
+        ready_deadline = min(deadline, time.monotonic() + self._media_ready_timeout())
+        query = "?" + urlencode({"ids": ",".join(sorted(wanted))})
+        headers = {"x-session-id": session_id}
+        last_phase = ""
+        while time.monotonic() < ready_deadline:
+            self._raise_if_cancelled(job_id)
+            _, body = self._request("GET", "/api/media/operations/status" + query, headers=headers, expect=200)
+            statuses = (body or {}).get("statuses") or [] if isinstance(body, dict) else []
+            by_id = {str(s.get("mediaFileId")): s for s in statuses if isinstance(s, dict)}
+            ready: set[str] = set()
+            for mid in wanted:
+                s = by_id.get(mid) or {}
+                # A failed analysis or render derivative won't self-heal (same bytes re-fail), and the
+                # server leaves terminalState 'active' on a failed analyze chunk — so surface the real
+                # error fast instead of spinning until the media-ready timeout.
+                if (s.get("terminalState") == "failed" or s.get("renderStatus") == "failed"
+                        or s.get("analyzeStatus") == "analyze_failed"):
+                    raise ApiTransportError(
+                        "media_processing_failed",
+                        str(s.get("errorMessage") or f"Media {mid} failed processing"),
+                        details={"media_file_id": mid, "analyze_status": s.get("analyzeStatus"),
+                                 "render_status": s.get("renderStatus")},
+                    )
+                if s.get("fullyReady") or (self._ai_ready(s) and self._export_ready(s)):
+                    ready.add(mid)
+                else:
+                    last_phase = str(s.get("readinessPhase") or last_phase)
+            if wanted <= ready:
+                return
+            time.sleep(self._poll_interval())
+        raise ApiTransportError(
+            "media_analysis_timeout",
+            f"Uploaded media did not finish processing in time (last phase: {last_phase or 'unknown'}); "
+            "the agent cannot edit and the render cannot export media that is not ready.",
+            details={"session_id": session_id, "readiness_phase": last_phase},
+        )
+
+    @staticmethod
+    def _ai_ready(status: dict) -> bool:
+        return bool(status.get("aiReady") or status.get("analysisReady"))
+
+    @staticmethod
+    def _export_ready(status: dict) -> bool:
+        return bool(status.get("exportReady") or status.get("renderStatus") == "completed")
 
     def _put_bytes(self, url: str, data: bytes, mime: str) -> None:
         request = Request(url, data=data, method="PUT", headers={"Content-Type": mime})
@@ -842,6 +906,15 @@ class ApiTransport:
             except ValueError:
                 pass
         return ApiTransport._job_timeout(job)
+
+    @staticmethod
+    def _media_ready_timeout() -> float:
+        # How long to wait for uploaded media to become analysis-ready. Generous — scene analysis +
+        # embeddings take real time for longer clips. Override with CASSETTE_API_MEDIA_READY_TIMEOUT_SEC.
+        try:
+            return max(30.0, float(_env("CASSETTE_API_MEDIA_READY_TIMEOUT_SEC") or "300"))
+        except ValueError:
+            return 300.0
 
     @staticmethod
     def _run_start_timeout() -> float:
