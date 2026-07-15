@@ -28,7 +28,8 @@ def _serve(handler_cls, monkeypatch, extra_rec=None):
     rec = {"requests": [], "put_count": 0, "init_count": 0, "complete_count": 0,
            "init_bodies": [], "complete_bodies": [], "upload_session_ids": [], "upload_project_ids": [],
            "auth_email": None, "resume_value": None, "run_input": None, "run_config": None,
-           "thread_metadata": None, "export_session": None, "status_polls": 0, "cancel_posts": []}
+           "thread_metadata": None, "export_session": None, "status_polls": 0, "cancel_posts": [],
+           "media_ready_polls": 0}
     rec.update(extra_rec or {})
     server.rec = rec  # type: ignore[attr-defined]
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -125,6 +126,14 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
 
         if path == "/api/media/upload/status":
             return self._json(200, {"uploadStatus": "completed"})
+        if path == "/api/media/operations/status":
+            # Report every completed upload as fully ready so the readiness gate proceeds.
+            self.rec["media_ready_polls"] += 1
+            statuses = [{"mediaFileId": f"m-{i}", "fullyReady": True, "aiReady": True,
+                         "exportReady": True, "analysisReady": True, "renderStatus": "completed",
+                         "terminalState": "succeeded", "readinessPhase": "ready"}
+                        for i in range(1, self.rec["complete_count"] + 1)]
+            return self._json(200, {"statuses": statuses})
         if path == "/api/langgraph/threads/th-1/runs/r-1":
             return self._json(200, {"run_id": "r-1", "status": "interrupted"})
         if path == "/api/langgraph/threads/th-1/runs/r-2":
@@ -149,6 +158,7 @@ def mock_api(monkeypatch):
         "init_bodies": [], "complete_bodies": [], "upload_session_ids": [], "upload_project_ids": [],
         "auth_email": None, "resume_value": None,
         "run_input": None, "run_config": None, "thread_metadata": None, "export_session": None,
+        "media_ready_polls": 0,
     }
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -216,6 +226,8 @@ def test_api_transport_run_job_end_to_end(cassette_env, mock_api, tmp_path):
     assert nav["ok"] is True and nav["noOp"] is True and nav["newVersion"] == 0
     # Export targeted the stored project by session id.
     assert rec["export_session"] == "sess"
+    # The run waited for media readiness before starting the agent (empty/blank-export guard).
+    assert rec["media_ready_polls"] >= 1
 
 
 def test_api_transport_forbidden_surfaces_full_access_hint(cassette_env, monkeypatch):
@@ -286,6 +298,67 @@ def test_api_transport_waits_for_media_processing(cassette_env, monkeypatch, tmp
         assert result["status"] == "succeeded", result["errors"]
         # The processing poll actually ran (it is the reason the loop exists).
         assert server.rec["status_polls"] >= 3
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+class _MediaReadyAfterPollsAPI(_MockCassetteAPI):
+    """Media is not-ready for the first two readiness polls, then fully ready."""
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/media/operations/status":
+            self.rec["media_ready_polls"] += 1
+            ready = self.rec["media_ready_polls"] >= 3
+            statuses = [{"mediaFileId": "m-1", "fullyReady": ready, "aiReady": ready,
+                         "exportReady": ready, "renderStatus": "completed" if ready else "processing",
+                         "terminalState": "succeeded" if ready else "processing",
+                         "readinessPhase": "ready" if ready else "missing_embeddings"}]
+            return self._json(200, {"statuses": statuses})
+        return super().do_GET()
+
+
+def test_api_transport_waits_for_media_full_readiness(cassette_env, monkeypatch, tmp_path):
+    server = _serve(_MediaReadyAfterPollsAPI, monkeypatch)
+    try:
+        asset = tmp_path / "clip.mp4"
+        asset.write_bytes(b"x" * 64)
+        result = ApiTransport().run_job({
+            "job_id": "job-ready", "session_hash": "s", "cassette_session_id": "s",
+            "prompt": "edit", "asset_paths": [str(asset)], "timeout_sec": 120,
+        })
+        assert result["status"] == "succeeded", result["errors"]
+        # It kept polling until media became fully ready (agent + render), not just upload-complete.
+        assert server.rec["media_ready_polls"] >= 3
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+class _MediaFailsAPI(_MockCassetteAPI):
+    """A required media derivative fails processing."""
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/media/operations/status":
+            return self._json(200, {"statuses": [{
+                "mediaFileId": "m-1", "fullyReady": False, "renderStatus": "failed",
+                "terminalState": "failed", "errorMessage": "render-source transcode failed"}]})
+        return super().do_GET()
+
+
+def test_api_transport_surfaces_media_processing_failure(cassette_env, monkeypatch, tmp_path):
+    server = _serve(_MediaFailsAPI, monkeypatch)
+    try:
+        asset = tmp_path / "clip.mp4"
+        asset.write_bytes(b"x" * 64)
+        result = ApiTransport().run_job({
+            "job_id": "job-mediafail", "session_hash": "s", "cassette_session_id": "s",
+            "prompt": "edit", "asset_paths": [str(asset)], "timeout_sec": 120,
+        })
+        assert result["status"] == "failed"
+        assert result["errors"][0]["code"] == "media_processing_failed"
+        # The run never started for un-renderable media.
+        assert not any(p.startswith("/api/langgraph/threads/th-1/runs") for _, p in server.rec["requests"])
     finally:
         server.shutdown()
         server.server_close()
