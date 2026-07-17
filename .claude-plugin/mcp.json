@@ -1,0 +1,12 @@
+{
+  "cassette": {
+    "command": "python3",
+    "args": [
+      "${CLAUDE_PLUGIN_ROOT}/scripts/run_local_mcp.py"
+    ],
+    "env": {
+      "CASSETTE_MCP_HOST": "claude",
+      "CASSETTE_PROJECT_ROOT": "${CLAUDE_PROJECT_DIR}"
+    }
+  }
+}

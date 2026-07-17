@@ -1,0 +1,19 @@
+{
+  "name": "oh-my-cassette",
+  "version": "0.2.0",
+  "description": "Edit local project media through a self-contained stdio MCP runtime that connects directly to Cassette.",
+  "author": {
+    "name": "Oh My Cassette contributors",
+    "url": "https://github.com/Cassette-Editor/oh-my-cassette"
+  },
+  "homepage": "https://github.com/Cassette-Editor/oh-my-cassette",
+  "repository": "https://github.com/Cassette-Editor/oh-my-cassette",
+  "license": "MIT",
+  "keywords": [
+    "cassette",
+    "video-editing",
+    "media",
+    "mcp"
+  ],
+  "mcpServers": "./.claude-plugin/mcp.json"
+}

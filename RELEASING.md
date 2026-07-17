@@ -1,70 +1,87 @@
 # Releasing Oh My Cassette
 
-Releases are automated with [release-please](https://github.com/googleapis/release-please):
-every push to `main` updates a standing release PR
-(`chore(main): release X.Y.Z`) that bumps `version.txt`,
-`.release-please-manifest.json`, the annotated `version:` line in
-`plugin.yaml`, and `CHANGELOG.md`. Merging that PR creates the `vX.Y.Z` tag
-and the GitHub Release. Because `hermes plugins install` clones `main` and
-`hermes plugins update` is a `git pull`, **main is the release channel** —
-keep it green.
+Releases are automated with [Release Please](https://github.com/googleapis/release-please). A standing release PR updates `version.txt`, `.release-please-manifest.json`, `CHANGELOG.md`, and the configured extra version fields for:
+
+- Hermes `plugin.yaml`;
+- Codex `.codex-plugin/plugin.json`;
+- Claude `.claude-plugin/plugin.json`;
+- `.claude-plugin/marketplace.json`; and
+- `mcp_plugin/__init__.py`.
+
+Merging the release PR creates `vX.Y.Z` and the GitHub Release. `main` is the marketplace and Hermes update channel, so keep it green.
 
 ## Release checklist
 
-1. Confirm `main` is green and review the standing release PR's version and
-   changelog.
-2. **Pre-release E2E** (real Cassette account). Preferred: trigger the
-   maintainer-only workflow, which runs the API-transport harness against a
-   real edit job using the repository secrets:
+1. Review the release PR version and changelog. Confirm every manifest and marketplace reports the same semantic version.
+2. Run the complete credential-free acceptance set:
 
    ```bash
-   gh workflow run e2e.yml
+   .venv/bin/python -m compileall -q .
+   .venv/bin/python -m pytest -q -rs -n 4 --dist loadfile
+   ./web_demo/build_frontend.sh
+   ```
+
+3. Run the Codex plugin validator and the official Claude validators:
+
+   ```bash
+   .venv/bin/python /path/to/plugin-creator/scripts/validate_plugin.py .
+   claude plugin validate --strict .claude-plugin/plugin.json
+   claude plugin validate --strict .claude-plugin/marketplace.json
+   ```
+
+4. Smoke-install from a clean config with the currently supported Codex and Claude CLI versions. Confirm Codex lists `oh-my-cassette@cassette-editor`; confirm Claude reports exactly one host-neutral skill and one `cassette` MCP server.
+5. Trigger the maintainer E2E workflow. It runs a real API edit through the local MCP entrypoint for both host labels; optionally enable browser parity:
+
+   ```bash
+   gh workflow run e2e.yml -f include-browser=true
    gh run watch
    ```
 
-   Or run it locally (also covers the gateway-marked tests):
+   For local acceptance, use only ephemeral environment variables:
 
    ```bash
-   RUN_CASSETTE_E2E=1 .venv/bin/python -m pytest -q -m e2e
-   .venv/bin/python scripts/e2e_local_cassette.py --transport api \
-     --media tests/fixtures/sample.mp4 \
-     --instruction "Make a short captioned video under 10 seconds."
+   CASSETTE_AUTH_EMAIL=… CASSETTE_AUTH_PASSWORD=… \
+   .venv/bin/python scripts/e2e_local_mcp.py \
+     --host codex --transport api \
+     --media /absolute/path/to/a-real-test-clip.mp4 \
+     --instruction "Make a short captioned video."
    ```
 
-   Record the hermes-agent version you tested against and update the
-   Requirements line in both READMEs if it changed.
-3. Trigger CI on the release PR. Release PRs are opened with `GITHUB_TOKEN`,
-   which does **not** trigger workflows — close and reopen the PR (or push an
-   empty commit to its branch) so required checks run.
-4. Merge the release PR. Verify the `vX.Y.Z` tag and GitHub Release exist and
-   that `plugin.yaml` on `main` carries the new version.
-5. Spot-check the official channel on a machine (or scratch `HERMES_HOME`):
+6. Record the live matrix in the release/PR notes:
 
-   ```bash
-   hermes plugins install Cassette-Editor/oh-my-cassette   # fresh install, or:
-   hermes plugins update cassette                 # existing install
-   hermes plugins list                            # shows the new version
-   ```
+   - API auth and one real MCP edit;
+   - Codex guided flow;
+   - Claude guided flow;
+   - optional browser/API parity;
+   - completion review and validated artifact link;
+   - API resume after host restart;
+   - expected `browser_session_lost` after browser-process restart.
 
-6. Announce: Nous Discord `#plugins-skills-and-sands`, and keep the
-   awesome-hermes-agent directory entries current.
+7. Inspect the complete diff and staged files for credentials, private IDs, media, job state, and absolute acceptance paths. Rotate the live test password if it was ever shared outside the repository secret store.
+8. Ensure the release PR's required checks run. Release PRs created with `GITHUB_TOKEN` may need to be closed/reopened or have a new commit pushed before workflows trigger.
+9. Merge and verify the tag, GitHub Release, marketplace manifests, and `plugin.yaml` on `main`.
+10. Spot-check update channels:
 
-If release-please proposes the wrong version, adjust with a
-`Release-As: X.Y.Z` footer on an empty commit to `main`.
+    ```bash
+    codex plugin marketplace upgrade cassette-editor
+    codex plugin add oh-my-cassette@cassette-editor
 
-## One-time repository settings (owner/admin)
+    claude plugin marketplace update cassette-editor
+    claude plugin update oh-my-cassette@cassette-editor
 
-- **Actions → General → Workflow permissions**: enable *"Allow GitHub Actions
-  to create and approve pull requests"* (release-please fails without it).
-- **Pull Requests**: enable squash merge and *"Default to pull request
-  title"* — release-please parses the squash commit message, so PR titles
-  must be conventional commits (see CONTRIBUTING.md).
-- **Branch protection on `main`**: require the `changes`, `test`,
-  `install-smoke`, and `frontend` checks; disallow force pushes.
-  (Path-skipped jobs count as satisfied.)
-- **Code security**: enable secret scanning + push protection, Dependabot
-  alerts, and CodeQL default setup (Python + JavaScript).
-- **E2E secrets**: create the `CASSETTE_AUTH_EMAIL` and
-  `CASSETTE_AUTH_PASSWORD` repository secrets (a dedicated test account is
-  recommended) so the manual `E2E` workflow can run. Optionally set a
-  `CASSETTE_URL` repository variable to pin the region.
+    hermes plugins update cassette
+    hermes plugins list
+    ```
+
+The repository marketplaces are the supported Codex/Claude distribution channel. Do not submit the release to an external public plugin directory as part of this process.
+
+If Release Please proposes the wrong version, use a `Release-As: X.Y.Z` footer on an empty commit to `main`.
+
+## Repository settings
+
+- Enable Actions permission to create and approve pull requests.
+- Enable squash merge and use the PR title as the default commit message.
+- Protect `main` with the stable `ci-ok` aggregate check and disallow force pushes.
+- Keep secret scanning, push protection, Dependabot alerts, and CodeQL enabled.
+- Store `CASSETTE_AUTH_EMAIL` and `CASSETTE_AUTH_PASSWORD` as repository secrets for the manual E2E workflow. Use a dedicated, rotatable test account.
+- Optionally set `CASSETTE_URL` and `CASSETTE_API_URL` repository variables for non-default deployments.

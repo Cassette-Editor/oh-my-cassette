@@ -45,7 +45,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket AI Co-editor fo
 
 <h3 align="center">
   <em>
-  Arm your <a href="https://github.com/nousresearch/hermes-agent">Hermes</a> with <a href="https://trycassette.online">Cassette</a>'s amazing video editing power.<br />
+  Arm Codex, Claude, or <a href="https://github.com/nousresearch/hermes-agent">Hermes</a> with <a href="https://trycassette.online">Cassette</a>'s amazing video editing power.<br />
   Add a friend, chat your video into shape.
   </em>
 </h3>
@@ -54,7 +54,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket AI Co-editor fo
 
 # 🎥 Overview
 
-**Oh My Cassette** is a harness plugin and video editing skill built for agent-supervised workflows on <a href="https://trycassette.online">Cassette</a>, with minimal token overhead.
+**Oh My Cassette** is a video editing plugin and skill for Codex, Claude, and Hermes, built for agent-supervised workflows on <a href="https://trycassette.online">Cassette</a> with minimal token overhead.
 
 Just send your videos or audio files and chat with your agent from anywhere on your phone. Your agent will work with Cassette to understand your intent, organize your media, plan the edit, and turn your materials into a ready-to-share video with powerful montage capabilities.
 
@@ -175,7 +175,7 @@ Be the director of your own story, effortlessly.
 
 # 🏄 Try without installation
 
-We host a public web demo so you can try the Oh My Cassette workflow from a desktop or mobile browser without installing Hermes Agent locally:
+We host a public web demo so you can try the Oh My Cassette workflow from a desktop or mobile browser without installing Codex, Claude, or Hermes locally:
 
 <a href="http://43.134.224.156:8080/"> TRY NOW! </a>
 
@@ -295,16 +295,16 @@ Then open the browser UI, upload a small video, send an edit request, and watch 
 
 ## Before You Start 🎬
 
-This plugin is built on top of the <a href="https://trycassette.online/agent"> Cassette Agent </a>page and is compatible with Hermes Agent. You need:
+Oh My Cassette connects Codex, Claude, or Hermes to the <a href="https://trycassette.online/agent">Cassette Agent</a>. You need:
 
-* A working Hermes Agent installation.
+* Codex, Claude Code, or a working Hermes Agent installation.
 * A Cassette account.
-* A configured Hermes gateway, such as QQ or Telegram.
+* For Hermes only, a configured gateway such as QQ or Telegram.
 
 > [!TIP]
 > **Apply for a Cassette account here:** [**Cassette Sign Up**](https://trycassette.online/signup/)
 
-If Hermes Agent is not installed yet:
+If you plan to use Hermes and it is not installed yet:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
@@ -321,9 +321,10 @@ Oh My Cassette currently supports QQ and Telegram gateways.
 
 ## Requirements
 
-- Hermes Agent installed and gateway configuration handled by Hermes.
-- Python 3.11–3.13 (the range Hermes Agent supports; last verified against hermes-agent 0.15.2).
-- `ffmpeg`, used only to normalize incoming gateway videos to H.264 MP4 before upload.
+- macOS or Linux.
+- Codex or Claude Code for the local MCP plugin, or Hermes Agent with its gateway configured.
+- Python 3.11–3.13.
+- `ffmpeg`, required for Hermes gateway normalization and optional API export thumbnails.
 
 Install system tools:
 
@@ -340,6 +341,30 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ## Install
+
+### Codex
+
+```bash
+codex plugin marketplace add https://github.com/Cassette-Editor/oh-my-cassette.git
+codex plugin add oh-my-cassette@cassette-editor
+```
+
+Start a new Codex task after installation so plugin discovery runs again. The plugin contributes the host-neutral `cassette-video-edit` skill and a local MCP process named `cassette`.
+
+### Claude Code
+
+```bash
+claude plugin marketplace add Cassette-Editor/oh-my-cassette
+claude plugin install oh-my-cassette@cassette-editor
+```
+
+Restart Claude Code after installation. You can verify the installation with:
+
+```bash
+claude plugin details oh-my-cassette@cassette-editor
+```
+
+### Hermes
 
 Install through the Hermes plugin manager (recommended):
 
@@ -397,7 +422,83 @@ python3 scripts/install_plugin.py \
 ```
 </details>
 
-## Ready to Use 📼
+## Use with Codex or Claude over local MCP
+
+Codex and Claude use the same self-contained runtime. In this README, **MCP server** means a local child process connected over stdin/stdout: it opens no port and does not depend on the FastAPI web-demo service. The separate Cassette backend remains the editing engine and continues to handle authentication, media processing, agent runs, project state, and rendering.
+
+The web demo is intentionally different. Browsers still need the retained FastAPI server for uploads, chat sessions, and frontend endpoints; none of that behavior is removed by the local MCP plugin.
+
+### First-run authentication
+
+Missing credentials do not prevent the MCP process from starting. The first tool that needs Cassette returns `auth_required` and an exact private-terminal setup command. Run that command outside the agent conversation; it prompts for the password with `getpass`, verifies the account before writing anything, and stores credentials in the platform-standard Oh My Cassette config directory.
+
+From a git checkout, the equivalent command is:
+
+```bash
+python3 scripts/setup_local_mcp.py --email you@example.com
+```
+
+Credentials may also come from process environment variables. Environment values take precedence over protected local config. Importing an existing Hermes `.env` is explicit and optional:
+
+```bash
+python3 scripts/setup_local_mcp.py --import-hermes
+```
+
+The setup command creates config directories with mode `0700` and credential files with mode `0600`, rejects symlinks and permissive files, and never persists access or refresh tokens. If the account does not have full API access, setup reports the optional browser path instead of silently changing transports.
+
+### Guided editing flow
+
+1. Ask Codex or Claude to edit one or more media files in the current project.
+2. The plugin ingests only media inside the active project or another explicitly trusted root. It canonicalizes paths and rejects traversal and symlink escapes.
+3. Describe the edit, answer any guided choices, and start the job. MCP jobs run in the background by default.
+4. The host checks status with bounded 30-second long polls. The skill monitors for up to 25 minutes, then returns the still-running job ID so you can continue later without tight-polling.
+5. If Cassette needs a real user decision, answer it with the returned job ID. API jobs persist their private continuation metadata across host restarts.
+6. When editing completes, review the result. Rendering starts only after an explicit `export` decision.
+7. The result contains validated absolute paths, file URIs, MIME type, size, and an MCP resource link for each exported artifact. Large media bytes are never embedded in the tool response.
+
+Sessions are isolated by a cryptographically random session ID. Codex and Claude share host-neutral storage, so you can deliberately hand a session or job ID from one host to the other; nothing is shared implicitly.
+
+Additional trusted media directories can be registered during setup:
+
+```bash
+python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
+```
+
+Exports stay under the shared Oh My Cassette data directory at `cassette/exports/<job_id>/`. Only files contained in that job-specific directory can be returned.
+
+### API and optional browser transports
+
+The API transport is the default. It connects directly to the separate Cassette backend, retries authentication once after a `401`, and keeps access tokens in memory only. Because API continuation metadata is persisted, paused API jobs can resume after Codex or Claude restarts.
+
+Browser transport is an explicit fallback for accounts without full API access and for parity diagnostics. Install pinned Playwright and Chromium only when needed:
+
+```bash
+python3 scripts/setup_local_mcp.py --with-browser
+```
+
+Browser jobs can resume while the same MCP process is alive. After a host restart they return `browser_session_lost`, because live browser objects cannot be persisted.
+
+### MCP tools
+
+The local MCP runtime exposes the same 11 tool names as Hermes:
+
+| Tool | Purpose |
+|---|---|
+| `cassette_ingest_media` | Safely ingest trusted project media into an isolated session |
+| `cassette_list_assets` | Read the session's media manifest |
+| `cassette_make_prompt` | Build the complete Cassette edit brief |
+| `cassette_match_bgm` | Match Free To Use background music |
+| `cassette_match_exact_bgm` | Match a specific title and artist |
+| `jamendo_music_matcher` | Match structured Jamendo preferences |
+| `cassette_answer_question` | Answer a guided question or resume a paused job |
+| `cassette_run_job` | Start an edit, in the background by default |
+| `cassette_job_status` | Read status or wait briefly for a change |
+| `cassette_review_completion` | Review completion and explicitly approve export |
+| `cassette_cancel_job` | Request cooperative cancellation |
+
+Every tool returns a structured envelope with `ok`, typed `data` or `error`, `session_id`, `job_id`, the current phase, and a runtime-derived `next_action`.
+
+## Ready to Use with Hermes 📼
 **Now you can pick up your phone and DM your agent! Don't forget to keep your agent alive and network connected.**
 
 In QQ or Telegram:
@@ -430,6 +531,22 @@ In QQ or Telegram:
 * QQ is set to Chinese and Telegram is set to English by default, you can set language by command `/cassette language zh/en` manually.
 
 ## Update
+
+For Codex:
+
+```bash
+codex plugin marketplace upgrade cassette-editor
+codex plugin add oh-my-cassette@cassette-editor
+```
+
+For Claude Code:
+
+```bash
+claude plugin marketplace update cassette-editor
+claude plugin update oh-my-cassette@cassette-editor
+```
+
+The local launcher updates its locked, plugin-managed virtual environment automatically on the next start. Browser binaries are installed only when requested.
 
 If installed through the Hermes plugin manager:
 
@@ -502,7 +619,15 @@ If Hermes or Cassette gets stuck, first send `/cut` to stop the current Cassette
 
 ## Diagnose
 
-Run:
+For the Codex and Claude local MCP plugin, run:
+
+```bash
+python3 scripts/diagnose_local_mcp.py
+```
+
+It reports runtime bootstrap, protected config, transport, project/media roots, and host-neutral data paths without printing credentials. Common MCP errors are actionable: `auth_required` includes the private setup command, `source_path_not_allowed` identifies the trusted-root problem, and `browser_session_lost` explains when a browser job cannot survive a restart.
+
+For Hermes, run:
 
 ```bash
 python3 scripts/diagnose_install.py
@@ -531,6 +656,8 @@ python3 scripts/install_plugin.py \
 ```
 
 ## Configuration
+
+Codex and Claude share the platform-standard Oh My Cassette config and data directories. Their credentials and job state are separate from Hermes. The active host project is trusted automatically; add any other media directory explicitly with `setup_local_mcp.py --allowed-root`. The web demo reads only its process environment and does not use either plugin's stored credentials.
 
 The installer writes normal runtime settings to `~/.hermes/.env`. You can also edit that file manually.
 <details>
@@ -592,6 +719,16 @@ Run checks:
 python3 -m compileall -q .
 .venv/bin/python -m pytest -q
 ```
+
+Run the real stdio MCP process against the development environment:
+
+```bash
+CASSETTE_MCP_SKIP_BOOTSTRAP=1 \
+CASSETTE_MCP_PYTHON="$PWD/.venv/bin/python" \
+.venv/bin/python scripts/run_local_mcp.py
+```
+
+The deterministic test suite covers core parity, all 11 tools, real stdio protocol calls, long-polling, restart/resume behavior, state transitions, resource links, auth and filesystem security, both plugin manifests, the existing Hermes/web suite, and frontend builds. Maintainer-triggered live E2E uses repository secrets through ephemeral environment variables; PR CI stays credential-free.
 
 Run the local Cassette E2E harness:
 
@@ -661,7 +798,7 @@ Do not commit:
 - Jamendo credentials;
 - downloaded media, exports, job state, browser traces, or local runtime cache.
 
-Runtime state belongs under `~/.hermes/cassette`, not in this repository.
+Hermes runtime state belongs under `~/.hermes/cassette`; Codex and Claude runtime state belongs under the platform-standard Oh My Cassette data directory. Neither belongs in this repository.
 </details>
 
 ## License

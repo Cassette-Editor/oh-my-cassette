@@ -37,6 +37,10 @@ class Transport(Protocol):
         """Re-drive/collect the export for an ambiguous-completion review job."""
         ...
 
+    def resume(self, job: dict, response: str) -> dict:
+        """Resume an interrupted job using validated user input."""
+        ...
+
     def close_sessions(self, session_key: str | None = None) -> None:
         """Tear down any live session(s) for the given key (or all when None)."""
         ...
@@ -47,8 +51,18 @@ class Transport(Protocol):
 
 
 def _read_env(name: str) -> str:
-    # Prefer the process env, then fall back to ~/.hermes/.env (notifier._runtime_env), matching the
-    # rest of the plugin so CASSETTE_TRANSPORT set in the Hermes env file is honored.
+    # MCP reads the host-neutral protected config; the web demo reads process env only. Hermes keeps
+    # its historical ~/.hermes/.env resolution.
+    try:
+        import runtime_config
+
+        adapter = runtime_config.runtime_adapter()
+        if adapter == runtime_config.MCP_ADAPTER:
+            return runtime_config.mcp_env_value(name)
+        if adapter == runtime_config.WEB_ADAPTER:
+            return str(os.getenv(name, "") or "").strip()
+    except Exception:  # noqa: BLE001 — preserve the legacy adapter below
+        pass
     try:
         from . import notifier
         getter = getattr(notifier, "_runtime_env", None)
@@ -79,6 +93,10 @@ class BrowserTransport:
     def export(self, job: dict, decision: dict[str, Any] | None = None) -> dict:
         from . import browser
         return browser.export_reviewed_completion_job_threaded(job, decision)
+
+    def resume(self, job: dict, response: str) -> dict:
+        from . import browser
+        return browser.resume_cassette_browser_job_threaded(job, response)
 
     def close_sessions(self, session_key: str | None = None) -> None:
         from . import browser

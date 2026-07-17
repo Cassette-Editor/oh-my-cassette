@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from cassette import jobs
-from cassette.api_transport import ApiTransport
+from cassette import jobs, tools
+from cassette.api_transport import ApiTransport, ApiTransportError
 
 EXPORT_BYTES = b"FAKE_MP4_BYTES"
 
@@ -153,6 +153,30 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
         return self._json(404, {"error": "not found"})
 
 
+class _ExpiringTokenAPI(_MockCassetteAPI):
+    def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        if path != "/api/agent-auth/verify":
+            return self._json(404, {"error": "not found"})
+        self.rec["auth_count"] += 1
+        token = f"token-{self.rec['auth_count']}"
+        return self._json(200, {"session": {"access_token": token}, "isFullUser": True})
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/protected":
+            self.rec["protected_count"] += 1
+            if self.rec["protected_count"] == 1:
+                return self._json(401, {"error": "expired"})
+            return self._json(200, {"ok": True})
+        if path == "/api/file":
+            self.rec["file_count"] += 1
+            if self.rec["file_count"] == 1:
+                return self._json(401, {"error": "expired"})
+            return self._bytes(200, EXPORT_BYTES, "video/mp4")
+        return self._json(404, {"error": "not found"})
+
+
 @pytest.fixture
 def mock_api(monkeypatch):
     server = ThreadingHTTPServer(("127.0.0.1", 0), _MockCassetteAPI)
@@ -176,6 +200,47 @@ def mock_api(monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_api_transport_reauthenticates_once_for_requests_and_downloads(monkeypatch, tmp_path):
+    server = _serve(
+        _ExpiringTokenAPI,
+        monkeypatch,
+        {"auth_count": 0, "protected_count": 0, "file_count": 0},
+    )
+    try:
+        transport = ApiTransport()
+        transport._authenticate()
+        status, body = transport._request("GET", "/api/protected", expect=200)
+        assert status == 200 and body == {"ok": True}
+
+        target = tmp_path / "download.mp4"
+        transport._download("/api/file", target)
+        assert target.read_bytes() == EXPORT_BYTES
+        assert server.rec["auth_count"] == 3  # initial auth + one retry for each operation
+        assert server.rec["protected_count"] == 2
+        assert server.rec["file_count"] == 2
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_api_continuation_persistence_failure_is_not_silently_ignored(monkeypatch):
+    def fail_update(*_args, **_kwargs):
+        raise OSError("read-only storage")
+
+    monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "mcp")
+    monkeypatch.setattr(jobs, "update_job", fail_update)
+    with pytest.raises(ApiTransportError, match="restart-safe resume") as raised:
+        ApiTransport()._persist_continuation(
+            "job-id",
+            "thread-id",
+            "session-id",
+            {"configurable": {}},
+            "run-id",
+            interrupts=[],
+        )
+    assert raised.value.code == "continuation_persist_failed"
 
 
 def test_api_transport_run_job_end_to_end(cassette_env, mock_api, tmp_path):
@@ -290,6 +355,130 @@ def test_api_transport_completion_review_gate(cassette_env, mock_api, monkeypatc
     assert export_result["outputs"] and Path(export_result["outputs"][0]["local_path"]).read_bytes() == EXPORT_BYTES
     assert export_result["quality"]["completion_source"] == "hermes_completion_review"
     assert mock_api.rec["export_session"] == "sess"
+
+
+class _AskThenResumeAPI(BaseHTTPRequestHandler):
+    """A persisted ask_user interrupt followed by same-thread resume success."""
+
+    def log_message(self, *args):
+        pass
+
+    @property
+    def rec(self):
+        return self.server.rec  # type: ignore[attr-defined]
+
+    def _body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(length) or b"{}")
+
+    def _json(self, status, value):
+        body = json.dumps(value).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        body = self._body()
+        if path == "/api/agent-auth/verify":
+            return self._json(200, {"session": {"access_token": "token"}, "isFullUser": True})
+        if path == "/api/langgraph/threads":
+            return self._json(200, {"thread_id": "persisted-thread"})
+        if path == "/api/langgraph/threads/persisted-thread/runs":
+            if body.get("command"):
+                self.rec["resume"] = body["command"]["resume"]
+                self.rec["resume_config"] = body.get("config")
+                return self._json(200, {"run_id": "resumed-run"})
+            self.rec["initial_config"] = body.get("config")
+            return self._json(200, {"run_id": "initial-run"})
+        return self._json(404, {"error": "not found"})
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path.endswith("/runs/initial-run"):
+            return self._json(200, {"run_id": "initial-run", "status": "interrupted"})
+        if path.endswith("/runs/resumed-run"):
+            return self._json(200, {"run_id": "resumed-run", "status": "success"})
+        if path == "/api/langgraph/threads/persisted-thread/state":
+            if self.rec.get("resume"):
+                return self._json(
+                    200,
+                    {
+                        "values": {
+                            "messages": [
+                                {"type": "assistant", "content": "The requested edit is complete."}
+                            ]
+                        },
+                        "tasks": [],
+                    },
+                )
+            return self._json(
+                200,
+                {
+                    "values": {},
+                    "tasks": [
+                        {
+                            "interrupts": [
+                                {
+                                    "id": "ask-1",
+                                    "value": {
+                                        "type": "ask_user",
+                                        "prompt": "You must choose version A or B.",
+                                    },
+                                }
+                            ]
+                        }
+                    ],
+                },
+            )
+        return self._json(404, {"error": "not found"})
+
+
+def test_api_interrupt_persists_and_resumes_on_same_thread_after_restart(cassette_env, monkeypatch):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _AskThenResumeAPI)
+    server.rec = {"resume": None, "initial_config": None, "resume_config": None}  # type: ignore[attr-defined]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    _, port = server.server_address
+    monkeypatch.setenv("CASSETTE_API_URL", f"http://127.0.0.1:{port}")
+    monkeypatch.setenv("CASSETTE_AUTH_EMAIL", "person@example.test")
+    monkeypatch.setenv("CASSETTE_AUTH_PASSWORD", "private")
+    monkeypatch.setenv("CASSETTE_TRANSPORT", "api")
+    monkeypatch.delenv("CASSETTE_API_AUTO_EXPORT", raising=False)
+    try:
+        job = jobs.create_job(
+            session_hash="resume",
+            prompt="edit",
+            instruction=None,
+            asset_paths=[],
+            options={"cassette_session_id": "resume-session"},
+        )
+        first = ApiTransport().run_job(job)
+        assert first["status"] == "needs_user"
+        job = jobs.merge_persisted_runtime_fields(job)
+        job.update(first)
+        jobs.save_job(job)
+
+        persisted = jobs.load_job(job["job_id"])
+        continuation = persisted["continuation"]
+        assert continuation["transport"] == "api"
+        assert continuation["thread_id"] == "persisted-thread"
+        assert continuation["interrupts"][0]["type"] == "ask_user"
+
+        # A fresh transport instance simulates a restarted Codex/Claude host process.
+        resumed = ApiTransport().resume(persisted, "Use version B")
+        assert resumed["status"] == "needs_user"
+        assert resumed["quality"]["completion_review_required"] is True
+        assert server.rec["resume"] == {"action": "respond", "userResponse": "Use version B"}
+        assert server.rec["resume_config"] == server.rec["initial_config"]
+        assert jobs.load_job(job["job_id"]).get("continuation") is None
+
+        public = json.loads(tools.cassette_job_status({"job_id": job["job_id"]}))
+        assert "continuation" not in public["data"]["job"]
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_api_transport_forbidden_surfaces_full_access_hint(cassette_env, monkeypatch):

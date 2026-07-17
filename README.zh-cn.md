@@ -45,14 +45,14 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 
 <h3 align="center">
   <em>
-  让你的 <a href="https://github.com/nousresearch/hermes-agent">Hermes</a> 拥有 <a href="https://trycassette.online">Cassette</a> 强大的视频剪辑能力。<br />
+  让 Codex、Claude 或 <a href="https://github.com/nousresearch/hermes-agent">Hermes</a> 拥有 <a href="https://trycassette.online">Cassette</a> 强大的视频剪辑能力。<br />
   加个好友，聊聊就出片。
   </em>
 </h3>
 
 # 🎥 项目概览
 
-**Oh My Cassette** 是一个面向 <a href="https://trycassette.online">Cassette</a> 视频剪辑工作流的 harness plugin 和视频剪辑 skill，专为 Agent 协作与调度设计，并尽可能减少token消耗。
+**Oh My Cassette** 是面向 Codex、Claude 和 Hermes 的视频剪辑插件与 skill。它基于 <a href="https://trycassette.online">Cassette</a> 构建，专为 Agent 协作与调度设计，并尽可能减少 token 消耗。
 
 你随时可以在手机上发送视频或音频素材，并和 Agent 聊聊你的想法，Agent 就会与 Cassette 协作，理解你的创作意图，整理素材，规划剪辑流程，并通过强大的剪辑能力，帮你制作可以直接分享的成片。
 
@@ -170,7 +170,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 
 # 🏄 无需安装试用
 
-我们提供了一个公开网页演示入口，你可以直接在电脑或手机浏览器里体验 Oh My Cassette 的消息式剪辑流程，不需要先在本地安装 Hermes Agent：
+我们提供了一个公开网页演示入口，你可以直接在电脑或手机浏览器里体验 Oh My Cassette 的消息式剪辑流程，无需先在本地安装 Codex、Claude 或 Hermes：
 
 <a href="http://43.134.224.156:8080/"> 立即试用 </a>
 
@@ -290,16 +290,16 @@ tail -f ./web_demo/logs/web_demo.log
 
 ## 开始之前 🎬
 
-本插件基于 <a href="https://trycassette.online/agent"> Cassette Agent </a> 页面构建，并兼容 Hermes Agent。你需要：
+Oh My Cassette 可以把 Codex、Claude 或 Hermes 接入 <a href="https://trycassette.online/agent">Cassette Agent</a>。你需要：
 
-* 一个可正常运行的 Hermes Agent。
+* Codex、Claude Code，或一个可正常运行的 Hermes Agent。
 * 一个 Cassette 账号。
-* 一个已经配置好的 Hermes 网关，例如 QQ 或 Telegram。
+* 如果使用 Hermes，还需要一个已经配置好的网关，例如 QQ 或 Telegram。
 
 > [!TIP]
 > **在这里申请 Cassette 账号：**[**Cassette 注册**](https://trycassette.online/signup/)
 
-如果还没有安装 Hermes Agent：
+如果你打算使用 Hermes，但尚未安装 Hermes Agent：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
@@ -315,9 +315,10 @@ Oh My Cassette 目前支持 QQ 和 Telegram 网关。
 
 ## 环境要求
 
-- 已安装 Hermes Agent，并已通过 Hermes 完成网关配置。
-- Python 3.11–3.13（与 Hermes Agent 支持范围一致；最近一次验证基于 hermes-agent 0.15.2）。
-- `ffmpeg`，仅用于在上传前将网关收到的视频标准化为 H.264 MP4。
+- macOS 或 Linux。
+- 使用本地 MCP 插件时需要 Codex 或 Claude Code；使用 Hermes 时需要完成 Agent 与网关配置。
+- Python 3.11–3.13。
+- `ffmpeg`，用于 Hermes 网关视频标准化，以及可选的 API 导出缩略图。
 
 安装系统工具：
 
@@ -334,6 +335,30 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ## 安装
+
+### Codex
+
+```bash
+codex plugin marketplace add https://github.com/Cassette-Editor/oh-my-cassette.git
+codex plugin add oh-my-cassette@cassette-editor
+```
+
+安装后请新建一个 Codex 任务，让插件发现流程重新运行。插件会提供与宿主无关的 `cassette-video-edit` skill，以及名为 `cassette` 的本地 MCP 进程。
+
+### Claude Code
+
+```bash
+claude plugin marketplace add Cassette-Editor/oh-my-cassette
+claude plugin install oh-my-cassette@cassette-editor
+```
+
+安装后请重启 Claude Code。可以用下面的命令确认安装结果：
+
+```bash
+claude plugin details oh-my-cassette@cassette-editor
+```
+
+### Hermes
 
 通过 Hermes 插件管理器安装（推荐）：
 
@@ -391,7 +416,83 @@ python3 scripts/install_plugin.py \
 ```
 </details>
 
-## 开始使用 📼 
+## 通过本地 MCP 在 Codex 或 Claude 中使用
+
+Codex 与 Claude 使用同一套自包含运行时。本文所说的 **MCP server** 是由宿主通过标准输入/输出连接的本地子进程：它不会监听端口，也不依赖 FastAPI 网页演示服务。独立的 Cassette 后端仍然是剪辑引擎，继续负责身份验证、素材处理、Agent 任务、项目状态和渲染。
+
+网页演示是另一条入口。浏览器仍然需要保留的 FastAPI 服务来处理上传、聊天会话和前端接口；改成本地 MCP 插件不会移除或改变这些能力。
+
+### 首次身份验证
+
+没有凭据也不会阻止 MCP 进程启动。第一个需要连接 Cassette 的工具会返回 `auth_required`，其中包含一条应在私人终端中运行的完整设置命令。该命令通过 `getpass` 隐藏密码输入，先验证账号，再把凭据写入操作系统标准的 Oh My Cassette 配置目录。
+
+如果从 git 检出目录运行，对应命令是：
+
+```bash
+python3 scripts/setup_local_mcp.py --email you@example.com
+```
+
+也可以通过进程环境变量提供凭据；环境变量优先于受保护的本地配置。导入现有 Hermes `.env` 必须显式执行，并非运行时依赖：
+
+```bash
+python3 scripts/setup_local_mcp.py --import-hermes
+```
+
+设置命令会以 `0700` 权限创建配置目录、以 `0600` 权限保存凭据文件，并拒绝符号链接或权限过宽的文件。访问令牌和刷新令牌只缓存在内存中，不会持久化。如果账号没有完整 API 权限，设置程序会提示可选的浏览器方案，而不是静默切换传输方式。
+
+### 引导式剪辑流程
+
+1. 让 Codex 或 Claude 剪辑当前项目中的一个或多个媒体文件。
+2. 插件只接收当前项目或显式信任目录中的素材，并会规范化路径、拒绝目录穿越和符号链接逃逸。
+3. 描述剪辑需求，完成必要的选项确认，然后启动任务。MCP 任务默认在后台运行。
+4. 宿主以最长 30 秒的长轮询查看状态。skill 最多持续监控 25 分钟，之后会返回仍在运行的任务 ID，方便稍后继续，而不是高频轮询。
+5. 如果 Cassette 确实需要用户决定，请用返回的任务 ID 回答。API 任务会保存私有续跑元数据，因此宿主重启后仍可继续。
+6. 剪辑完成后先审阅结果；只有明确选择 `export` 才会开始渲染。
+7. 导出结果会返回经过校验的绝对路径、文件 URI、MIME 类型、文件大小和 MCP 资源链接，不会把大体积媒体字节直接塞进工具响应。
+
+每个会话都使用密码学安全的随机 ID 隔离。Codex 与 Claude 共用宿主无关的数据目录，因此你可以主动把会话或任务 ID 交给另一个宿主继续处理；插件不会在未明确指定时共享会话。
+
+可以在设置时添加额外的可信素材目录：
+
+```bash
+python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
+```
+
+导出文件位于共享 Oh My Cassette 数据目录下的 `cassette/exports/<job_id>/`。插件只会返回对应任务专属目录中的文件。
+
+### API 与可选浏览器传输
+
+默认使用 API 传输，直接连接独立的 Cassette 后端。遇到 `401` 时只重试一次身份验证，访问令牌只保存在内存中。API 任务会持久化续跑元数据，因此 Codex 或 Claude 重启后仍能继续暂停中的任务。
+
+浏览器传输是为没有完整 API 权限的账号和传输一致性诊断准备的显式备选方案。只在需要时安装固定版本的 Playwright 与 Chromium：
+
+```bash
+python3 scripts/setup_local_mcp.py --with-browser
+```
+
+只要 MCP 进程仍然存活，浏览器任务就可以继续回答问题；宿主重启后会返回 `browser_session_lost`，因为活动浏览器对象无法持久化。
+
+### MCP 工具
+
+本地 MCP 运行时与 Hermes 保持完全相同的 11 个工具名：
+
+| 工具 | 用途 |
+|---|---|
+| `cassette_ingest_media` | 把可信项目素材安全地导入隔离会话 |
+| `cassette_list_assets` | 读取会话素材清单 |
+| `cassette_make_prompt` | 生成完整的 Cassette 剪辑需求 |
+| `cassette_match_bgm` | 匹配 Free To Use 背景音乐 |
+| `cassette_match_exact_bgm` | 按明确的曲名和艺人匹配音乐 |
+| `jamendo_music_matcher` | 按结构化偏好匹配 Jamendo 音乐 |
+| `cassette_answer_question` | 回答引导问题或恢复暂停任务 |
+| `cassette_run_job` | 启动剪辑，MCP 默认后台执行 |
+| `cassette_job_status` | 读取状态，或短暂等待状态变化 |
+| `cassette_review_completion` | 审阅完成结果并明确批准导出 |
+| `cassette_cancel_job` | 请求协作式取消任务 |
+
+每个工具都会返回结构化结果，其中包含 `ok`、带类型的 `data` 或 `error`、`session_id`、`job_id`、当前阶段，以及由运行时状态推导出的 `next_action`。
+
+## 通过 Hermes 开始使用 📼
 
 **现在可以拿起手机给你的 Agent 发私信了。记得保持 Agent 在线，并确保网络可用。**
 
@@ -425,6 +526,22 @@ python3 scripts/install_plugin.py \
 * 默认情况下，QQ 使用中文，Telegram 使用英文。你也可以通过 `/cassette language zh/en` 手动切换语言。
 
 ## 更新
+
+Codex 更新方式：
+
+```bash
+codex plugin marketplace upgrade cassette-editor
+codex plugin add oh-my-cassette@cassette-editor
+```
+
+Claude Code 更新方式：
+
+```bash
+claude plugin marketplace update cassette-editor
+claude plugin update oh-my-cassette@cassette-editor
+```
+
+本地启动器会在下次运行时自动更新由插件管理、依赖版本锁定的虚拟环境。浏览器组件仍只在明确要求时安装。
 
 如果是通过 Hermes 插件管理器安装的：
 
@@ -495,7 +612,15 @@ hermes gateway restart
 
 ## 诊断
 
-运行：
+诊断 Codex 与 Claude 本地 MCP 插件：
+
+```bash
+python3 scripts/diagnose_local_mcp.py
+```
+
+它会检查运行时引导、受保护配置、传输方式、项目与媒体根目录，以及宿主无关的数据路径，并且不会输出凭据。常见 MCP 错误都带有可执行的说明：`auth_required` 会提供私人设置命令，`source_path_not_allowed` 会指出可信目录问题，`browser_session_lost` 会说明浏览器任务为何无法跨重启继续。
+
+诊断 Hermes：
 
 ```bash
 python3 scripts/diagnose_install.py
@@ -524,6 +649,8 @@ python3 scripts/install_plugin.py \
 ```
 
 ## 配置
+
+Codex 与 Claude 共用操作系统标准的 Oh My Cassette 配置和数据目录，其凭据与任务状态和 Hermes 相互独立。当前宿主项目会自动加入可信范围；其他媒体目录必须通过 `setup_local_mcp.py --allowed-root` 显式添加。网页演示只读取自身进程环境，不会使用任一插件保存的凭据。
 
 安装器会把常规运行时设置写入 `~/.hermes/.env`。你也可以手动编辑该文件。
 
@@ -587,6 +714,16 @@ python3 -m compileall -q .
 .venv/bin/python -m pytest -q
 ```
 
+使用开发环境运行真实的 stdio MCP 进程：
+
+```bash
+CASSETTE_MCP_SKIP_BOOTSTRAP=1 \
+CASSETTE_MCP_PYTHON="$PWD/.venv/bin/python" \
+.venv/bin/python scripts/run_local_mcp.py
+```
+
+确定性测试会覆盖核心能力对齐、全部 11 个工具、真实 stdio 协议调用、长轮询、重启与续跑、状态转换、资源链接、身份验证和文件系统安全、两种插件清单、现有 Hermes 与网页演示测试，以及前端构建。由维护者手动触发的实时 E2E 会通过临时环境变量读取仓库 Secret；PR CI 本身不使用凭据。
+
 运行本地 Cassette 端到端测试工具：
 
 ```bash
@@ -629,7 +766,7 @@ RUN_CASSETTE_E2E=1 .venv/bin/python -m pytest -q -m e2e
 - Jamendo 凭据；
 - 下载的媒体、导出文件、任务状态、浏览器追踪记录或本地运行时缓存。
 
-运行时状态应保存在 `~/.hermes/cassette` 下，而不是这个仓库中。
+Hermes 运行时状态应保存在 `~/.hermes/cassette`；Codex 与 Claude 的状态应保存在操作系统标准的 Oh My Cassette 数据目录。它们都不应写进这个仓库。
 </details>
 
 ## 许可证

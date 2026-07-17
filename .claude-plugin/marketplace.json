@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cassette-editor",
+  "description": "Local video editing for Codex, Claude, and Hermes through Cassette.",
+  "owner": {
+    "name": "Oh My Cassette contributors",
+    "url": "https://github.com/Cassette-Editor/oh-my-cassette"
+  },
+  "plugins": [
+    {
+      "name": "oh-my-cassette",
+      "description": "Edit trusted project media through a local stdio MCP runtime and the Cassette backend.",
+      "source": "./",
+      "version": "0.2.0",
+      "category": "productivity",
+      "tags": [
+        "video-editing",
+        "media",
+        "mcp",
+        "cassette"
+      ]
+    }
+  ]
+}

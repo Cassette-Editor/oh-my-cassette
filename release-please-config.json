@@ -6,8 +6,28 @@
       "release-type": "simple",
       "extra-files": [
         {
+          "type": "yaml",
+          "path": "plugin.yaml",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": ".codex-plugin/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": ".claude-plugin/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": ".claude-plugin/marketplace.json",
+          "jsonpath": "$.plugins[0].version"
+        },
+        {
           "type": "generic",
-          "path": "plugin.yaml"
+          "path": "mcp_plugin/__init__.py"
         }
       ]
     }
