@@ -166,3 +166,17 @@ jobs:
           cache-dependency-path: web_demo/frontend/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  # Single stable required check for branch protection. Path-skipped jobs
+  # never expand their matrix, so their per-leg check names don't exist on
+  # docs-only PRs — this aggregate tolerates skips but fails on any failure.
+  ci-ok:
+    needs: [changes, test, install-smoke, frontend]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Fail if any needed job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo "all required jobs passed or were skipped by path filters"
