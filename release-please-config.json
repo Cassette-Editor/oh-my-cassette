@@ -6,9 +6,8 @@
       "release-type": "simple",
       "extra-files": [
         {
-          "type": "yaml",
-          "path": "plugin.yaml",
-          "jsonpath": "$.version"
+          "type": "generic",
+          "path": "plugin.yaml"
         },
         {
           "type": "json",
