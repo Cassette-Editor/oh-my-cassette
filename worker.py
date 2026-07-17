@@ -18,8 +18,8 @@ else:
     from cassette import browser, jobs, notifier, transport
 
 
-def run(job_id: str) -> dict:
-    job = jobs.update_job(job_id, status="running", started_at=jobs.now_iso())
+def run(job_id: str, action: str = "run") -> dict:
+    job = jobs.update_job(job_id, status="running", started_at=jobs.now_iso(), finished_at=None)
     try:
         if jobs.is_cancel_requested(job_id):
             job = jobs.update_job(job_id, status="cancelled", finished_at=jobs.now_iso())
@@ -28,7 +28,11 @@ def run(job_id: str) -> dict:
             return job
         # Detached subprocess: keep the browser path on the original non-threaded entrypoint
         # (byte-identical); route only the API transport through the seam.
-        if transport.selected_transport() == transport.TRANSPORT_API:
+        if action == "resume":
+            request = job.get("resume_request") if isinstance(job.get("resume_request"), dict) else {}
+            response = str(request.get("response") or "")
+            result = transport.get_transport().resume(job, response)
+        elif transport.selected_transport() == transport.TRANSPORT_API:
             result = transport.get_transport().run_job(job)
         else:
             result = browser.run_cassette_browser_job(job)
@@ -36,6 +40,9 @@ def run(job_id: str) -> dict:
         job.update(result)
         job["status"] = result.get("status", "failed")
         job["finished_at"] = jobs.now_iso()
+        job.pop("resume_request", None)
+        if job["status"] != "needs_user":
+            job.pop("continuation", None)
         jobs.save_job(job)
         job["notification"] = notifier.notify_terminal_job(job)
         jobs.save_job(job)
@@ -55,8 +62,9 @@ def run(job_id: str) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--job-id", required=True)
+    parser.add_argument("--action", choices=("run", "resume"), default="run")
     args = parser.parse_args()
-    run(args.job_id)
+    run(args.job_id, args.action)
 
 
 if __name__ == "__main__":

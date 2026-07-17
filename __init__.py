@@ -59,7 +59,8 @@ def register(ctx) -> None:
     ctx.register_hook("on_session_finalize", tools.close_cassette_browser_sessions)
     ctx.register_hook("on_session_reset", tools.close_cassette_browser_sessions)
 
-    skill_path = Path(__file__).parent / "skills" / "cassette-video-edit" / "SKILL.md"
+    # Keep the gateway-specific Hermes workflow out of the native Codex/Claude plugin skill path.
+    skill_path = Path(__file__).parent / "hermes" / "skills" / "cassette-video-edit" / "SKILL.md"
     if skill_path.exists():
         ctx.register_skill(
             "cassette-video-edit",

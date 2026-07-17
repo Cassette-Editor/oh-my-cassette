@@ -48,6 +48,21 @@ def test_prompt_can_target_english_cassette_chat():
     assert "You are Hermes" not in result["chat_message"]
 
 
+def test_prompt_has_host_neutral_mcp_variant_without_changing_chat_message():
+    result = prompt.build_cassette_prompt(
+        "Make a short captioned reel",
+        {"session_hash": "abc", "assets": [{"asset_id": "asset_1", "media_type": "video", "original_name": "clip.mp4"}]},
+        {"cassette_language": "en"},
+        runtime_host="mcp",
+    )
+
+    assert result["prompt"].startswith("You are the user's Codex or Claude host agent")
+    assert "You are Hermes" not in result["prompt"]
+    assert "Host-agent execution rules" in result["prompt"]
+    assert "validated artifacts and MCP resource links" in result["prompt"]
+    assert result["chat_message"].startswith("Please complete this editing task")
+
+
 def test_question_classification():
     missing = prompt.classify_cassette_question("Please upload the main video")
     assert missing["requires_user"] is True

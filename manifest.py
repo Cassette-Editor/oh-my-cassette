@@ -27,6 +27,13 @@ def _hermes_home() -> Path:
 
 
 def get_asset_root() -> Path:
+    try:
+        import runtime_config
+
+        if runtime_config.is_mcp_runtime():
+            return runtime_config.asset_root()
+    except Exception:  # noqa: BLE001 — retain the Hermes default below
+        pass
     return Path(os.getenv("CASSETTE_ASSET_ROOT", str(_hermes_home() / "cassette"))).expanduser().resolve()
 
 

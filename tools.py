@@ -114,6 +114,7 @@ def cassette_make_prompt(args: dict, **kwargs) -> str:
                 "cassette_language": _normalize_cassette_language(a.get("cassette_language") or a.get("language")),
                 "constraints": a.get("constraints") or {},
             },
+            runtime_host=str(kw.get("runtime_host") or "hermes"),
         )
         return ok(data)
 
@@ -122,6 +123,58 @@ def cassette_make_prompt(args: dict, **kwargs) -> str:
 
 def cassette_answer_question(args: dict, **kwargs) -> str:
     def run(a: dict, **kw) -> str:
+        job_id = str(a.get("job_id") or "").strip()
+        response = str(a.get("response") or "").strip()
+        if job_id or response:
+            if not job_id or not response:
+                raise CassetteError("missing_required_arg", "resume mode requires both job_id and response")
+            job = jobs.load_job(job_id)
+            quality = job.get("quality") if isinstance(job.get("quality"), dict) else {}
+            if job.get("status") != "needs_user" or quality.get("completion_review_required"):
+                raise CassetteError(
+                    "invalid_transition",
+                    "cassette_answer_question can resume only a user-input-paused job; use cassette_review_completion for completion review",
+                    {"job_id": job_id, "status": job.get("status") or ""},
+                )
+            if kw.get("runtime_host") == "mcp":
+                if transport.selected_transport() == transport.TRANSPORT_BROWSER:
+                    from . import browser
+
+                    if not browser.has_live_browser_session_threaded(job):
+                        result = transport.get_transport().resume(job, response)
+                        job = jobs.merge_persisted_runtime_fields(job)
+                        job.update(result)
+                        job["status"] = result.get("status", "failed")
+                        job["finished_at"] = jobs.now_iso()
+                        job.pop("resume_request", None)
+                        job.pop("continuation", None)
+                        jobs.save_job(job)
+                        return ok({"job": _scrub_job(job), "background": False}, job_id=job_id)
+                    job["status"] = "running"
+                    job["started_at"] = job.get("started_at") or jobs.now_iso()
+                    job["finished_at"] = None
+                    job["worker_kind"] = "thread"
+                    job["resume_request"] = {"response": response}
+                    jobs.save_job(job)
+                    _gateway_job_executor().submit(
+                        _finish_background_cassette_job,
+                        job_id,
+                        "resume",
+                        response,
+                    )
+                    return ok({"job": _scrub_job(job), "background": True}, job_id=job_id)
+                job = jobs.start_worker(job_id, action="resume", response=response)
+                return ok({"job": _scrub_job(job), "background": True}, job_id=job_id)
+            result = transport.get_transport().resume(job, response)
+            job = jobs.merge_persisted_runtime_fields(job)
+            job.update(result)
+            job["status"] = result.get("status", "failed")
+            job["finished_at"] = jobs.now_iso()
+            job.pop("resume_request", None)
+            if job["status"] != "needs_user":
+                job.pop("continuation", None)
+            jobs.save_job(job)
+            return ok({"job": _scrub_job(job)}, job_id=job_id)
         question = (a.get("question") or "").strip()
         if not question:
             raise CassetteError("missing_required_arg", "question is required")
@@ -649,19 +702,33 @@ def _should_run_gateway_job_in_background(args: dict, delivery: dict | None) -> 
     return bool((delivery or {}).get("chat_id"))
 
 
-def _finish_background_cassette_job(job_id: str) -> None:
+def _finish_background_cassette_job(job_id: str, action: str = "run", response: str = "") -> None:
     try:
         if jobs.is_cancel_requested(job_id):
             job = jobs.update_job(job_id, status="cancelled", finished_at=jobs.now_iso())
             job["notification"] = notifier.notify_terminal_job(job)
             jobs.save_job(job)
             return
-        job = jobs.update_job(job_id, status="running", started_at=jobs.now_iso(), worker_kind="thread")
-        result = transport.get_transport().run_job(job)
+        job = jobs.update_job(
+            job_id,
+            status="running",
+            started_at=jobs.now_iso(),
+            finished_at=None,
+            worker_kind="thread",
+        )
+        active_transport = transport.get_transport()
+        result = (
+            active_transport.resume(job, response)
+            if action == "resume"
+            else active_transport.run_job(job)
+        )
         job = jobs.merge_persisted_runtime_fields(job)
         job.update(result)
         job["status"] = result.get("status", "failed")
         job["finished_at"] = jobs.now_iso()
+        job.pop("resume_request", None)
+        if job["status"] != "needs_user":
+            job.pop("continuation", None)
         jobs.save_job(job)
         job["notification"] = notifier.notify_terminal_job(job)
         jobs.save_job(job)
@@ -679,12 +746,15 @@ def _finish_background_cassette_job(job_id: str) -> None:
             pass
 
 
-def _start_inprocess_cassette_job(job: dict) -> dict:
+def _start_inprocess_cassette_job(job: dict, *, runtime_host: str = "gateway") -> dict:
     job["status"] = "running"
     job["started_at"] = job.get("started_at") or jobs.now_iso()
     job["worker_kind"] = "thread"
     quality = dict(job.get("quality") or {})
-    quality["gateway_background_job"] = True
+    if runtime_host == "mcp":
+        quality["mcp_background_job"] = True
+    else:
+        quality["gateway_background_job"] = True
     quality["interruptible_by_cut"] = True
     job["quality"] = quality
     jobs.save_job(job)
@@ -738,6 +808,16 @@ def cassette_run_job(args: dict, **kwargs) -> str:
                 },
                 job_id=job["job_id"],
             )
+        if (
+            kw.get("runtime_host") == "mcp"
+            and a.get("wait", False) is False
+            and transport.selected_transport() == transport.TRANSPORT_BROWSER
+        ):
+            job = _start_inprocess_cassette_job(job, runtime_host="mcp")
+            return ok(
+                {"job": _scrub_job(job), "background": True},
+                job_id=job["job_id"],
+            )
         if a.get("wait", True) is False:
             job = jobs.start_worker(job["job_id"])
             scrubbed = _scrub_job(job)
@@ -764,6 +844,8 @@ def _scrub_job(job: dict) -> dict:
     scrubbed.pop("prompt", None)
     scrubbed.pop("asset_paths", None)
     scrubbed.pop("worker_command", None)
+    scrubbed.pop("continuation", None)
+    scrubbed.pop("resume_request", None)
     scrubbed["outputs"] = _scrub_outputs(scrubbed.get("outputs") or [])
     if scrubbed.get("model_selection_notification"):
         notification = dict(scrubbed["model_selection_notification"])

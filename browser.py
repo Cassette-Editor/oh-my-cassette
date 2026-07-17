@@ -135,6 +135,16 @@ def check_cassette_connectivity(url: str | None = None, timeout_sec: float | Non
 
 
 def _runtime_env(name: str) -> str:
+    try:
+        import runtime_config
+
+        adapter = runtime_config.runtime_adapter()
+        if adapter == runtime_config.MCP_ADAPTER:
+            return runtime_config.mcp_env_value(name)
+        if adapter == runtime_config.WEB_ADAPTER:
+            return str(os.getenv(name, "") or "").strip()
+    except Exception:  # noqa: BLE001 — retain the Hermes fallback below
+        pass
     getter = getattr(notifier, "_runtime_env", None)
     if callable(getter):
         return str(getter(name) or "").strip()
@@ -562,6 +572,56 @@ def run_cassette_browser_job_threaded(job: dict) -> dict:
     if not _browser_worker_enabled() or _in_browser_worker():
         return run_cassette_browser_job(job)
     return _browser_worker().submit(run_cassette_browser_job, job).result()
+
+
+def resume_cassette_browser_job_threaded(job: dict, response: str) -> dict:
+    if not _browser_worker_enabled() or _in_browser_worker():
+        return resume_cassette_browser_job(job, response)
+    return _browser_worker().submit(resume_cassette_browser_job, job, response).result()
+
+
+def has_live_browser_session_threaded(job: dict) -> bool:
+    if not _browser_worker_enabled() or _in_browser_worker():
+        return has_live_browser_session(job)
+    return bool(_browser_worker().submit(has_live_browser_session, job).result())
+
+
+def has_live_browser_session(job: dict) -> bool:
+    record = _BROWSER_SESSIONS.get(_browser_session_key(job))
+    page = record.get("page") if isinstance(record, dict) else None
+    return bool(page and not _page_is_closed(page))
+
+
+def resume_cassette_browser_job(job: dict, response: str) -> dict:
+    """Continue a question-paused browser job in the same process and browser session."""
+    if not has_live_browser_session(job):
+        return {
+            "status": "failed",
+            "outputs": job.get("outputs") or [],
+            "questions": job.get("questions") or [],
+            "errors": [
+                {
+                    "code": "browser_session_lost",
+                    "message": (
+                        "The browser transport can resume only while the same local MCP process "
+                        "keeps its live browser session. Start a new browser job after a host restart."
+                    ),
+                }
+            ],
+            "quality": {
+                **(job.get("quality") or {}),
+                "completion_observed": False,
+                "export_completed": False,
+                "risk": "high",
+            },
+            "final_screenshot": None,
+        }
+    answer = str(response or "").strip()
+    resumed = dict(job)
+    resumed["prompt"] = answer
+    resumed["chat_message"] = answer
+    resumed["instruction"] = answer
+    return run_cassette_browser_job(resumed)
 
 
 def close_browser_sessions_threaded(session_key: str | None = None, timeout_sec: float | None = None) -> bool:

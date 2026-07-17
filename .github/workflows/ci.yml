@@ -22,6 +22,8 @@ jobs:
       python: ${{ steps.filter.outputs.python }}
       frontend: ${{ steps.filter.outputs.frontend }}
       install: ${{ steps.filter.outputs.install }}
+      mcp: ${{ steps.filter.outputs.mcp }}
+      native: ${{ steps.filter.outputs.native }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -31,18 +33,58 @@ jobs:
             python:
               - '**/*.py'
               - 'requirements-web.txt'
+              - 'requirements-mcp.in'
+              - 'requirements-mcp.lock'
+              - 'requirements-browser.in'
+              - 'requirements-browser.lock'
               - 'pytest.ini'
               - 'plugin.yaml'
               - 'after-install.md'
               - 'tests/**'
               - 'skills/**'
+              - 'hermes/**'
+              - 'mcp_plugin/**'
               - 'prompts/**'
               - '.gitignore'
               - '.env.example'
               - 'version.txt'
+              - 'release-please-config.json'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/e2e.yml'
             frontend:
               - 'web_demo/frontend/**'
+              - '.github/workflows/ci.yml'
+            mcp:
+              - 'mcp_plugin/**'
+              - 'runtime_config.py'
+              - 'requirements-mcp.in'
+              - 'requirements-mcp.lock'
+              - 'requirements-browser.in'
+              - 'requirements-browser.lock'
+              - 'scripts/run_local_mcp.py'
+              - 'scripts/local_mcp_bootstrap.py'
+              - 'scripts/setup_local_mcp.py'
+              - 'scripts/diagnose_local_mcp.py'
+              - 'scripts/e2e_local_mcp.py'
+              - 'tests/test_mcp_*.py'
+              - '.mcp.json'
+              - '.codex-plugin/**'
+              - '.claude-plugin/**'
+              - '.agents/plugins/**'
+              - 'skills/**'
+              - 'release-please-config.json'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/e2e.yml'
+            native:
+              - '.mcp.json'
+              - '.codex-plugin/**'
+              - '.claude-plugin/**'
+              - '.agents/plugins/**'
+              - 'skills/**'
+              - 'scripts/run_local_mcp.py'
+              - 'scripts/local_mcp_bootstrap.py'
+              - 'requirements-mcp.lock'
+              - 'release-please-config.json'
               - '.github/workflows/ci.yml'
             install:
               - 'plugin.yaml'
@@ -69,9 +111,11 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          cache-dependency-path: requirements-web.txt
+          cache-dependency-path: |
+            requirements-web.txt
+            requirements-browser.lock
       - name: Install dependencies
-        run: python -m pip install -r requirements-web.txt pytest pytest-xdist
+        run: python -m pip install -r requirements-web.txt -r requirements-browser.lock pytest pytest-xdist
       - name: Resolve Playwright version
         id: playwright
         run: echo "version=$(python -c 'from importlib.metadata import version; print(version("playwright"))')" >> "$GITHUB_OUTPUT"
@@ -93,6 +137,90 @@ jobs:
         # The suite is mostly waiting (browser timeouts, sleeps); xdist cuts
         # wall time several-fold. loadfile keeps same-file tests together.
         run: python -m pytest -q -rs -n 4 --dist loadfile
+
+  mcp-macos-smoke:
+    needs: changes
+    if: needs.changes.outputs.mcp == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-mcp.lock
+      - name: Install local MCP test dependencies
+        run: python -m pip install -r requirements-mcp.lock pytest pyyaml
+      - name: Run host-neutral MCP tests
+        run: >-
+          python -m pytest -q
+          tests/test_mcp_config.py
+          tests/test_mcp_packaging.py
+          tests/test_mcp_protocol.py
+          tests/test_mcp_runtime.py
+          tests/test_mcp_state.py
+      - name: Smoke-test locked launcher bootstrap twice
+        run: |
+          export CASSETTE_MCP_PYTHON="$(command -v python)"
+          export CASSETTE_CONFIG_HOME="$(mktemp -d)/config"
+          export CASSETTE_DATA_HOME="$(mktemp -d)/data"
+          first="$(python scripts/run_local_mcp.py --bootstrap-only)"
+          second="$(python scripts/run_local_mcp.py --bootstrap-only)"
+          test "$first" = "$second"
+          test -x "$first"
+
+  native-packaging:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-mcp.lock
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install pinned native host CLIs and validator dependencies
+        run: |
+          python -m pip install -r requirements-mcp.lock pyyaml
+          npm install --global @openai/codex@0.143.0 @anthropic-ai/claude-code@2.1.212
+      - name: Validate Claude plugin and marketplace manifests
+        run: |
+          claude plugin validate --strict .claude-plugin/plugin.json
+          claude plugin validate --strict .claude-plugin/marketplace.json
+      - name: Smoke-install with Codex CLI
+        run: |
+          smoke_root="$(mktemp -d)"
+          mkdir -p "$smoke_root/codex-home"
+          cp -R "$GITHUB_WORKSPACE" "$smoke_root/repo"
+          jq '.plugins[0].source={"source":"local","path":"./"}' \
+            "$smoke_root/repo/.agents/plugins/marketplace.json" > "$smoke_root/marketplace.json"
+          mv "$smoke_root/marketplace.json" "$smoke_root/repo/.agents/plugins/marketplace.json"
+          CODEX_HOME="$smoke_root/codex-home" codex plugin marketplace add "$smoke_root/repo"
+          CODEX_HOME="$smoke_root/codex-home" codex plugin add oh-my-cassette@cassette-editor
+          CODEX_HOME="$smoke_root/codex-home" codex plugin list | tee "$smoke_root/codex-list.txt"
+          grep -F 'oh-my-cassette@cassette-editor' "$smoke_root/codex-list.txt"
+          grep -F 'installed, enabled' "$smoke_root/codex-list.txt"
+          expected_version="$(jq -r .version .codex-plugin/plugin.json)"
+          installed_manifest="$(find "$smoke_root/codex-home/plugins/cache/cassette-editor/oh-my-cassette" \
+            -path '*/.codex-plugin/plugin.json' -print -quit)"
+          test -n "$installed_manifest"
+          test "$(jq -r .version "$installed_manifest")" = "$expected_version"
+      - name: Smoke-install with Claude CLI
+        run: |
+          smoke_root="$(mktemp -d)"
+          mkdir -p "$smoke_root/home"
+          cp -R "$GITHUB_WORKSPACE" "$smoke_root/repo"
+          HOME="$smoke_root/home" claude plugin marketplace add "$smoke_root/repo" --scope user
+          HOME="$smoke_root/home" claude plugin install oh-my-cassette@cassette-editor --scope user
+          HOME="$smoke_root/home" claude plugin details oh-my-cassette@cassette-editor | tee "$smoke_root/claude-details.txt"
+          grep -F 'Skills (1)  cassette-video-edit' "$smoke_root/claude-details.txt"
+          grep -F 'MCP servers (1)  cassette' "$smoke_root/claude-details.txt"
 
   # Real end-to-end test of the official install channel: installs the
   # hermes-agent CLI from PyPI and drives `hermes plugins install` against
@@ -171,7 +299,7 @@ jobs:
   # never expand their matrix, so their per-leg check names don't exist on
   # docs-only PRs — this aggregate tolerates skips but fails on any failure.
   ci-ok:
-    needs: [changes, test, install-smoke, frontend]
+    needs: [changes, test, mcp-macos-smoke, native-packaging, install-smoke, frontend]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 3

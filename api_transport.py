@@ -146,9 +146,18 @@ class _JobCancelled(Exception):
 
 
 def _env(name: str) -> str:
-    # Match the rest of the plugin's config resolution: prefer the process env, then fall back to
-    # ~/.hermes/.env (notifier._runtime_env), so settings placed in the Hermes env file are honored
-    # even when Hermes does not export them into os.environ.
+    # MCP reads only the host-neutral protected config (after process env); the web demo reads only
+    # process env. Hermes retains its historical ~/.hermes/.env fallback.
+    try:
+        import runtime_config
+
+        adapter = runtime_config.runtime_adapter()
+        if adapter == runtime_config.MCP_ADAPTER:
+            return runtime_config.mcp_env_value(name)
+        if adapter == runtime_config.WEB_ADAPTER:
+            return str(os.getenv(name, "") or "").strip()
+    except Exception:  # noqa: BLE001 — preserve the legacy adapter below
+        pass
     try:
         from . import notifier
         getter = getattr(notifier, "_runtime_env", None)
@@ -383,6 +392,167 @@ class ApiTransport:
             errors.append(self._error(exc))
             return self._result(_FAILED, questions=questions, errors=errors,
                                 completion_observed=False, export_completed=False, risk="high")
+
+    def resume(self, job: dict, response: str) -> dict:
+        """Resume a persisted API ``ask_user`` interrupt on the same LangGraph thread."""
+        job_id = str(job.get("job_id") or "")
+        session_id = _session_id(job)
+        continuation = job.get("continuation") if isinstance(job.get("continuation"), dict) else {}
+        questions = list(job.get("questions") or [])
+        errors = list(job.get("errors") or [])
+        deadline = time.monotonic() + self._job_timeout(job)
+        self._init_progress(job)
+        try:
+            if continuation.get("transport") != "api":
+                raise ApiTransportError(
+                    "resume_state_missing",
+                    "This API job has no persisted continuation state to resume.",
+                )
+            thread_id = str(continuation.get("thread_id") or "")
+            config = continuation.get("config")
+            if not thread_id or not isinstance(config, dict):
+                raise ApiTransportError(
+                    "resume_state_missing",
+                    "The persisted API continuation is incomplete.",
+                )
+            answer = str(response or "").strip()
+            if not answer:
+                raise ApiTransportError("missing_required_arg", "response is required to resume a Cassette job")
+            self._authenticate()
+            interrupts = self._pending_interrupts(thread_id)
+            if not any((item.get("value") or {}).get("type") == "ask_user" for item in interrupts):
+                raise ApiTransportError(
+                    "resume_not_waiting_for_user",
+                    "The persisted API thread is no longer waiting for a user response.",
+                )
+            self._enter_stage(job_id, "agent", "Resuming the Cassette agent")
+            run_id = self._post_run(
+                thread_id,
+                {
+                    "assistant_id": "cassette-chat",
+                    "command": {"resume": {"action": "respond", "userResponse": answer}},
+                    "config": config,
+                    "multitask_strategy": "interrupt",
+                },
+            )
+            self._persist_continuation(job_id, thread_id, session_id, config, run_id, interrupts=[])
+            run_status, new_questions = self._drive_run(thread_id, run_id, config, job, deadline)
+            questions.append(
+                {
+                    "question": "Cassette requested user input.",
+                    "requires_user": False,
+                    "reason": "user_response",
+                    "answer": "Response supplied by the user.",
+                }
+            )
+            questions.extend(new_questions)
+            if run_status == _NEEDS_USER:
+                return self._result(
+                    _NEEDS_USER,
+                    questions=questions,
+                    errors=errors,
+                    completion_observed=True,
+                    export_completed=False,
+                    risk="medium",
+                    extra_quality={"progress_summary": self._questions_summary(questions)},
+                )
+            if run_status == _TIMED_OUT:
+                errors.append(
+                    {
+                        "code": "agent_run_timeout",
+                        "message": "Agent run did not finish before the job timeout",
+                        "details": {},
+                    }
+                )
+                return self._result(
+                    _TIMED_OUT,
+                    questions=questions,
+                    errors=errors,
+                    completion_observed=False,
+                    export_completed=False,
+                    risk="medium",
+                )
+            if run_status != _SUCCEEDED:
+                raise ApiTransportError("agent_run_incomplete", f"Agent run ended with status '{run_status}'")
+
+            edit_summary = self._latest_agent_summary(thread_id) or "Cassette reports the requested edit is complete."
+            if _export_on_complete(job) and not _auto_export():
+                questions.append(
+                    {
+                        "question": edit_summary[:500],
+                        "requires_user": False,
+                        "reason": "completion_requires_hermes_review",
+                        "answer": "The latest Cassette reply needs completion review before export.",
+                    }
+                )
+                return self._result(
+                    _NEEDS_USER,
+                    questions=questions,
+                    errors=errors,
+                    completion_observed=False,
+                    export_completed=False,
+                    risk="medium",
+                    extra_quality={
+                        "completion_review_required": True,
+                        "completion_source": "cassette_agent_success",
+                        "progress_summary": edit_summary,
+                        "current_stage": "agent",
+                    },
+                )
+            if not _export_on_complete(job):
+                return self._result(
+                    _SUCCEEDED,
+                    questions=questions,
+                    errors=errors,
+                    completion_observed=True,
+                    export_completed=False,
+                    export_pending=False,
+                    risk="medium",
+                    extra_quality={"progress_summary": edit_summary, "current_stage": "agent"},
+                )
+            self._enter_stage(job_id, "export", "Rendering the export")
+            outputs = self._export_project(session_id, job_id, deadline=deadline)
+            return self._result(
+                _SUCCEEDED,
+                outputs=outputs,
+                questions=questions,
+                errors=errors,
+                completion_observed=True,
+                export_completed=bool(outputs),
+                export_pending=not outputs,
+                risk="low" if outputs else "medium",
+                extra_quality={"progress_summary": edit_summary, "current_stage": "export"},
+                final_screenshot=self._export_thumbnail(outputs),
+            )
+        except _JobCancelled:
+            return self._result(
+                _CANCELLED,
+                questions=questions,
+                errors=errors,
+                completion_observed=False,
+                export_completed=False,
+                risk="medium",
+            )
+        except ApiTransportError as exc:
+            errors.append(self._error(exc))
+            return self._result(
+                _FAILED,
+                questions=questions,
+                errors=errors,
+                completion_observed=False,
+                export_completed=False,
+                risk="high",
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(self._error(exc))
+            return self._result(
+                _FAILED,
+                questions=questions,
+                errors=errors,
+                completion_observed=False,
+                export_completed=False,
+                risk="high",
+            )
 
     # ── auth ──────────────────────────────────────────────────────────────────
     def _authenticate(self) -> None:
@@ -767,8 +937,28 @@ class ApiTransport:
             "multitask_strategy": "rollback",
         }
         run_id = self._post_run(thread_id, run_body)
-        questions: list[dict] = []
+        self._persist_continuation(
+            job_id,
+            thread_id,
+            session_id,
+            config,
+            run_id,
+            interrupts=[],
+        )
+        return self._drive_run(thread_id, run_id, config, job, deadline)
 
+    def _drive_run(
+        self,
+        thread_id: str,
+        run_id: str,
+        config: dict[str, Any],
+        job: dict,
+        deadline: float,
+    ) -> tuple[str, list[dict]]:
+        """Drive a new or resumed run until success, timeout, or genuine user input."""
+        questions: list[dict] = []
+        job_id = str(job.get("job_id") or "")
+        session_id = _session_id(job)
         while True:
             status = self._await_run(thread_id, run_id, deadline, job_id)
             if status == "interrupted":
@@ -779,12 +969,23 @@ class ApiTransport:
                     summary = self._latest_agent_summary(thread_id) or "Cassette paused and needs input to continue."
                     questions.append({"question": summary[:500], "requires_user": True,
                                       "reason": "cassette_agent_question", "answer": ""})
+                    self._persist_continuation(
+                        job_id, thread_id, session_id, config, run_id, interrupts=[]
+                    )
                     return _NEEDS_USER, questions
                 resume_value, new_questions, needs_user = self._resume_value(interrupts)
                 questions.extend(new_questions)
                 if needs_user:
                     # A genuine user question was raised (e.g. ask_user) with no auto-reply configured:
                     # leave the thread interrupted and hand back to the Hermes/user review loop.
+                    self._persist_continuation(
+                        job_id,
+                        thread_id,
+                        session_id,
+                        config,
+                        run_id,
+                        interrupts=interrupts,
+                    )
                     return _NEEDS_USER, questions
                 run_id = self._post_run(thread_id, {
                     "assistant_id": "cassette-chat",
@@ -792,12 +993,87 @@ class ApiTransport:
                     "config": config,
                     "multitask_strategy": "interrupt",
                 })
+                self._persist_continuation(
+                    job_id, thread_id, session_id, config, run_id, interrupts=[]
+                )
                 continue
             if status == "success":
+                self._clear_continuation(job_id)
                 return _SUCCEEDED, questions
             if status == "timeout":
                 return _TIMED_OUT, questions
+            self._clear_continuation(job_id)
             raise ApiTransportError("agent_run_error", f"Agent run failed: {self._run_error_detail(thread_id)}")
+
+    @staticmethod
+    def _interrupt_metadata(interrupts: list[dict]) -> list[dict]:
+        metadata: list[dict] = []
+        for item in interrupts:
+            value = item.get("value") if isinstance(item, dict) else {}
+            if not isinstance(value, dict):
+                value = {}
+            metadata.append(
+                {
+                    "id": str(item.get("id") or "") if isinstance(item, dict) else "",
+                    "type": str(value.get("type") or "unknown"),
+                    "tool_call_id": str((value.get("toolCall") or {}).get("id") or "")
+                    if isinstance(value.get("toolCall"), dict)
+                    else "",
+                }
+            )
+        return metadata
+
+    def _persist_continuation(
+        self,
+        job_id: str,
+        thread_id: str,
+        session_id: str,
+        config: dict[str, Any],
+        run_id: str,
+        *,
+        interrupts: list[dict],
+    ) -> None:
+        if not job_id:
+            return
+        try:
+            from . import jobs
+
+            jobs.update_job(
+                job_id,
+                continuation={
+                    "transport": "api",
+                    "thread_id": thread_id,
+                    "run_id": run_id,
+                    "session_id": session_id,
+                    "config": config,
+                    "interrupts": self._interrupt_metadata(interrupts),
+                    "updated_at": self._now_iso(),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                import runtime_config
+
+                restart_safe_required = runtime_config.is_mcp_runtime()
+            except Exception:  # noqa: BLE001
+                restart_safe_required = False
+            if restart_safe_required:
+                raise ApiTransportError(
+                    "continuation_persist_failed",
+                    "Could not persist the private API continuation required for restart-safe resume.",
+                    details={"type": type(exc).__name__},
+                ) from exc
+
+    @staticmethod
+    def _clear_continuation(job_id: str) -> None:
+        if not job_id:
+            return
+        try:
+            from . import jobs
+
+            jobs.update_job(job_id, continuation=None, resume_request=None)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _run_error_detail(self, thread_id: str) -> str:
         """Best-effort extraction of why a run reached 'error' (thread-state task errors)."""
@@ -988,7 +1264,7 @@ class ApiTransport:
             "kind": "video",
         }]
 
-    def _download(self, path: str, target: Path) -> None:
+    def _download(self, path: str, target: Path, *, _retried: bool = False) -> None:
         request = Request(_api_base() + path, method="GET", headers=self._auth_headers({}))
         try:
             with urlopen(request, timeout=max(120.0, self._http_timeout_for_upload(0))) as response, target.open("wb") as fh:
@@ -998,6 +1274,11 @@ class ApiTransport:
                         break
                     fh.write(chunk)
         except HTTPError as exc:
+            if exc.code == 401 and not _retried:
+                self._token = None
+                self._authenticate()
+                self._download(path, target, _retried=True)
+                return
             raise ApiTransportError("export_download_failed", f"Export download failed (HTTP {exc.code})") from exc
         except URLError as exc:
             raise ApiTransportError("export_download_failed", f"Export download failed: {exc.reason}") from exc
