@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately via
-[GitHub security advisories](https://github.com/epc314/oh-my-cassette/security/advisories/new)
+[GitHub security advisories](https://github.com/Cassette-Editor/oh-my-cassette/security/advisories/new)
 rather than opening a public issue. We'll acknowledge reports as quickly as we
 can and coordinate a fix and disclosure.
 

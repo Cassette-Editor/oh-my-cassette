@@ -15,4 +15,4 @@ Notes:
   directory is just an unused copy of `.env.example` — you can ignore it.
 - Verify your install anytime:
   `python3 ~/.hermes/plugins/cassette/scripts/diagnose_install.py`
-- Docs: https://github.com/epc314/oh-my-cassette#-quick-start
+- Docs: https://github.com/Cassette-Editor/oh-my-cassette#-quick-start
