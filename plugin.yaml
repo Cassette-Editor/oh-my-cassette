@@ -1,7 +1,16 @@
 name: cassette
-version: 0.1.0
+version: 0.1.0 # x-release-please-version
+manifest_version: 1
 description: Cassette video-editing automation for QQ/Telegram gateway media ingestion, manifest generation, prompt preparation, and browser-driven Cassette jobs.
 author: Oh My Cassette contributors
+requires_env:
+  - name: CASSETTE_AUTH_EMAIL
+    description: Cassette account email used for scripted browser login
+    url: https://trycassette.online
+  - name: CASSETTE_AUTH_PASSWORD
+    description: Cassette account password
+    url: https://trycassette.online
+    secret: true
 provides_tools:
   - cassette_ingest_media
   - cassette_list_assets

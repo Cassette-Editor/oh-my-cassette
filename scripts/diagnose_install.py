@@ -50,6 +50,16 @@ def _redacted_env_snapshot(values: dict[str, str]) -> dict[str, str]:
     return snapshot
 
 
+def _read_plugin_version(plugin_dir: Path) -> str:
+    manifest = plugin_dir / "plugin.yaml"
+    try:
+        text = manifest.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    match = re.search(r"^version:\s*([0-9][\w.+-]*)", text, re.MULTILINE)
+    return match.group(1) if match else ""
+
+
 def _check_plugin(home: Path, repo: Path) -> dict:
     plugin_dir = home / "plugins" / "cassette"
     if not plugin_dir.exists() and not plugin_dir.is_symlink():
@@ -62,7 +72,36 @@ def _check_plugin(home: Path, repo: Path) -> dict:
         if target == repo.resolve():
             return _check("plugin", "ok", "plugin symlink points to this checkout", path=str(plugin_dir), target=str(target))
         return _check("plugin", "warn", "plugin symlink points to a different checkout", path=str(plugin_dir), target=str(target), expected=str(repo.resolve()))
-    return _check("plugin", "ok", "plugin directory exists", path=str(plugin_dir))
+    try:
+        resolved = plugin_dir.resolve()
+    except OSError:
+        resolved = plugin_dir
+    if resolved == repo.resolve():
+        return _check("plugin", "ok", "plugin directory is this checkout", path=str(plugin_dir))
+    if (plugin_dir / ".git").exists():
+        returncode, remote = _run(["git", "-C", str(plugin_dir), "remote", "get-url", "origin"])
+        if returncode != 0:
+            return _check("plugin", "warn", "plugin directory is a git clone but its remote could not be read", path=str(plugin_dir), output=remote)
+        if "oh-my-cassette" not in remote:
+            return _check("plugin", "warn", "plugin directory is a git clone of a different repository", path=str(plugin_dir), remote=remote)
+        installed_version = _read_plugin_version(plugin_dir)
+        local_version = _read_plugin_version(repo)
+        if installed_version and local_version and installed_version != local_version:
+            return _check(
+                "plugin",
+                "warn",
+                f"installed plugin version {installed_version} differs from this checkout ({local_version}); run `hermes plugins update cassette`",
+                path=str(plugin_dir),
+                remote=remote,
+            )
+        return _check(
+            "plugin",
+            "ok",
+            "plugin is a git clone managed by Hermes; update with `hermes plugins update cassette`",
+            path=str(plugin_dir),
+            remote=remote,
+        )
+    return _check("plugin", "warn", "plugin directory exists but is neither a symlink nor a git clone; reinstall with `hermes plugins install epc314/oh-my-cassette --force` or scripts/install_plugin.py", path=str(plugin_dir))
 
 
 def _check_plugin_enabled(home: Path) -> dict:

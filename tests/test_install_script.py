@@ -298,3 +298,93 @@ def test_install_script_can_skip_cassette_plugin_enable(tmp_path):
         input_func=lambda prompt: "n",
         interactive=True,
     ) is False
+
+
+SETUP_STEP_NAMES = (
+    "enable_cassette_plugin",
+    "configure_cassette_url",
+    "configure_cassette_auth",
+    "configure_jamendo_auth",
+    "configure_transcoder_paths",
+    "install_hermes_playwright",
+    "restart_gateway",
+)
+
+
+def _record_setup_steps(install_plugin, monkeypatch):
+    called = []
+    for name in SETUP_STEP_NAMES:
+        monkeypatch.setattr(
+            install_plugin,
+            name,
+            lambda home, *, dry_run=False, _name=name: called.append((_name, home)) or True,
+        )
+    return called
+
+
+def test_install_script_setup_only_skips_file_install(tmp_path, monkeypatch):
+    install_plugin = _load_install_script()
+    home = tmp_path / ".hermes"
+
+    def fail_install(*args, **kwargs):
+        raise AssertionError("install_plugin() must not run with --setup-only")
+
+    monkeypatch.setattr(install_plugin, "install_plugin", fail_install)
+    called = _record_setup_steps(install_plugin, monkeypatch)
+    monkeypatch.setattr(install_plugin.sys, "argv", ["install_plugin.py", "--setup-only", "--hermes-home", str(home)])
+
+    assert install_plugin.main() == 0
+    assert [name for name, _ in called] == list(SETUP_STEP_NAMES)
+    expected_home = install_plugin.hermes_home(str(home))
+    assert all(step_home == expected_home for _, step_home in called)
+
+
+def test_install_script_setup_only_respects_skip_flags(tmp_path, monkeypatch):
+    install_plugin = _load_install_script()
+    called = _record_setup_steps(install_plugin, monkeypatch)
+    monkeypatch.setattr(
+        install_plugin.sys,
+        "argv",
+        [
+            "install_plugin.py",
+            "--setup-only",
+            "--hermes-home",
+            str(tmp_path / ".hermes"),
+            "--skip-plugin-enable",
+            "--skip-cassette-url",
+            "--skip-cassette-auth",
+            "--skip-jamendo-auth",
+            "--skip-ffmpeg-detect",
+            "--skip-playwright-install",
+            "--skip-gateway-restart",
+        ],
+    )
+
+    assert install_plugin.main() == 0
+    assert called == []
+
+
+def test_install_script_setup_only_subprocess_non_tty(tmp_path):
+    home = tmp_path / ".hermes"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "install_plugin.py"),
+            "--setup-only",
+            "--copy",
+            "--hermes-home",
+            str(home),
+            "--skip-playwright-install",
+            "--skip-gateway-restart",
+            "--skip-ffmpeg-detect",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+    assert result.returncode == 0
+    assert not (home / "plugins" / "cassette").exists()
+    assert "--setup-only ignores --copy" in result.stderr
+    # Interactive steps skip cleanly off a tty.
+    assert "skip interactive" in result.stdout

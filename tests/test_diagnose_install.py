@@ -54,6 +54,68 @@ def test_diagnose_plugin_reports_missing_install(tmp_path):
     assert result["name"] == "plugin"
 
 
+def test_diagnose_plugin_accepts_dir_that_is_this_checkout(tmp_path):
+    diagnose = _load_diagnose_script()
+    plugin_dir = tmp_path / ".hermes" / "plugins" / "cassette"
+    plugin_dir.mkdir(parents=True)
+
+    result = diagnose._check_plugin(tmp_path / ".hermes", plugin_dir)
+
+    assert result["status"] == "ok"
+    assert "this checkout" in result["message"]
+
+
+def test_diagnose_plugin_recognizes_cli_managed_git_clone(tmp_path, monkeypatch):
+    diagnose = _load_diagnose_script()
+    plugin_dir = tmp_path / ".hermes" / "plugins" / "cassette"
+    (plugin_dir / ".git").mkdir(parents=True)
+    (plugin_dir / "plugin.yaml").write_text("name: cassette\nversion: 0.1.0\n", encoding="utf-8")
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    (repo / "plugin.yaml").write_text("name: cassette\nversion: 0.1.0\n", encoding="utf-8")
+    monkeypatch.setattr(diagnose, "_run", lambda cmd, timeout=20: (0, "https://github.com/epc314/oh-my-cassette.git"))
+
+    result = diagnose._check_plugin(tmp_path / ".hermes", repo)
+
+    assert result["status"] == "ok"
+    assert "hermes plugins update cassette" in result["message"]
+
+
+def test_diagnose_plugin_warns_on_version_drift_in_git_clone(tmp_path, monkeypatch):
+    diagnose = _load_diagnose_script()
+    plugin_dir = tmp_path / ".hermes" / "plugins" / "cassette"
+    (plugin_dir / ".git").mkdir(parents=True)
+    (plugin_dir / "plugin.yaml").write_text("name: cassette\nversion: 0.1.0\n", encoding="utf-8")
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    (repo / "plugin.yaml").write_text("name: cassette\nversion: 0.2.0 # x-release-please-version\n", encoding="utf-8")
+    monkeypatch.setattr(diagnose, "_run", lambda cmd, timeout=20: (0, "https://github.com/epc314/oh-my-cassette.git"))
+
+    result = diagnose._check_plugin(tmp_path / ".hermes", repo)
+
+    assert result["status"] == "warn"
+    assert "0.1.0" in result["message"] and "0.2.0" in result["message"]
+
+
+def test_diagnose_plugin_warns_on_foreign_clone_and_unknown_dir(tmp_path, monkeypatch):
+    diagnose = _load_diagnose_script()
+    plugin_dir = tmp_path / ".hermes" / "plugins" / "cassette"
+    (plugin_dir / ".git").mkdir(parents=True)
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    monkeypatch.setattr(diagnose, "_run", lambda cmd, timeout=20: (0, "https://github.com/someone/other-plugin.git"))
+
+    foreign = diagnose._check_plugin(tmp_path / ".hermes", repo)
+    assert foreign["status"] == "warn"
+    assert "different repository" in foreign["message"]
+
+    plain = tmp_path / "plain-home"
+    (plain / "plugins" / "cassette").mkdir(parents=True)
+    unknown = diagnose._check_plugin(plain, repo)
+    assert unknown["status"] == "warn"
+    assert "neither a symlink nor a git clone" in unknown["message"]
+
+
 def test_diagnose_detects_enabled_plugin_from_hermes_list(tmp_path, monkeypatch):
     diagnose = _load_diagnose_script()
     python = tmp_path / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"

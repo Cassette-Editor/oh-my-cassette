@@ -466,6 +466,11 @@ def main() -> int:
     parser.add_argument("--plugin-dir", help="Plugin destination; defaults to <Hermes home>/plugins/cassette")
     parser.add_argument("--copy", action="store_true", help="copy files instead of creating a symlink")
     parser.add_argument("--force", action="store_true", help="replace an existing destination")
+    parser.add_argument(
+        "--setup-only",
+        action="store_true",
+        help="skip plugin file installation and run only the setup steps (use after `hermes plugins install`)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="show the destination without changing files")
     parser.add_argument("--skip-plugin-enable", action="store_true", help="do not prompt to enable the Cassette plugin in Hermes")
     parser.add_argument("--skip-cassette-url", action="store_true", help="do not prompt for Cassette agent URL")
@@ -478,8 +483,14 @@ def main() -> int:
 
     source = repo_root()
     home = hermes_home(args.hermes_home)
-    dest = Path(args.plugin_dir).expanduser().resolve() if args.plugin_dir else home / "plugins" / "cassette"
-    code = install_plugin(source, dest, copy=args.copy, force=args.force, dry_run=args.dry_run)
+    if args.setup_only:
+        for flag, value in (("--copy", args.copy), ("--force", args.force), ("--plugin-dir", args.plugin_dir)):
+            if value:
+                print(f"--setup-only ignores {flag}", file=sys.stderr)
+        code = 0
+    else:
+        dest = Path(args.plugin_dir).expanduser().resolve() if args.plugin_dir else home / "plugins" / "cassette"
+        code = install_plugin(source, dest, copy=args.copy, force=args.force, dry_run=args.dry_run)
     if code == 0 and not args.dry_run and not args.skip_plugin_enable:
         enable_cassette_plugin(home)
     if code == 0 and not args.dry_run and not args.skip_cassette_url:
