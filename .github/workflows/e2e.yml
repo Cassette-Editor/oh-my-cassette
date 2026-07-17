@@ -52,6 +52,15 @@ jobs:
           python -m pip install -r requirements-web.txt
           sudo apt-get update -q
           sudo apt-get install -y -q ffmpeg
+      - name: Generate a realistic test clip
+        # The tiny unit-test fixture (1s / 3.6KB) deterministically fails
+        # Cassette's server-side media analysis; feed a real clip instead.
+        run: |
+          ffmpeg -y -v error \
+            -f lavfi -i "testsrc2=duration=8:size=1280x720:rate=30" \
+            -f lavfi -i "sine=frequency=440:duration=8" \
+            -c:v libx264 -pix_fmt yuv420p -preset veryfast -c:a aac -shortest \
+            /tmp/e2e-clip.mp4
       - name: Run the API-transport E2E harness
         env:
           INSTRUCTION: ${{ inputs.instruction }}
@@ -59,6 +68,6 @@ jobs:
         run: |
           python scripts/e2e_local_cassette.py \
             --transport api \
-            --media tests/fixtures/sample.mp4 \
+            --media /tmp/e2e-clip.mp4 \
             --instruction "$INSTRUCTION" \
             --timeout-sec "$TIMEOUT_SEC"
