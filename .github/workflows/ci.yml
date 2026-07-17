@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Cheap path filter so docs-only changes skip the expensive jobs.
+  # Job-level skips still satisfy branch-protection required checks.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            python:
+              - '**/*.py'
+              - 'requirements-web.txt'
+              - 'pytest.ini'
+              - 'plugin.yaml'
+              - 'after-install.md'
+              - 'tests/**'
+              - 'skills/**'
+              - 'prompts/**'
+              - '.gitignore'
+              - '.env.example'
+              - 'version.txt'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'web_demo/frontend/**'
+              - '.github/workflows/ci.yml'
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest and newest Python supported by hermes-agent (>=3.11,<3.14).
+        python: ["3.11", "3.13"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-web.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements-web.txt pytest pytest-xdist
+      - name: Resolve Playwright version
+        id: playwright
+        run: echo "version=$(python -c 'from importlib.metadata import version; print(version("playwright"))')" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - name: Install Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: python -m playwright install --with-deps chromium
+      - name: Install Chromium system deps (cached browser)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: python -m playwright install-deps chromium
+      - name: Compile check
+        run: python -m compileall -q .
+      - name: Run tests
+        # The suite is mostly waiting (browser timeouts, sleeps); xdist cuts
+        # wall time several-fold. loadfile keeps same-file tests together.
+        run: python -m pytest -q -rs -n 4 --dist loadfile
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web_demo/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web_demo/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build

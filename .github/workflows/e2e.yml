@@ -1,0 +1,64 @@
+name: E2E
+
+# Real-account Cassette end-to-end run over the API transport (no browser).
+# Maintainer-triggered only: it drives a real edit job on trycassette.online
+# with the account stored in repository secrets, and costs ~10-25 min of
+# runner time per run. Fork PRs cannot access the secrets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      instruction:
+        description: Edit instruction for the test job
+        required: false
+        default: "Make a short captioned video under 10 seconds."
+      timeout-sec:
+        description: Max seconds to wait for the Cassette job
+        required: false
+        default: "1500"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cassette-e2e
+  cancel-in-progress: false
+
+jobs:
+  cassette-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CASSETTE_TRANSPORT: api
+      CASSETTE_AUTH_EMAIL: ${{ secrets.CASSETTE_AUTH_EMAIL }}
+      CASSETTE_AUTH_PASSWORD: ${{ secrets.CASSETTE_AUTH_PASSWORD }}
+      # Optional repository variable to override the region/URL defaults.
+      CASSETTE_URL: ${{ vars.CASSETTE_URL }}
+    steps:
+      - name: Require credentials
+        run: |
+          if [ -z "$CASSETTE_AUTH_EMAIL" ] || [ -z "$CASSETTE_AUTH_PASSWORD" ]; then
+            echo "::error::Set the CASSETTE_AUTH_EMAIL / CASSETTE_AUTH_PASSWORD repository secrets first (see RELEASING.md)."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-web.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements-web.txt
+          sudo apt-get update -q
+          sudo apt-get install -y -q ffmpeg
+      - name: Run the API-transport E2E harness
+        env:
+          INSTRUCTION: ${{ inputs.instruction }}
+          TIMEOUT_SEC: ${{ inputs.timeout-sec }}
+        run: |
+          python scripts/e2e_local_cassette.py \
+            --transport api \
+            --media tests/fixtures/sample.mp4 \
+            --instruction "$INSTRUCTION" \
+            --timeout-sec "$TIMEOUT_SEC"
