@@ -1,0 +1,2 @@
+# Runtime dependency for the local stdio MCP plugin.
+mcp==1.12.4

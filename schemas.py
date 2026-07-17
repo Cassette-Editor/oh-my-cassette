@@ -57,7 +57,7 @@ CASSETTE_MAKE_PROMPT = {
 
 CASSETTE_ANSWER_QUESTION = {
     "name": "cassette_answer_question",
-    "description": "Classify a Cassette follow-up question and return either a safe default answer or a user-required clarification.",
+    "description": "Classify a Cassette follow-up question, or resume a user-input-paused job with job_id and response.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -65,8 +65,13 @@ CASSETTE_ANSWER_QUESTION = {
             "instruction": {"type": "string"},
             "asset_count": {"type": "integer"},
             "context": {"type": "object"},
+            "job_id": {"type": "string", "description": "Resume mode: persisted job waiting for user input."},
+            "response": {"type": "string", "description": "Resume mode: validated user response for the pending question."},
         },
-        "required": ["question"],
+        "anyOf": [
+            {"required": ["question"]},
+            {"required": ["job_id", "response"]},
+        ],
         "additionalProperties": False,
     },
 }

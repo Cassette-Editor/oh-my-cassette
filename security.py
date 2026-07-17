@@ -26,13 +26,24 @@ def _hermes_home() -> Path:
 
 def get_allowed_source_roots() -> list[Path]:
     raw = os.getenv("CASSETTE_ALLOWED_SOURCE_ROOTS")
-    if not raw:
+    dynamic_roots: list[Path] = []
+    try:
+        import runtime_config
+
+        if runtime_config.is_mcp_runtime():
+            dynamic_roots = runtime_config.all_mcp_media_roots()
+    except Exception:  # noqa: BLE001 — callers surface config problems separately
+        dynamic_roots = []
+    if not raw and not dynamic_roots:
         home = _hermes_home()
         raw = os.pathsep.join(str(p) for p in (home / "weixin", home / "qqbot", home / "telegram", home / "cache", home / "tmp"))
     roots: list[Path] = []
-    for item in raw.split(os.pathsep):
+    for item in (raw or "").split(os.pathsep):
         if item.strip():
             roots.append(Path(os.path.expandvars(item)).expanduser().resolve())
+    for root in dynamic_roots:
+        if root not in roots:
+            roots.append(root)
     return roots
 
 

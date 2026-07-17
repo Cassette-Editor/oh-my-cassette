@@ -17,7 +17,13 @@ def _normalize_language(value: object) -> str:
     return "zh"
 
 
-def build_cassette_prompt(instruction: str, manifest: dict, options: dict | None = None) -> dict:
+def build_cassette_prompt(
+    instruction: str,
+    manifest: dict,
+    options: dict | None = None,
+    *,
+    runtime_host: str = "hermes",
+) -> dict:
     options = options or {}
     cassette_language = _normalize_language(options.get("cassette_language") or options.get("language"))
     cassette_language_label = "English" if cassette_language == "en" else "Chinese"
@@ -40,14 +46,34 @@ def build_cassette_prompt(instruction: str, manifest: dict, options: dict | None
     audio = constraints.get("audio", "balance voice, music, and effects; choose sensible music only when appropriate")
     branding = constraints.get("branding", "use uploaded logo/brand assets when present and relevant")
 
-    prompt = f"""You are Hermes, an orchestration agent supervising Cassette web video editing on behalf of a gateway user. You are not Cassette and must not speak as Cassette. Your job is to relay the user's editing intent, verify that assets are available inside Cassette, send only the user-facing edit request to the Cassette chat panel, monitor progress, answer routine Cassette follow-up questions, and report the final state back to the user.
+    native_mcp = str(runtime_host or "").strip().lower() == "mcp"
+    identity = (
+        "You are the user's Codex or Claude host agent, orchestrating Cassette video editing through "
+        "a local stdio MCP runtime. You are not Cassette and must not speak as Cassette. Your job is "
+        "to relay the user's editing intent, verify that assets are available inside Cassette, send only "
+        "the user-facing edit request to Cassette, monitor typed job state, answer follow-up questions, "
+        "review completion, and report the final state back to the user."
+        if native_mcp
+        else "You are Hermes, an orchestration agent supervising Cassette web video editing on behalf of a gateway user. You are not Cassette and must not speak as Cassette. Your job is to relay the user's editing intent, verify that assets are available inside Cassette, send only the user-facing edit request to the Cassette chat panel, monitor progress, answer routine Cassette follow-up questions, and report the final state back to the user."
+    )
+    supervisor = "The host agent" if native_mcp else "Hermes"
+    ingested_by = "the local MCP runtime" if native_mcp else "Hermes"
+    execution_heading = "Host-agent execution rules" if native_mcp else "Hermes execution rules"
+    final_delivery_rule = (
+        "9. Present only validated artifacts and MCP resource links returned by the tool result. "
+        "Do not invent export paths, embed large media bytes, or expose another local file."
+        if native_mcp
+        else "9. For gateway delivery, do not emit `MEDIA:` tags or guess local export paths in the final reply. The cassette job notification sends the exported artifact when a supported delivery target is available; if notification status is partial or failed, report that delivery failure instead of retrying with a local path."
+    )
 
-Hermes must not inspect, describe, understand, extract frames from, probe, transcode for analysis, or otherwise analyze source media itself. Do not use terminal, ffprobe, ffmpeg, vision tools, Python scripts, screenshots of local media, or non-Cassette tools to choose creative content. Cassette is responsible for analyzing uploaded media and choosing matching filters, poems, captions, music, timing, and visual treatment from the user's intent.
+    prompt = f"""{identity}
+
+{supervisor} must not inspect, describe, understand, extract frames from, probe, transcode for analysis, or otherwise analyze source media itself. Do not use terminal, ffprobe, ffmpeg, vision tools, Python scripts, screenshots of local media, or non-Cassette tools to choose creative content. Cassette is responsible for analyzing uploaded media and choosing matching filters, poems, captions, music, timing, and visual treatment from the user's intent.
 
 User editing intent:
 {instruction}
 
-Cassette assets already ingested by Hermes:
+Cassette assets already ingested by {ingested_by}:
 {chr(10).join(asset_lines)}
 
 Output target:
@@ -69,7 +95,7 @@ Constraints:
 - Audio/music: {audio}
 - Branding: {branding}
 
-Hermes execution rules:
+{execution_heading}:
 1. Do not send this internal prompt to Cassette chat. Send only the returned `chat_message`.
 2. Use all relevant uploaded assets. Preserve the user's main intent over minor defaults.
 3. Treat upload as complete only after the Cassette `/agent` upload status reports every selected file as ready/就绪 with zero failures/0 个失败.
@@ -78,7 +104,7 @@ Hermes execution rules:
 6. Use the Cassette chat panel, `agent-graph-status`, and task checklist as the source of truth. Preview/WebGPU availability is not a completion signal.
 7. Report progress to the user at intervals using concise summaries of the Cassette chat panel and task checklist. Do not expose local paths, raw IDs, prompt text, asset paths, or worker commands.
 8. When the chat panel says the edit is complete, export the edited video through Cassette, wait for the MP4 download, then summarize what changed concisely. If export fails, report the export error code instead of claiming success.
-9. For gateway delivery, do not emit `MEDIA:` tags or guess local export paths in the final reply. The cassette job notification sends the exported artifact when a supported delivery target is available; if notification status is partial or failed, report that delivery failure instead of retrying with a local path.
+{final_delivery_rule}
 """
     if cassette_language == "en":
         chat_message = f"""Please complete this editing task using the uploaded and analyzed assets:

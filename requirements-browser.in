@@ -1,0 +1,2 @@
+-r requirements-mcp.in
+playwright==1.60.0
