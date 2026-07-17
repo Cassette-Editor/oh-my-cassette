@@ -101,7 +101,7 @@ def _check_plugin(home: Path, repo: Path) -> dict:
             path=str(plugin_dir),
             remote=remote,
         )
-    return _check("plugin", "warn", "plugin directory exists but is neither a symlink nor a git clone; reinstall with `hermes plugins install epc314/oh-my-cassette --force` or scripts/install_plugin.py", path=str(plugin_dir))
+    return _check("plugin", "warn", "plugin directory exists but is neither a symlink nor a git clone; reinstall with `hermes plugins install Cassette-Editor/oh-my-cassette --force` or scripts/install_plugin.py", path=str(plugin_dir))
 
 
 def _check_plugin_enabled(home: Path) -> dict:

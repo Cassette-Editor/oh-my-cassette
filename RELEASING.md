@@ -41,7 +41,7 @@ keep it green.
 5. Spot-check the official channel on a machine (or scratch `HERMES_HOME`):
 
    ```bash
-   hermes plugins install epc314/oh-my-cassette   # fresh install, or:
+   hermes plugins install Cassette-Editor/oh-my-cassette   # fresh install, or:
    hermes plugins update cassette                 # existing install
    hermes plugins list                            # shows the new version
    ```

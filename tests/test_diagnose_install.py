@@ -73,7 +73,7 @@ def test_diagnose_plugin_recognizes_cli_managed_git_clone(tmp_path, monkeypatch)
     repo = tmp_path / "checkout"
     repo.mkdir()
     (repo / "plugin.yaml").write_text("name: cassette\nversion: 0.1.0\n", encoding="utf-8")
-    monkeypatch.setattr(diagnose, "_run", lambda cmd, timeout=20: (0, "https://github.com/epc314/oh-my-cassette.git"))
+    monkeypatch.setattr(diagnose, "_run", lambda cmd, timeout=20: (0, "https://github.com/Cassette-Editor/oh-my-cassette.git"))
 
     result = diagnose._check_plugin(tmp_path / ".hermes", repo)
 
@@ -89,6 +89,7 @@ def test_diagnose_plugin_warns_on_version_drift_in_git_clone(tmp_path, monkeypat
     repo = tmp_path / "checkout"
     repo.mkdir()
     (repo / "plugin.yaml").write_text("name: cassette\nversion: 0.2.0 # x-release-please-version\n", encoding="utf-8")
+    # Pre-org-transfer installs have the old-owner remote; they must stay recognized.
     monkeypatch.setattr(diagnose, "_run", lambda cmd, timeout=20: (0, "https://github.com/epc314/oh-my-cassette.git"))
 
     result = diagnose._check_plugin(tmp_path / ".hermes", repo)
