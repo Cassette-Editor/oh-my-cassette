@@ -7,7 +7,9 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 </h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-0.1.0-blue.svg" alt="版本">
+  <a href="https://github.com/epc314/oh-my-cassette/releases">
+    <img src="https://img.shields.io/github/v/release/epc314/oh-my-cassette?style=flat-square&color=blue" alt="版本">
+  </a>
   <a href="https://github.com/epc314/oh-my-cassette/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/epc314/oh-my-cassette?style=flat-square" alt="许可证">
   </a>

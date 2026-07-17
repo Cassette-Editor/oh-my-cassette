@@ -7,7 +7,9 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket AI Co-editor fo
 </h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-0.1.0-blue.svg" alt="Version">
+  <a href="https://github.com/epc314/oh-my-cassette/releases">
+    <img src="https://img.shields.io/github/v/release/epc314/oh-my-cassette?style=flat-square&color=blue" alt="Version">
+  </a>
   <a href="https://github.com/epc314/oh-my-cassette/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/epc314/oh-my-cassette?style=flat-square" alt="License">
   </a>
