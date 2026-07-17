@@ -11,7 +11,7 @@
       "name": "oh-my-cassette",
       "description": "Edit trusted project media through a local stdio MCP runtime and the Cassette backend.",
       "source": "./",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "productivity",
       "tags": [
         "video-editing",

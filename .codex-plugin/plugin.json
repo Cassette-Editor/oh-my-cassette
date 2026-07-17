@@ -1,6 +1,6 @@
 {
   "name": "oh-my-cassette",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Edit local project media through a self-contained stdio MCP runtime that connects directly to Cassette.",
   "author": {
     "name": "Oh My Cassette contributors",

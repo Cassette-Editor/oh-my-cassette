@@ -81,11 +81,15 @@ def test_native_hosts_load_only_host_neutral_skill_and_hermes_keeps_its_skill():
 def test_release_please_updates_all_host_version_fields():
     config = _json("release-please-config.json")
     entries = config["packages"]["."]["extra-files"]
-    paths = {entry["path"] for entry in entries}
+    entries_by_path = {entry["path"]: entry for entry in entries}
     assert {
         "plugin.yaml",
         ".codex-plugin/plugin.json",
         ".claude-plugin/plugin.json",
         ".claude-plugin/marketplace.json",
         "mcp_plugin/__init__.py",
-    } <= paths
+    } <= entries_by_path.keys()
+    assert entries_by_path["plugin.yaml"] == {
+        "type": "generic",
+        "path": "plugin.yaml",
+    }
