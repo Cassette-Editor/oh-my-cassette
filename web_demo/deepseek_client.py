@@ -5,7 +5,7 @@ import os
 import time
 from typing import Any
 
-import requests
+import httpx
 
 from .cassette_loader import load_cassette_package
 from . import logging_utils, session_store
@@ -86,13 +86,14 @@ def _post_chat_completion(messages: list[dict[str, Any]], api_key: str) -> dict[
     }
     logging_utils.log_event("deepseek_request_start", model=body["model"], url=_chat_url(), message_count=len(messages), tool_count=len(body["tools"]))
     try:
-        response = requests.post(
+        response = httpx.post(
             _chat_url(),
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=body,
             timeout=float(_runtime_env("DEEPSEEK_TIMEOUT_SEC") or "120"),
+            follow_redirects=True,
         )
-    except requests.RequestException as exc:
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         logging_utils.log_event("deepseek_request_exception", error_type=type(exc).__name__, duration_ms=int((time.monotonic() - started) * 1000))
         raise DeepSeekError(f"DeepSeek request failed: {type(exc).__name__}") from exc
     duration_ms = int((time.monotonic() - started) * 1000)

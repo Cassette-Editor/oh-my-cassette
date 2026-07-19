@@ -935,25 +935,24 @@ def _selector(job: dict, key: str, env: str, default: str) -> str:
     return (job.get("selectors") or {}).get(key) or os.getenv(env, default)
 
 
-def _screenshot(page: Any, job_id: str) -> str | None:
-    path = Path(os.getenv("CASSETTE_ASSET_ROOT", str(get_asset_root()))) / "screenshots" / f"{job_id}_final.png"
+def _capture(page: Any, path: Path) -> str | None:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         page.screenshot(path=str(path), full_page=True)
         return str(path)
     except Exception:
         return None
+
+
+def _screenshot(page: Any, job_id: str) -> str | None:
+    path = Path(os.getenv("CASSETTE_ASSET_ROOT", str(get_asset_root()))) / "screenshots" / f"{job_id}_final.png"
+    return _capture(page, path)
 
 
 def _progress_screenshot(page: Any, job_id: str) -> str | None:
     timestamp = jobs.now_iso().replace(":", "").replace("-", "")
     path = Path(os.getenv("CASSETTE_ASSET_ROOT", str(get_asset_root()))) / "screenshots" / f"{job_id}_progress_{timestamp}.png"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        page.screenshot(path=str(path), full_page=True)
-        return str(path)
-    except Exception:
-        return None
+    return _capture(page, path)
 
 
 def _exports_dir(job_id: str) -> Path:
@@ -1445,18 +1444,6 @@ def _page_state_reports_incomplete(state: dict[str, Any]) -> bool:
     )
 
 
-def _page_state_structurally_export_ready(state: dict[str, Any]) -> bool:
-    export_enabled = bool((state.get("export_control") or {}).get("enabled"))
-    stop_enabled = bool((state.get("stop_control") or {}).get("enabled"))
-    current_assistant = bool(state.get("assistant_is_current", True))
-    return (
-        export_enabled
-        and current_assistant
-        and not stop_enabled
-        and bool(str(state.get("assistant_text") or "").strip())
-    )
-
-
 def _page_state_requires_completion_review(state: dict[str, Any], export_required: bool = True) -> bool:
     if not export_required:
         return False
@@ -1777,7 +1764,7 @@ def _download_export(page: Any, job_id: str, output_selector: str, timeout_sec: 
         if stage:
             now = time.monotonic()
             if stage != last_stage or now - last_progress_record >= int(os.getenv("CASSETTE_PROGRESS_INTERVAL_SEC", "30")):
-                _record_progress(job_id, f"Export status: {stage}", outputs, "running")
+                _record_stage_progress(job_id, f"Export status: {stage}", outputs, status="running")
                 last_progress_record = now
             last_stage = stage
         stage_lower = stage.lower()
@@ -2156,10 +2143,6 @@ def _summarize_page_state(body: str) -> str:
         if idx >= 0:
             return _compact_summary_text(text[max(0, idx - 120):idx + 700])
     return _compact_summary_text(text[-700:])
-
-
-def _record_progress(job_id: str, body: str, outputs: list[dict], status: str = "running") -> None:
-    _record_stage_progress(job_id, body, outputs, status=status)
 
 
 def _record_stage_progress(
@@ -3330,7 +3313,7 @@ def export_reviewed_completion_job(job: dict, decision: dict[str, Any] | None = 
         },
         "progress_summary": _compact_summary_text(str((decision or {}).get("summary") or (job.get("quality") or {}).get("progress_summary") or ""), 700),
     }
-    _record_progress(job_id, "Hermes completion review approved export; starting Cassette export.", outputs)
+    _record_stage_progress(job_id, "Hermes completion review approved export; starting Cassette export.", outputs)
     return _success_result(page, job, outputs, questions, errors, quality, output_selector, stage_control=None)
 
 
@@ -3875,7 +3858,7 @@ def run_cassette_browser_job(job: dict) -> dict:
                             "reason": "routine_plan_approval",
                             "answer": f"Clicked Cassette routine action control: {clicked}",
                         })
-                        _record_progress(job_id, f"Cassette routine interaction handled: {clicked}", outputs)
+                        _record_stage_progress(job_id, f"Cassette routine interaction handled: {clicked}", outputs)
                         last_routine_interaction_key = routine_key
                         last_routine_interaction_at = now
                         seen_text = body

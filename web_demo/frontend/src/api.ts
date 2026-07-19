@@ -4,9 +4,8 @@ export function getApiKey(): string {
   return sessionStorage.getItem("omc_deepseek_key") || "";
 }
 
-function authHeaders(json: boolean): Record<string, string> {
-  const headers: Record<string, string> = {};
-  if (json) headers["Content-Type"] = "application/json";
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
   const key = getApiKey();
   if (key) headers["X-DeepSeek-Api-Key"] = key;
   return headers;
@@ -58,7 +57,7 @@ const UPLOAD_TIMEOUT_MS = 60 * 60 * 1000;
 export async function postMessage(sessionId: string, text: string, language: Lang, clientEventId = ""): Promise<MutationResult> {
   const response = await fetch("/api/messages", {
     method: "POST",
-    headers: authHeaders(true),
+    headers: authHeaders(),
     body: JSON.stringify({ session_id: sessionId, text, language, client_event_id: clientEventId }),
   });
   if (response.ok) return { ok: true };

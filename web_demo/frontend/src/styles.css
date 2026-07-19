@@ -958,10 +958,6 @@ a:hover {
   color: #6aa6f9;
   background: rgba(60, 131, 246, 0.14);
 }
-.badge.warn {
-  color: var(--warning);
-  background: rgba(245, 159, 10, 0.14);
-}
 .badge.neutral {
   color: var(--ink-secondary);
   background: var(--elevated);

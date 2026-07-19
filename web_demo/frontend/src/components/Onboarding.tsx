@@ -9,8 +9,6 @@ type Rect = { top: number; left: number; width: number; height: number };
 interface StepDef {
   /** `data-tour` value of the element to spotlight on desktop. */
   target: string;
-  /** Optional override target for the mobile layout (where the desktop element is off-screen). */
-  mobileTarget?: string;
   titleKey: string;
   bodyKey: string;
   /** Optional body copy swapped in on the mobile layout. */
@@ -81,7 +79,7 @@ export function Onboarding() {
 
   const measure = useCallback(() => {
     if (!active) return;
-    const name = isMobile && def.mobileTarget ? def.mobileTarget : def.target;
+    const name = def.target;
     const el = document.querySelector<HTMLElement>(`[data-tour="${name}"]`);
     if (!el) {
       setRect(null);

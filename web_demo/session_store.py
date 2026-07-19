@@ -56,12 +56,6 @@ def close_session(session_id: str) -> None:
         _CLOSED_SESSIONS.add(sid)
 
 
-def is_closed(session_id: str) -> bool:
-    sid = validate_session_id(session_id)
-    with _LOCK:
-        return sid in _CLOSED_SESSIONS
-
-
 def reset_all() -> None:
     with _LOCK:
         _SESSIONS.clear()

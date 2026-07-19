@@ -724,10 +724,6 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
     return "\n".join(lines).strip()
 
 
-def format_weixin_final_message(job: dict, media_delivery: str | None = None) -> str:
-    return format_platform_final_message(job, media_delivery=media_delivery, platform="weixin")
-
-
 async def _send_weixin_text(chat_id: str, message: str) -> dict:
     from gateway.platforms.weixin import send_weixin_direct
 
@@ -755,7 +751,7 @@ async def _send_weixin_image_attachment(chat_id: str, file_path: str, caption: s
     return {"success": False, "error": str(result.get("error") or "unknown")[:300]}
 
 
-async def _send_weixin_video_attachment(chat_id: str, file_path: str) -> dict:
+async def _weixin_send_with_adapter(call):
     try:
         from gateway.config import PlatformConfig
         from gateway.platforms import weixin as weixin_module
@@ -805,43 +801,51 @@ async def _send_weixin_video_attachment(chat_id: str, file_path: str) -> dict:
             adapter._token_store = token_store
             _patch_weixin_adapter_for_openclaw_media(adapter)
             try:
-                message_id = await adapter._send_file(str(chat_id), file_path, "")
-                return {"success": True, "message_id": message_id, "mode": "native"}
-            except Exception as first_exc:
-                if (
-                    not _is_video_export(file_path)
-                    or _is_disabled(os.getenv("CASSETTE_WEIXIN_DELIVERY_TRANSCODE", "1"))
-                ):
-                    return {"success": False, "error": str(first_exc)[:300]}
-                try:
-                    errors = []
-                    for profile in _delivery_profiles():
-                        try:
-                            compatible_path = _prepare_weixin_video_delivery_file(file_path, profile)
-                            message_id = await adapter._send_file(str(chat_id), str(compatible_path), "")
-                            return {
-                                "success": True,
-                                "message_id": message_id,
-                                "mode": "weixin_compatible_mp4",
-                                "media_profile": profile["name"],
-                                "fallback_error": str(first_exc)[:200],
-                            }
-                        except Exception as profile_exc:
-                            errors.append(f"{profile['name']}:{str(profile_exc)[:80]}")
-                    raise RuntimeError("; ".join(errors))
-                except Exception as fallback_exc:
-                    return {
-                        "success": False,
-                        "error": str(first_exc)[:200],
-                        "fallback_error": str(fallback_exc)[:200],
-                    }
+                return await call(adapter)
             finally:
                 restore_retry()
     except Exception as exc:
         return {"success": False, "error": str(exc)[:300]}
 
 
-async def _send_qq_text(chat_id: str, message: str, chat_type: str | None = None) -> dict:
+async def _send_weixin_video_attachment(chat_id: str, file_path: str) -> dict:
+    async def _call(adapter):
+        try:
+            message_id = await adapter._send_file(str(chat_id), file_path, "")
+            return {"success": True, "message_id": message_id, "mode": "native"}
+        except Exception as first_exc:
+            if (
+                not _is_video_export(file_path)
+                or _is_disabled(os.getenv("CASSETTE_WEIXIN_DELIVERY_TRANSCODE", "1"))
+            ):
+                return {"success": False, "error": str(first_exc)[:300]}
+            try:
+                errors = []
+                for profile in _delivery_profiles():
+                    try:
+                        compatible_path = _prepare_weixin_video_delivery_file(file_path, profile)
+                        message_id = await adapter._send_file(str(chat_id), str(compatible_path), "")
+                        return {
+                            "success": True,
+                            "message_id": message_id,
+                            "mode": "weixin_compatible_mp4",
+                            "media_profile": profile["name"],
+                            "fallback_error": str(first_exc)[:200],
+                        }
+                    except Exception as profile_exc:
+                        errors.append(f"{profile['name']}:{str(profile_exc)[:80]}")
+                raise RuntimeError("; ".join(errors))
+            except Exception as fallback_exc:
+                return {
+                    "success": False,
+                    "error": str(first_exc)[:200],
+                    "fallback_error": str(fallback_exc)[:200],
+                }
+
+    return await _weixin_send_with_adapter(_call)
+
+
+async def _qq_send_with_adapter(chat_id: str, chat_type: str | None, call):
     try:
         from gateway.config import PlatformConfig
         from gateway.platforms._http_client_limits import platform_httpx_limits
@@ -862,79 +866,42 @@ async def _send_qq_text(chat_id: str, message: str, chat_type: str | None = None
     _enable_qq_direct_rest_mode(adapter)
     adapter._http_client = httpx.AsyncClient(timeout=30.0, follow_redirects=True, limits=platform_httpx_limits())
     try:
+        return await call(adapter)
+    except Exception as exc:
+        return {"success": False, "error": str(exc)[:300]}
+    finally:
+        if adapter._http_client:
+            await adapter._http_client.aclose()
+
+
+async def _send_qq_text(chat_id: str, message: str, chat_type: str | None = None) -> dict:
+    async def _call(adapter):
         result = await adapter.send(str(chat_id), message)
         if result.success:
             return {"success": True, "message_id": result.message_id}
         return {"success": False, "error": str(result.error or "unknown")[:300]}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)[:300]}
-    finally:
-        if adapter._http_client:
-            await adapter._http_client.aclose()
+
+    return await _qq_send_with_adapter(chat_id, chat_type, _call)
 
 
 async def _send_qq_video_attachment(chat_id: str, file_path: str, chat_type: str | None = None) -> dict:
-    try:
-        from gateway.config import PlatformConfig
-        from gateway.platforms._http_client_limits import platform_httpx_limits
-        from gateway.platforms.qqbot.adapter import QQAdapter
-        import httpx
-    except Exception as exc:
-        return {"success": False, "error": f"qq_import_failed:{type(exc).__name__}"}
-
-    app_id = _runtime_env("QQ_APP_ID")
-    client_secret = _runtime_env("QQ_CLIENT_SECRET")
-    if not app_id:
-        return {"success": False, "error": "missing_qq_app_id"}
-    if not client_secret:
-        return {"success": False, "error": "missing_qq_client_secret"}
-
-    adapter = QQAdapter(PlatformConfig(enabled=True, token="", extra={"app_id": app_id, "client_secret": client_secret}))
-    adapter._chat_type_map[str(chat_id)] = _normalize_qq_chat_type(chat_type)
-    _enable_qq_direct_rest_mode(adapter)
-    adapter._http_client = httpx.AsyncClient(timeout=30.0, follow_redirects=True, limits=platform_httpx_limits())
-    try:
+    async def _call(adapter):
         result = await adapter.send_video(str(chat_id), file_path)
         if result.success:
             return {"success": True, "message_id": result.message_id, "mode": "native"}
         return {"success": False, "error": str(result.error or "unknown")[:300]}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)[:300]}
-    finally:
-        if adapter._http_client:
-            await adapter._http_client.aclose()
+
+    return await _qq_send_with_adapter(chat_id, chat_type, _call)
 
 
 async def _send_qq_image_attachment(chat_id: str, file_path: str, caption: str = "", chat_type: str | None = None) -> dict:
-    try:
-        from gateway.config import PlatformConfig
-        from gateway.platforms._http_client_limits import platform_httpx_limits
-        from gateway.platforms.qqbot.adapter import QQAdapter
-        import httpx
-    except Exception as exc:
-        return {"success": False, "error": f"qq_import_failed:{type(exc).__name__}"}
-
-    app_id = _runtime_env("QQ_APP_ID")
-    client_secret = _runtime_env("QQ_CLIENT_SECRET")
-    if not app_id:
-        return {"success": False, "error": "missing_qq_app_id"}
-    if not client_secret:
-        return {"success": False, "error": "missing_qq_client_secret"}
-
-    adapter = QQAdapter(PlatformConfig(enabled=True, token="", extra={"app_id": app_id, "client_secret": client_secret}))
-    adapter._chat_type_map[str(chat_id)] = _normalize_qq_chat_type(chat_type)
-    _enable_qq_direct_rest_mode(adapter)
-    adapter._http_client = httpx.AsyncClient(timeout=30.0, follow_redirects=True, limits=platform_httpx_limits())
-    try:
+    async def _call(adapter):
         result = await adapter.send_image_file(str(chat_id), file_path, caption=caption)
         if result.success:
             return {"success": True, "message_id": result.message_id, "mode": "native"}
         return {"success": False, "error": str(result.error or "unknown")[:300]}
-    except Exception as exc:
-        return {"success": False, "error": str(exc)[:300]}
-    finally:
-        if adapter._http_client:
-            await adapter._http_client.aclose()
+
+    return await _qq_send_with_adapter(chat_id, chat_type, _call)
 
 
 def _telegram_thread_metadata(thread_id: str | None = None) -> dict[str, str] | None:
@@ -1036,61 +1003,11 @@ async def _send_telegram_video_attachment(chat_id: str, file_path: str, thread_i
 
 
 async def _send_weixin_file_attachment(chat_id: str, file_path: str) -> dict:
-    try:
-        from gateway.config import PlatformConfig
-        from gateway.platforms import weixin as weixin_module
-        from gateway.platforms.weixin import (
-            ILINK_BASE_URL,
-            WEIXIN_CDN_BASE_URL,
-            ContextTokenStore,
-            WeixinAdapter,
-            _make_ssl_connector,
-        )
-        from hermes_constants import get_hermes_home
-        import aiohttp
-    except Exception as exc:
-        return {"success": False, "error": f"weixin_import_failed:{type(exc).__name__}"}
+    async def _call(adapter):
+        message_id = await adapter._send_file(str(chat_id), file_path, "")
+        return {"success": True, "message_id": message_id}
 
-    token = _runtime_env("WEIXIN_TOKEN")
-    account_id = _runtime_env("WEIXIN_ACCOUNT_ID")
-    if not token:
-        return {"success": False, "error": "missing_weixin_token"}
-    if not account_id:
-        return {"success": False, "error": "missing_weixin_account_id"}
-
-    base_url = str(_runtime_env("WEIXIN_BASE_URL") or ILINK_BASE_URL).strip().rstrip("/")
-    cdn_base_url = str(_runtime_env("WEIXIN_CDN_BASE_URL") or WEIXIN_CDN_BASE_URL).strip().rstrip("/")
-    token_store = ContextTokenStore(str(get_hermes_home()))
-    token_store.restore(account_id)
-    try:
-        async with aiohttp.ClientSession(trust_env=True, connector=_make_ssl_connector()) as session:
-            restore_retry = _install_weixin_cdn_retry(weixin_module)
-            adapter = WeixinAdapter(
-                PlatformConfig(
-                    enabled=True,
-                    token=token,
-                    extra={
-                        "account_id": account_id,
-                        "base_url": base_url,
-                        "cdn_base_url": cdn_base_url,
-                    },
-                )
-            )
-            adapter._send_session = session
-            adapter._session = session
-            adapter._token = token
-            adapter._account_id = account_id
-            adapter._base_url = base_url
-            adapter._cdn_base_url = cdn_base_url
-            adapter._token_store = token_store
-            _patch_weixin_adapter_for_openclaw_media(adapter)
-            try:
-                message_id = await adapter._send_file(str(chat_id), file_path, "")
-                return {"success": True, "message_id": message_id}
-            finally:
-                restore_retry()
-    except Exception as exc:
-        return {"success": False, "error": str(exc)[:300]}
+    return await _weixin_send_with_adapter(_call)
 
 
 def format_progress_snapshot_message(job: dict, summary: str = "") -> str:

@@ -11,11 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import CassetteError
-from .manifest import get_asset_root
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+from .manifest import get_asset_root, now_iso
 
 
 def get_jobs_dir() -> Path:

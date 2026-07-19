@@ -11,15 +11,9 @@ import tempfile
 from pathlib import Path
 
 
-EXCLUDE_NAMES = {
-    ".git",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".venv",
-    "__pycache__",
-}
-EXCLUDE_FILES = {".env.e2e"}
+COPY_IGNORE = shutil.ignore_patterns(
+    ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "__pycache__", ".env.e2e", "*.pyc",
+)
 CASSETTE_DEFAULT_URL = "https://sg.trycassette.online/agent"
 CASSETTE_URL_OPTIONS = (
     ("1", "https://sg.trycassette.online/agent", "Asia"),
@@ -49,15 +43,6 @@ def same_path(left: Path, right: Path) -> bool:
         return left.resolve() == right.resolve()
     except OSError:
         return False
-
-
-def copy_ignore(directory: str, names: list[str]) -> set[str]:
-    del directory
-    ignored = set()
-    for name in names:
-        if name in EXCLUDE_NAMES or name in EXCLUDE_FILES or name.endswith(".pyc"):
-            ignored.add(name)
-    return ignored
 
 
 def remove_existing(path: Path) -> None:
@@ -451,7 +436,7 @@ def install_plugin(source: Path, dest: Path, *, copy: bool, force: bool, dry_run
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     if copy:
-        shutil.copytree(source, dest, ignore=copy_ignore)
+        shutil.copytree(source, dest, ignore=COPY_IGNORE)
     else:
         dest.symlink_to(source, target_is_directory=True)
 

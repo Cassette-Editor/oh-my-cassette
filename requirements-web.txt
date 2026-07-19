@@ -1,6 +1,5 @@
 fastapi
 uvicorn[standard]
 python-multipart
-requests
 httpx
 playwright
