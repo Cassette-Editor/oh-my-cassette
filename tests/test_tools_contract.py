@@ -1810,13 +1810,7 @@ def test_ingest_gateway_media_clears_semantic_gate_on_unrelated_followup(cassett
     assert tools._load_pending_edit(session_id) is None
 
 
-def test_edit_instruction_detection_delegates_positive_classification_to_hermes():
-    assert tools._looks_like_edit_instruction("Make a short video with clean pacing") is False
-    assert tools._looks_like_edit_instruction("Create a vertical reel with subtitles") is False
-    assert tools._looks_like_edit_instruction("把背景音乐替换成恢弘大气的坐飞机的音乐") is False
-    assert tools._looks_like_edit_instruction("换成更适合旅行感的 BGM") is False
-    assert tools._looks_like_edit_instruction("按这个感觉来") is False
-    assert tools._looks_like_edit_instruction("I didn't receive the video") is False
+def test_asset_status_query_detection():
     assert tools._looks_like_asset_status_query("Did you receive the video files?") is False
     assert tools._looks_like_asset_status_query("/check_assets") is True
     assert tools._looks_like_asset_status_query("/check_assets@CassetteBot") is True

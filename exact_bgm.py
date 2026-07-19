@@ -768,8 +768,8 @@ def _sort_exact_candidates(
     require_artist: bool = True,
 ) -> list[ExactBgmCandidate]:
     return sorted(candidates, key=lambda item: (
-        _title_rank(title, item.title),
-        _artist_rank(artist, item.artist) if require_artist and artist else 0,
+        _match_rank(title, item.title),
+        _match_rank(artist, item.artist) if require_artist and artist else 0,
         _SOURCE_PRIORITY.get(item.source, 99),
         item.display_index or 9999,
         item.id,
@@ -811,19 +811,7 @@ def _artist_matches(target: str, candidate: str) -> bool:
     return any(part and (target_norm == part or target_norm in part or part in target_norm) for part in candidate_parts)
 
 
-def _title_rank(target: str, candidate: str) -> int:
-    target_norm = _normalize_music_text(target)
-    candidate_norm = _normalize_music_text(candidate)
-    if target_norm == candidate_norm:
-        return 0
-    if target_norm in candidate_norm:
-        return 1
-    if candidate_norm in target_norm:
-        return 2
-    return 3
-
-
-def _artist_rank(target: str, candidate: str) -> int:
+def _match_rank(target: str, candidate: str) -> int:
     target_norm = _normalize_music_text(target)
     candidate_norm = _normalize_music_text(candidate)
     if target_norm == candidate_norm:

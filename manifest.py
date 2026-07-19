@@ -17,15 +17,6 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _hermes_home() -> Path:
-    try:
-        from hermes_constants import get_hermes_home
-
-        return Path(get_hermes_home()).expanduser()
-    except Exception:
-        return Path(os.getenv("HERMES_HOME", "~/.hermes")).expanduser()
-
-
 def get_asset_root() -> Path:
     try:
         import runtime_config
@@ -34,20 +25,16 @@ def get_asset_root() -> Path:
             return runtime_config.asset_root()
     except Exception:  # noqa: BLE001 — retain the Hermes default below
         pass
-    return Path(os.getenv("CASSETTE_ASSET_ROOT", str(_hermes_home() / "cassette"))).expanduser().resolve()
+    return Path(os.getenv("CASSETTE_ASSET_ROOT", str(security._hermes_home() / "cassette"))).expanduser().resolve()
 
 
 def session_key(session_id: str | None = None, chat_id: str | None = None, task_id: str | None = None) -> str:
     return str(session_id or chat_id or task_id or "default")
 
 
-def session_hash(key: str) -> str:
-    return security.safe_hash_id(key)
-
-
 def resolve_session_hash(session_id: str | None = None, chat_id: str | None = None, task_id: str | None = None) -> str:
     key = session_key(session_id, chat_id, task_id)
-    hashed = session_hash(key)
+    hashed = security.safe_hash_id(key)
     if get_manifest_path(hashed).exists():
         return hashed
     if session_id and get_manifest_path(str(session_id)).exists():
@@ -215,6 +202,65 @@ def _transcode_h264(source: Path, dest: Path) -> None:
     os.replace(tmp_path, dest)
 
 
+def _register_asset(
+    sess_hash: str,
+    empty_manifest_key: str,
+    digest: str,
+    dest: Path,
+    size: int,
+    resolved_media_type: str,
+    original_name: str,
+    caption: str | None,
+    message_id_hash: str,
+    deduplicated: bool,
+    *,
+    on_manifest=None,
+    asset_extra: dict | None = None,
+) -> dict:
+    """Shared manifest-lock tail for ingest_asset / ingest_internal_asset: upsert the asset into
+    the session manifest and return the ingestion result. ``on_manifest`` runs inside the lock to
+    apply caller-specific manifest fields (e.g. gateway delivery); ``asset_extra`` adds
+    caller-specific asset fields (e.g. internal metadata)."""
+    asset_id = f"asset_{digest[:12]}"
+    with manifest_lock(sess_hash):
+        manifest = load_manifest(sess_hash)
+        if not manifest.get("assets") and manifest.get("session_id") == "default":
+            manifest = _empty_manifest(empty_manifest_key, sess_hash)
+        manifest["session_id"] = sess_hash
+        manifest["session_hash"] = sess_hash
+        if on_manifest is not None:
+            on_manifest(manifest)
+        existing = next((a for a in manifest["assets"] if a.get("sha256") == digest), None)
+        asset = {
+            "asset_id": asset_id,
+            "sha256": digest,
+            "saved_path": str(dest),
+            "original_name": original_name,
+            "extension": dest.suffix.lower(),
+            "media_type": resolved_media_type,
+            "size_bytes": size,
+            "caption": caption or "",
+            "message_id": message_id_hash,
+            "created_at": existing.get("created_at") if existing else now_iso(),
+            "exists": dest.exists(),
+            **(asset_extra or {}),
+        }
+        if existing:
+            existing.update(asset)
+        else:
+            manifest["assets"].append(asset)
+        save_manifest_atomic(sess_hash, manifest)
+    return {
+        "asset_id": asset_id,
+        "saved_path": str(dest),
+        "manifest_path": str(get_manifest_path(sess_hash)),
+        "sha256": digest,
+        "size_bytes": size,
+        "session_hash": sess_hash,
+        "deduplicated": deduplicated or existing is not None,
+    }
+
+
 def ingest_asset(
     source_path: str,
     original_name: str | None = None,
@@ -234,7 +280,7 @@ def ingest_asset(
     size = security.validate_size(source)
     digest = security.sha256_file(source)
     key = session_key(session_id, chat_id, task_id)
-    sess_hash = session_hash(key)
+    sess_hash = security.safe_hash_id(key)
 
     resolved_media_type = media_type if media_type in {"video", "image", "audio", "file", "unknown"} else _media_type_from_ext(ext)
     media_dir = get_session_dir(sess_hash) / "media"
@@ -248,13 +294,7 @@ def ingest_asset(
         else:
             shutil.copy2(source, dest)
 
-    asset_id = f"asset_{digest[:12]}"
-    with manifest_lock(sess_hash):
-        manifest = load_manifest(sess_hash)
-        if not manifest.get("assets") and manifest.get("session_id") == "default":
-            manifest = _empty_manifest(key, sess_hash)
-        manifest["session_id"] = sess_hash
-        manifest["session_hash"] = sess_hash
+    def _apply_delivery(manifest: dict) -> None:
         manifest["chat_hash"] = security.safe_hash_id(chat_id or key)
         manifest["user_hash"] = security.safe_hash_id(user_id) if user_id else manifest.get("user_hash", "")
         if chat_id or user_id:
@@ -270,34 +310,19 @@ def ingest_asset(
             })
             manifest["delivery"] = delivery
 
-        existing = next((a for a in manifest["assets"] if a.get("sha256") == digest), None)
-        asset = {
-            "asset_id": asset_id,
-            "sha256": digest,
-            "saved_path": str(dest),
-            "original_name": original_name or source.name,
-            "extension": dest.suffix.lower(),
-            "media_type": resolved_media_type,
-            "size_bytes": size,
-            "caption": caption or "",
-            "message_id": security.safe_hash_id(message_id) if message_id else "",
-            "created_at": existing.get("created_at") if existing else now_iso(),
-            "exists": dest.exists(),
-        }
-        if existing:
-            existing.update(asset)
-        else:
-            manifest["assets"].append(asset)
-        save_manifest_atomic(sess_hash, manifest)
-    return {
-        "asset_id": asset_id,
-        "saved_path": str(dest),
-        "manifest_path": str(get_manifest_path(sess_hash)),
-        "sha256": digest,
-        "size_bytes": size,
-        "session_hash": sess_hash,
-        "deduplicated": deduplicated or existing is not None,
-    }
+    return _register_asset(
+        sess_hash,
+        key,
+        digest,
+        dest,
+        size,
+        resolved_media_type,
+        original_name or source.name,
+        caption,
+        security.safe_hash_id(message_id) if message_id else "",
+        deduplicated,
+        on_manifest=_apply_delivery,
+    )
 
 
 def ingest_internal_asset(
@@ -329,44 +354,20 @@ def ingest_internal_asset(
     if source != dest and not deduplicated:
         shutil.copy2(source, dest)
 
-    asset_id = f"asset_{digest[:12]}"
     resolved_media_type = media_type if media_type in {"video", "image", "audio", "file", "unknown"} else _media_type_from_ext(ext)
-    with manifest_lock(sess_hash):
-        session_manifest = load_manifest(sess_hash)
-        if not session_manifest.get("assets") and session_manifest.get("session_id") == "default":
-            session_manifest = _empty_manifest(session_id, sess_hash)
-        session_manifest["session_id"] = sess_hash
-        session_manifest["session_hash"] = sess_hash
-        existing = next((a for a in session_manifest["assets"] if a.get("sha256") == digest), None)
-        asset = {
-            "asset_id": asset_id,
-            "sha256": digest,
-            "saved_path": str(dest),
-            "original_name": original_name or source.name,
-            "extension": ext,
-            "media_type": resolved_media_type,
-            "size_bytes": size,
-            "caption": caption or "",
-            "message_id": "",
-            "created_at": existing.get("created_at") if existing else now_iso(),
-            "exists": dest.exists(),
-        }
-        if metadata:
-            asset["metadata"] = metadata
-        if existing:
-            existing.update(asset)
-        else:
-            session_manifest["assets"].append(asset)
-        save_manifest_atomic(sess_hash, session_manifest)
-    return {
-        "asset_id": asset_id,
-        "saved_path": str(dest),
-        "manifest_path": str(get_manifest_path(sess_hash)),
-        "sha256": digest,
-        "size_bytes": size,
-        "session_hash": sess_hash,
-        "deduplicated": deduplicated or existing is not None,
-    }
+    return _register_asset(
+        sess_hash,
+        session_id,
+        digest,
+        dest,
+        size,
+        resolved_media_type,
+        original_name or source.name,
+        caption,
+        "",
+        deduplicated,
+        asset_extra={"metadata": metadata} if metadata else None,
+    )
 
 
 def list_assets(session_id: str | None = None, chat_id: str | None = None, task_id: str | None = None) -> dict:

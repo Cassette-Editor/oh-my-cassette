@@ -729,10 +729,6 @@ def _reconcile_stale_web_jobs_globally() -> int:
     return timed_out_count
 
 
-def _reconcile_stale_web_jobs_on_startup() -> None:
-    _reconcile_stale_web_jobs_globally()
-
-
 def _terminate_worker_if_any(job: dict) -> bool:
     try:
         pid = int(job.get("worker_pid") or 0)
@@ -851,11 +847,7 @@ def _cleanup_web_session(session_id: str, reason: str = "") -> dict[str, Any]:
     return result
 
 
-def reconcile_stale_web_jobs_on_startup() -> None:
-    _reconcile_stale_web_jobs_on_startup()
-
-
-app.router.add_event_handler("startup", reconcile_stale_web_jobs_on_startup)
+app.router.add_event_handler("startup", _reconcile_stale_web_jobs_globally)
 
 
 @app.get("/")

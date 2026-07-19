@@ -257,23 +257,6 @@ class TrackCandidate:
         }
 
 
-@dataclass
-class DownloadResult:
-    track_id: str
-    file_path: str
-    metadata_path: str
-    selected_at: str
-    seed: int
-    search_plan: dict[str, Any]
-    candidate_count: int
-    selected_track: dict[str, Any]
-    candidate_pool_snapshot: list[dict[str, Any]] = field(default_factory=list)
-    manifest_asset: dict[str, Any] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
 class HermesPlanRequired(Exception):
     def __init__(self, prompt: str) -> None:
         super().__init__("Hermes Jamendo SearchPlan JSON is required")
@@ -538,7 +521,7 @@ def save_download_metadata(
     manifest_asset: dict[str, Any] | None = None,
 ) -> Path:
     metadata_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = selected_at.replace(":", "").replace("-", "").replace("Z", "Z")
+    timestamp = selected_at.replace(":", "").replace("-", "")
     path = metadata_dir / f"{selected.id}_{timestamp}.json"
     local_file_value = _display_path(local_file, asset_root or manifest.get_asset_root())
     payload = {
@@ -641,19 +624,18 @@ def match_jamendo_music(
         metadata_dir=_safe_output_dir(cfg.metadata_dir),
         manifest_asset=manifest_asset,
     )
-    result = DownloadResult(
-        track_id=selected.id,
-        file_path=_display_path(local_file, manifest.get_asset_root()),
-        metadata_path=_display_path(metadata_path, manifest.get_asset_root()),
-        selected_at=selected_at,
-        seed=effective_seed,
-        search_plan=effective_plan.to_dict(),
-        candidate_count=len(eligible),
-        selected_track=selected.to_dict(include_raw=False),
-        candidate_pool_snapshot=[item.snapshot() for item in sorted(eligible, key=lambda item: item.id)],
-        manifest_asset=_scrub_manifest_asset(manifest_asset) if manifest_asset else None,
-    )
-    data = result.to_dict()
+    data: dict[str, Any] = {
+        "track_id": selected.id,
+        "file_path": _display_path(local_file, manifest.get_asset_root()),
+        "metadata_path": _display_path(metadata_path, manifest.get_asset_root()),
+        "selected_at": selected_at,
+        "seed": effective_seed,
+        "search_plan": effective_plan.to_dict(),
+        "candidate_count": len(eligible),
+        "selected_track": selected.to_dict(include_raw=False),
+        "candidate_pool_snapshot": [item.snapshot() for item in sorted(eligible, key=lambda item: item.id)],
+        "manifest_asset": _scrub_manifest_asset(manifest_asset) if manifest_asset else None,
+    }
     data.update({
         "status": "downloaded",
         "provider": "jamendo",

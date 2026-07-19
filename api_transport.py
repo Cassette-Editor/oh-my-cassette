@@ -168,6 +168,16 @@ def _env(name: str) -> str:
     return str(os.getenv(name, "") or "").strip()
 
 
+def _env_num(name: str, default, floor, *, cast=float, getter=None):
+    # Shared env-number parse: read name (via _env by default, or os.getenv), coerce with cast,
+    # clamp to floor, and fall back to default on missing/garbage input.
+    getter = getter or _env
+    try:
+        return max(floor, cast(getter(name) or default))
+    except (TypeError, ValueError):
+        return default
+
+
 # Deployed Cassette render-server API origin (VITE_REMOTION_RENDER_SERVER_URL in the shipped
 # frontend bundle). This is a single request-routed Cloud Run service for both regions and is NOT
 # the editor SPA route in CASSETTE_URL (which ends in /agent). Override with CASSETTE_API_URL for
@@ -199,16 +209,12 @@ def _session_id(job: dict) -> str:
 
 
 def _http_timeout() -> float:
-    try:
-        return max(5.0, float(_env("CASSETTE_API_HTTP_TIMEOUT_SEC") or "60"))
-    except ValueError:
-        return 60.0
+    return _env_num("CASSETTE_API_HTTP_TIMEOUT_SEC", 60.0, 5.0)
 
 
 class ApiTransport:
     def __init__(self) -> None:
         self._token: str | None = None
-        self._is_full_user: bool = False
         # Progress state (reset per run in _init_progress; defaults keep helpers safe on the export path).
         self._job: dict | None = None
         self._stage_timings: dict[str, dict] = {}
@@ -312,7 +318,7 @@ class ApiTransport:
             self._notify_model_selection(job, self._resolve_model_id(job), self._resolve_thinking_config(job))
             self._enter_stage(job_id, "agent", "Cassette agent is editing")
             thread_id = self._create_thread(session_id, job)
-            run_status, run_questions = self._run_agent(thread_id, session_id, prompt, job, deadline, media_file_ids)
+            run_status, run_questions = self._run_agent(thread_id, session_id, prompt, job, deadline)
             questions.extend(run_questions)
 
             if run_status == _NEEDS_USER:
@@ -569,7 +575,6 @@ class ApiTransport:
         if not token:
             raise ApiTransportError("auth_failed", "Cassette sign-in returned no access token")
         self._token = str(token)
-        self._is_full_user = bool(body.get("isFullUser"))
 
     # ── media upload ────────────────────────────────────────────────────────
     def _upload_asset(self, path: str, session_id: str, deadline: float, job_id: str = "") -> str:
@@ -909,13 +914,12 @@ class ApiTransport:
         env_default = _env("CASSETTE_DEFAULT_THINKING_LEVEL").lower()
         return env_default if env_default in valid else _DEFAULT_THINKING
 
-    def _run_agent(self, thread_id: str, session_id: str, prompt: str, job: dict, deadline: float,
-                   media_file_ids: list[str] | None = None) -> tuple[str, list[dict]]:
+    def _run_agent(self, thread_id: str, session_id: str, prompt: str, job: dict,
+                   deadline: float) -> tuple[str, list[dict]]:
         """Start the run, satisfy interrupts headlessly, return (terminal_status, questions).
 
         Uploaded media is NOT passed as ids — the cassette-chat graph reads the session-scoped media
-        catalog keyed by sessionContext.mediaSessionId (== the upload x-session-id). media_file_ids is
-        accepted only so callers can log/verify what was uploaded."""
+        catalog keyed by sessionContext.mediaSessionId (== the upload x-session-id)."""
         job_id = str(job.get("job_id") or "")
         turn_id = f"{job_id or session_id}-turn"
         session_context = self._session_context(session_id, job, prompt)
@@ -1392,17 +1396,11 @@ class ApiTransport:
 
     @staticmethod
     def _event_interval() -> float:
-        try:
-            return max(5.0, float(os.getenv("CASSETTE_PROGRESS_INTERVAL_SEC", "30")))
-        except ValueError:
-            return 30.0
+        return _env_num("CASSETTE_PROGRESS_INTERVAL_SEC", 30.0, 5.0, getter=os.getenv)
 
     @staticmethod
     def _heartbeat_interval() -> float:
-        try:
-            return max(30.0, float(os.getenv("CASSETTE_PROGRESS_SNAPSHOT_SEC", "180")))
-        except ValueError:
-            return 180.0
+        return _env_num("CASSETTE_PROGRESS_SNAPSHOT_SEC", 180.0, 30.0, getter=os.getenv)
 
     # ── http + result helpers ──────────────────────────────────────────────────
     def _auth_headers(self, headers: dict[str, str]) -> dict[str, str]:
@@ -1565,24 +1563,15 @@ class ApiTransport:
     def _run_start_timeout() -> float:
         # How long a run may stay 'pending' before we declare the queue stalled. Generous by default
         # to tolerate cold starts; override with CASSETTE_API_RUN_START_TIMEOUT_SEC.
-        try:
-            return max(30.0, float(_env("CASSETTE_API_RUN_START_TIMEOUT_SEC") or "120"))
-        except ValueError:
-            return 120.0
+        return _env_num("CASSETTE_API_RUN_START_TIMEOUT_SEC", 120.0, 30.0)
 
     @staticmethod
     def _poll_interval() -> float:
-        try:
-            return max(1.0, float(_env("CASSETTE_API_POLL_INTERVAL_SEC") or "3"))
-        except ValueError:
-            return 3.0
+        return _env_num("CASSETTE_API_POLL_INTERVAL_SEC", 3.0, 1.0)
 
     @staticmethod
     def _recursion_limit() -> int:
-        try:
-            return max(25, int(_env("CASSETTE_API_RECURSION_LIMIT") or "344"))
-        except ValueError:
-            return 344
+        return _env_num("CASSETTE_API_RECURSION_LIMIT", 344, 25, cast=int)
 
     @staticmethod
     def _http_timeout_for_upload(num_bytes: int) -> float:

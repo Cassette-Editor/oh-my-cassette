@@ -8,13 +8,13 @@ from cassette import notifier
 
 
 def test_weixin_final_message_contains_status_without_delivery_target():
-    message = notifier.format_weixin_final_message({
+    message = notifier.format_platform_final_message({
         "job_id": "cassette_test",
         "status": "failed",
         "errors": [{"code": "asset_upload_failed"}],
         "delivery": {"chat_id": "wxid_chat_raw", "user_id": "wxid_user_raw"},
         "quality": {"progress_summary": "Cassette upload status reported 0 ready, 1 failed."},
-    })
+    }, platform="weixin")
 
     assert "asset_upload_failed" in message
     assert "Cassette upload status" in message
@@ -26,12 +26,12 @@ def test_weixin_final_message_mentions_export_without_local_path(tmp_path: Path)
     exported = tmp_path / "result.mp4"
     exported.write_bytes(b"video")
 
-    message = notifier.format_weixin_final_message({
+    message = notifier.format_platform_final_message({
         "job_id": "cassette_test",
         "status": "succeeded",
         "outputs": [{"local_path": str(exported), "download": exported.name}],
         "quality": {"progress_summary": "剪辑完成，可以导出。"},
-    })
+    }, platform="weixin")
 
     assert "导出视频已生成" in message
     assert str(exported) not in message
@@ -41,13 +41,14 @@ def test_weixin_final_message_mentions_compatible_mp4_without_local_path(tmp_pat
     exported = tmp_path / "result.mp4"
     exported.write_bytes(b"video")
 
-    message = notifier.format_weixin_final_message(
+    message = notifier.format_platform_final_message(
         {
             "job_id": "cassette_test",
             "status": "succeeded",
             "outputs": [{"local_path": str(exported), "download": exported.name}],
         },
         media_delivery="sent_compatible",
+        platform="weixin",
     )
 
     assert "微信兼容 MP4" in message
@@ -59,13 +60,14 @@ def test_weixin_final_message_explains_preview_and_original_zip(tmp_path: Path):
     exported = tmp_path / "result.mp4"
     exported.write_bytes(b"video")
 
-    message = notifier.format_weixin_final_message(
+    message = notifier.format_platform_final_message(
         {
             "job_id": "cassette_test",
             "status": "succeeded",
             "outputs": [{"local_path": str(exported), "download": exported.name}],
         },
         media_delivery="sent_preview_zip",
+        platform="weixin",
     )
 
     assert "低码率 MP4 预览" in message

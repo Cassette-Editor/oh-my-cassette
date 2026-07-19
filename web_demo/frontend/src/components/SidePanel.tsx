@@ -23,7 +23,6 @@ export function SidePanel({ open, onClose }: Props) {
     <aside
       ref={paneRef}
       className={`side-pane ${open ? "open" : ""}`}
-      data-tour="sidepanel"
       aria-label={t("statusAria")}
     >
       <div className="side-pane-head">
@@ -72,7 +71,7 @@ function EmptyCard({ text }: { text: string }) {
   return <div className="status-card empty">{text}</div>;
 }
 
-type BadgeVariant = "success" | "danger" | "info" | "warn" | "neutral";
+type BadgeVariant = "success" | "danger" | "info" | "neutral";
 
 function Badge({ text, variant }: { text: string; variant: BadgeVariant }) {
   return <span className={`badge ${variant}`}>{text}</span>;

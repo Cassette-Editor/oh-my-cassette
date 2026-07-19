@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import json
 import mimetypes
@@ -41,7 +42,6 @@ def err(
     message: str,
     details: dict | None = None,
     recoverable: bool = True,
-    job_id: str | None = None,
 ) -> str:
     payload: dict[str, Any] = {
         "ok": False,
@@ -53,8 +53,6 @@ def err(
             "recoverable": recoverable,
         },
     }
-    if job_id:
-        payload["job_id"] = job_id
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -67,371 +65,370 @@ def _safe_call(tool_name: str, fn, args: dict, **kwargs) -> str:
         return err(tool_name, "internal_error", str(exc), {"type": type(exc).__name__}, True)
 
 
-def cassette_ingest_media(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        data = manifest.ingest_asset(
-            source_path=a.get("source_path"),
-            original_name=a.get("original_name"),
-            media_type=a.get("media_type"),
-            chat_id=a.get("chat_id"),
-            user_id=a.get("user_id"),
-            message_id=a.get("message_id"),
-            chat_type=a.get("chat_type"),
-            thread_id=a.get("thread_id"),
-            platform=a.get("platform"),
-            caption=a.get("caption"),
-            session_id=a.get("session_id"),
-            task_id=kw.get("task_id"),
-        )
-        return ok(_scrub_ingest_data(data))
+def safe_tool(fn):
+    """Wrap a tool entrypoint so raised exceptions become the standard err() envelope."""
+    tool_name = fn.__name__
 
-    return _safe_call("cassette_ingest_media", run, args, **kwargs)
+    @functools.wraps(fn)
+    def wrapper(args: dict, **kwargs) -> str:
+        return _safe_call(tool_name, fn, args, **kwargs)
+
+    return wrapper
 
 
-def cassette_list_assets(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        return ok(_scrub_list_assets(manifest.list_assets(a.get("session_id"), a.get("chat_id"), kw.get("task_id"))))
-
-    return _safe_call("cassette_list_assets", run, args, **kwargs)
-
-
-def cassette_make_prompt(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        instruction = (a.get("instruction") or "").strip()
-        if not instruction:
-            raise CassetteError("missing_required_arg", "instruction is required")
-        listed = manifest.list_assets(a.get("session_id"), a.get("chat_id"), kw.get("task_id"))
-        session_manifest = listed["manifest"]
-        if a.get("requires_assets", True) and not session_manifest.get("assets"):
-            raise CassetteError("missing_critical_assets", "No media assets are available for this Cassette edit")
-        data = prompt_mod.build_cassette_prompt(
-            instruction,
-            session_manifest,
-            {
-                "output_format": a.get("output_format"),
-                "duration": a.get("duration"),
-                "style": a.get("style"),
-                "cassette_language": _normalize_cassette_language(a.get("cassette_language") or a.get("language")),
-                "constraints": a.get("constraints") or {},
-            },
-            runtime_host=str(kw.get("runtime_host") or "hermes"),
-        )
-        return ok(data)
-
-    return _safe_call("cassette_make_prompt", run, args, **kwargs)
+@safe_tool
+def cassette_ingest_media(a: dict, **kw) -> str:
+    data = manifest.ingest_asset(
+        source_path=a.get("source_path"),
+        original_name=a.get("original_name"),
+        media_type=a.get("media_type"),
+        chat_id=a.get("chat_id"),
+        user_id=a.get("user_id"),
+        message_id=a.get("message_id"),
+        chat_type=a.get("chat_type"),
+        thread_id=a.get("thread_id"),
+        platform=a.get("platform"),
+        caption=a.get("caption"),
+        session_id=a.get("session_id"),
+        task_id=kw.get("task_id"),
+    )
+    return ok(_scrub_ingest_data(data))
 
 
-def cassette_answer_question(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        job_id = str(a.get("job_id") or "").strip()
-        response = str(a.get("response") or "").strip()
-        if job_id or response:
-            if not job_id or not response:
-                raise CassetteError("missing_required_arg", "resume mode requires both job_id and response")
-            job = jobs.load_job(job_id)
-            quality = job.get("quality") if isinstance(job.get("quality"), dict) else {}
-            if job.get("status") != "needs_user" or quality.get("completion_review_required"):
-                raise CassetteError(
-                    "invalid_transition",
-                    "cassette_answer_question can resume only a user-input-paused job; use cassette_review_completion for completion review",
-                    {"job_id": job_id, "status": job.get("status") or ""},
-                )
-            if kw.get("runtime_host") == "mcp":
-                if transport.selected_transport() == transport.TRANSPORT_BROWSER:
-                    from . import browser
+@safe_tool
+def cassette_list_assets(a: dict, **kw) -> str:
+    return ok(_scrub_list_assets(manifest.list_assets(a.get("session_id"), a.get("chat_id"), kw.get("task_id"))))
 
-                    if not browser.has_live_browser_session_threaded(job):
-                        result = transport.get_transport().resume(job, response)
-                        job = jobs.merge_persisted_runtime_fields(job)
-                        job.update(result)
-                        job["status"] = result.get("status", "failed")
-                        job["finished_at"] = jobs.now_iso()
-                        job.pop("resume_request", None)
-                        job.pop("continuation", None)
-                        jobs.save_job(job)
-                        return ok({"job": _scrub_job(job), "background": False}, job_id=job_id)
-                    job["status"] = "running"
-                    job["started_at"] = job.get("started_at") or jobs.now_iso()
-                    job["finished_at"] = None
-                    job["worker_kind"] = "thread"
-                    job["resume_request"] = {"response": response}
+
+@safe_tool
+def cassette_make_prompt(a: dict, **kw) -> str:
+    instruction = (a.get("instruction") or "").strip()
+    if not instruction:
+        raise CassetteError("missing_required_arg", "instruction is required")
+    listed = manifest.list_assets(a.get("session_id"), a.get("chat_id"), kw.get("task_id"))
+    session_manifest = listed["manifest"]
+    if a.get("requires_assets", True) and not session_manifest.get("assets"):
+        raise CassetteError("missing_critical_assets", "No media assets are available for this Cassette edit")
+    data = prompt_mod.build_cassette_prompt(
+        instruction,
+        session_manifest,
+        {
+            "output_format": a.get("output_format"),
+            "duration": a.get("duration"),
+            "style": a.get("style"),
+            "cassette_language": _normalize_cassette_language(a.get("cassette_language") or a.get("language")),
+            "constraints": a.get("constraints") or {},
+        },
+        runtime_host=str(kw.get("runtime_host") or "hermes"),
+    )
+    return ok(data)
+
+
+@safe_tool
+def cassette_answer_question(a: dict, **kw) -> str:
+    job_id = str(a.get("job_id") or "").strip()
+    response = str(a.get("response") or "").strip()
+    if job_id or response:
+        if not job_id or not response:
+            raise CassetteError("missing_required_arg", "resume mode requires both job_id and response")
+        job = jobs.load_job(job_id)
+        quality = job.get("quality") if isinstance(job.get("quality"), dict) else {}
+        if job.get("status") != "needs_user" or quality.get("completion_review_required"):
+            raise CassetteError(
+                "invalid_transition",
+                "cassette_answer_question can resume only a user-input-paused job; use cassette_review_completion for completion review",
+                {"job_id": job_id, "status": job.get("status") or ""},
+            )
+        if kw.get("runtime_host") == "mcp":
+            if transport.selected_transport() == transport.TRANSPORT_BROWSER:
+                from . import browser
+
+                if not browser.has_live_browser_session_threaded(job):
+                    result = transport.get_transport().resume(job, response)
+                    job = jobs.merge_persisted_runtime_fields(job)
+                    job.update(result)
+                    job["status"] = result.get("status", "failed")
+                    job["finished_at"] = jobs.now_iso()
+                    job.pop("resume_request", None)
+                    job.pop("continuation", None)
                     jobs.save_job(job)
-                    _gateway_job_executor().submit(
-                        _finish_background_cassette_job,
-                        job_id,
-                        "resume",
-                        response,
-                    )
-                    return ok({"job": _scrub_job(job), "background": True}, job_id=job_id)
-                job = jobs.start_worker(job_id, action="resume", response=response)
+                    return ok({"job": _scrub_job(job), "background": False}, job_id=job_id)
+                job["status"] = "running"
+                job["started_at"] = job.get("started_at") or jobs.now_iso()
+                job["finished_at"] = None
+                job["worker_kind"] = "thread"
+                job["resume_request"] = {"response": response}
+                jobs.save_job(job)
+                _gateway_job_executor().submit(
+                    _finish_background_cassette_job,
+                    job_id,
+                    "resume",
+                    response,
+                )
                 return ok({"job": _scrub_job(job), "background": True}, job_id=job_id)
-            result = transport.get_transport().resume(job, response)
-            job = jobs.merge_persisted_runtime_fields(job)
-            job.update(result)
-            job["status"] = result.get("status", "failed")
-            job["finished_at"] = jobs.now_iso()
-            job.pop("resume_request", None)
-            if job["status"] != "needs_user":
-                job.pop("continuation", None)
-            jobs.save_job(job)
-            return ok({"job": _scrub_job(job)}, job_id=job_id)
-        question = (a.get("question") or "").strip()
-        if not question:
-            raise CassetteError("missing_required_arg", "question is required")
-        context = a.get("context") or {}
-        context.update({"instruction": a.get("instruction"), "asset_count": a.get("asset_count")})
-        return ok(prompt_mod.classify_cassette_question(question, context))
+            job = jobs.start_worker(job_id, action="resume", response=response)
+            return ok({"job": _scrub_job(job), "background": True}, job_id=job_id)
+        result = transport.get_transport().resume(job, response)
+        job = jobs.merge_persisted_runtime_fields(job)
+        job.update(result)
+        job["status"] = result.get("status", "failed")
+        job["finished_at"] = jobs.now_iso()
+        job.pop("resume_request", None)
+        if job["status"] != "needs_user":
+            job.pop("continuation", None)
+        jobs.save_job(job)
+        return ok({"job": _scrub_job(job)}, job_id=job_id)
+    question = (a.get("question") or "").strip()
+    if not question:
+        raise CassetteError("missing_required_arg", "question is required")
+    context = a.get("context") or {}
+    context.update({"instruction": a.get("instruction"), "asset_count": a.get("asset_count")})
+    return ok(prompt_mod.classify_cassette_question(question, context))
 
-    return _safe_call("cassette_answer_question", run, args, **kwargs)
 
-
-def cassette_match_bgm(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        session_id = str(a.get("session_id") or kw.get("task_id") or "").strip()
-        instruction = str(a.get("instruction") or "").strip()
-        raw_queries = a.get("search_queries") or []
-        if isinstance(raw_queries, str):
-            raw_queries = [raw_queries]
-        if not session_id:
-            raise CassetteError("missing_required_arg", "session_id is required")
-        if not instruction:
-            raise CassetteError("missing_required_arg", "instruction is required")
-        if not isinstance(raw_queries, list) or not raw_queries:
-            raise CassetteError("missing_required_arg", "search_queries is required")
-        search_queries = [_sanitize_bgm_query(str(query)) for query in raw_queries]
-        search_queries = [query for query in search_queries if query]
-        if not search_queries:
-            raise CassetteError("invalid_bgm_search_query", "At least one valid Free To Use search query is required")
-        continue_after_match = a.get("continue_after_match", True)
-        continue_after_match = True if continue_after_match is None else bool(continue_after_match)
-        optimization_enabled = bool(a.get("optimization_enabled"))
-        fallback_from = str(a.get("fallback_from") or "").strip()
-        fallback_reason = str(a.get("fallback_reason") or "").strip()
-        session_hash = _debug_session_hash(session_id)
-        started = time.monotonic()
+@safe_tool
+def cassette_match_bgm(a: dict, **kw) -> str:
+    session_id = str(a.get("session_id") or kw.get("task_id") or "").strip()
+    instruction = str(a.get("instruction") or "").strip()
+    raw_queries = a.get("search_queries") or []
+    if isinstance(raw_queries, str):
+        raw_queries = [raw_queries]
+    if not session_id:
+        raise CassetteError("missing_required_arg", "session_id is required")
+    if not instruction:
+        raise CassetteError("missing_required_arg", "instruction is required")
+    if not isinstance(raw_queries, list) or not raw_queries:
+        raise CassetteError("missing_required_arg", "search_queries is required")
+    search_queries = [_sanitize_bgm_query(str(query)) for query in raw_queries]
+    search_queries = [query for query in search_queries if query]
+    if not search_queries:
+        raise CassetteError("invalid_bgm_search_query", "At least one valid Free To Use search query is required")
+    continue_after_match = a.get("continue_after_match", True)
+    continue_after_match = True if continue_after_match is None else bool(continue_after_match)
+    optimization_enabled = bool(a.get("optimization_enabled"))
+    fallback_from = str(a.get("fallback_from") or "").strip()
+    fallback_reason = str(a.get("fallback_reason") or "").strip()
+    session_hash = _debug_session_hash(session_id)
+    started = time.monotonic()
+    _log_cassette_debug_event(
+        "bgm_freetouse_search_started",
+        session_hash=session_hash,
+        search_queries=search_queries[:3],
+        continue_after_match=continue_after_match,
+        optimization_enabled=optimization_enabled,
+        fallback_from=fallback_from,
+        fallback_reason=fallback_reason,
+    )
+    language = _cassette_language_for_session(session_id)
+    try:
+        result = dict(_match_and_download_smart_bgm(session_id, instruction, search_queries))
+        if fallback_from:
+            result["fallback_from"] = fallback_from
+            if fallback_reason:
+                result["fallback_reason"] = fallback_reason
+        effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
+        if continue_after_match:
+            if optimization_enabled:
+                _save_pending_edit(
+                    session_id,
+                    effective_instruction,
+                    _gateway_asset_count(session_id),
+                    "awaiting_optimized_brief_confirmation",
+                    optimization_enabled=True,
+                )
+            else:
+                _clear_pending_edit(session_id)
+        user_message = _smart_bgm_status_message(result, continue_after_match=continue_after_match, language=language)
+        notification = _notify_smart_bgm_result(session_id, user_message)
+        data = {
+            "status": result.get("status") or "skipped",
+            "code": result.get("code") or "",
+            "search_queries": search_queries[:3],
+            "selected": {
+                "artist": result.get("artist") or "",
+                "title": result.get("title") or "",
+                "query": result.get("query") or "",
+                "source_rank": result.get("source_rank") or "",
+                "track_id": result.get("track_id") or "",
+            },
+            "asset_count": _gateway_asset_count(session_id),
+            "effective_instruction": effective_instruction,
+            "user_message": user_message,
+            "notification": notification,
+            "fallback": {
+                "from": fallback_from,
+                "reason": fallback_reason,
+            } if fallback_from else {},
+            "hermes_next_step": _bgm_next_step_guidance(
+                optimization_enabled,
+                continue_after_match=continue_after_match,
+                language=language,
+            ),
+        }
         _log_cassette_debug_event(
-            "bgm_freetouse_search_started",
+            "bgm_freetouse_search_done",
             session_hash=session_hash,
+            status=data["status"],
+            code=data["code"],
             search_queries=search_queries[:3],
-            continue_after_match=continue_after_match,
-            optimization_enabled=optimization_enabled,
+            attempted_queries=result.get("queries") or search_queries[:3],
+            zero_result_queries=result.get("zero_result_queries") or [],
+            selected=data["selected"],
+            notification_status=notification.get("status") if isinstance(notification, dict) else "",
             fallback_from=fallback_from,
             fallback_reason=fallback_reason,
+            duration_ms=int((time.monotonic() - started) * 1000),
         )
-        language = _cassette_language_for_session(session_id)
-        try:
-            result = dict(_match_and_download_smart_bgm(session_id, instruction, search_queries))
-            if fallback_from:
-                result["fallback_from"] = fallback_from
-                if fallback_reason:
-                    result["fallback_reason"] = fallback_reason
-            effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
-            if continue_after_match:
-                if optimization_enabled:
-                    _save_pending_edit(
-                        session_id,
-                        effective_instruction,
-                        _gateway_asset_count(session_id),
-                        "awaiting_optimized_brief_confirmation",
-                        optimization_enabled=True,
-                    )
-                else:
-                    _clear_pending_edit(session_id)
-            user_message = _smart_bgm_status_message(result, continue_after_match=continue_after_match, language=language)
-            notification = _notify_smart_bgm_result(session_id, user_message)
-            data = {
-                "status": result.get("status") or "skipped",
-                "code": result.get("code") or "",
-                "search_queries": search_queries[:3],
-                "selected": {
-                    "artist": result.get("artist") or "",
-                    "title": result.get("title") or "",
-                    "query": result.get("query") or "",
-                    "source_rank": result.get("source_rank") or "",
-                    "track_id": result.get("track_id") or "",
-                },
-                "asset_count": _gateway_asset_count(session_id),
-                "effective_instruction": effective_instruction,
-                "user_message": user_message,
-                "notification": notification,
-                "fallback": {
-                    "from": fallback_from,
-                    "reason": fallback_reason,
-                } if fallback_from else {},
-                "hermes_next_step": _bgm_next_step_guidance(
-                    optimization_enabled,
-                    continue_after_match=continue_after_match,
-                    language=language,
-                ),
-            }
-            _log_cassette_debug_event(
-                "bgm_freetouse_search_done",
-                session_hash=session_hash,
-                status=data["status"],
-                code=data["code"],
-                search_queries=search_queries[:3],
-                attempted_queries=result.get("queries") or search_queries[:3],
-                zero_result_queries=result.get("zero_result_queries") or [],
-                selected=data["selected"],
-                notification_status=notification.get("status") if isinstance(notification, dict) else "",
-                fallback_from=fallback_from,
-                fallback_reason=fallback_reason,
-                duration_ms=int((time.monotonic() - started) * 1000),
-            )
-            return ok(data)
-        except CassetteError as exc:
-            _log_cassette_debug_event(
-                "bgm_freetouse_search_failed",
-                session_hash=session_hash,
-                code=exc.code,
-                message=str(exc),
-                recoverable=exc.recoverable,
-                details=exc.details,
-                search_queries=search_queries[:3],
-                fallback_from=fallback_from,
-                fallback_reason=fallback_reason,
-                duration_ms=int((time.monotonic() - started) * 1000),
-            )
-            raise
-        except Exception as exc:
-            _log_cassette_debug_event(
-                "bgm_freetouse_search_failed",
-                session_hash=session_hash,
-                code="internal_error",
-                error_type=type(exc).__name__,
-                message=str(exc),
-                search_queries=search_queries[:3],
-                fallback_from=fallback_from,
-                fallback_reason=fallback_reason,
-                duration_ms=int((time.monotonic() - started) * 1000),
-            )
-            raise
-
-    return _safe_call("cassette_match_bgm", run, args, **kwargs)
-
-
-def cassette_match_exact_bgm(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        session_id = str(a.get("session_id") or kw.get("task_id") or "").strip()
-        instruction = str(a.get("instruction") or "").strip()
-        title = str(a.get("title") or a.get("songTitle") or a.get("song_title") or "").strip()
-        artist = str(a.get("artist") or a.get("singer") or "").strip()
-        title, artist = _normalize_exact_bgm_request(title, artist)
-        if not session_id:
-            raise CassetteError("missing_required_arg", "session_id is required")
-        if not instruction:
-            raise CassetteError("missing_required_arg", "instruction is required")
-        if not title:
-            raise CassetteError("missing_required_arg", "title is required")
-        continue_after_match = a.get("continue_after_match", True)
-        continue_after_match = True if continue_after_match is None else bool(continue_after_match)
-        download = bool(a.get("download", True))
-        optimization_enabled = bool(a.get("optimization_enabled"))
-        session_hash = _debug_session_hash(session_id)
-        started = time.monotonic()
+        return ok(data)
+    except CassetteError as exc:
         _log_cassette_debug_event(
-            "bgm_exact_search_started",
+            "bgm_freetouse_search_failed",
             session_hash=session_hash,
+            code=exc.code,
+            message=str(exc),
+            recoverable=exc.recoverable,
+            details=exc.details,
+            search_queries=search_queries[:3],
+            fallback_from=fallback_from,
+            fallback_reason=fallback_reason,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        raise
+    except Exception as exc:
+        _log_cassette_debug_event(
+            "bgm_freetouse_search_failed",
+            session_hash=session_hash,
+            code="internal_error",
+            error_type=type(exc).__name__,
+            message=str(exc),
+            search_queries=search_queries[:3],
+            fallback_from=fallback_from,
+            fallback_reason=fallback_reason,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        raise
+
+
+@safe_tool
+def cassette_match_exact_bgm(a: dict, **kw) -> str:
+    session_id = str(a.get("session_id") or kw.get("task_id") or "").strip()
+    instruction = str(a.get("instruction") or "").strip()
+    title = str(a.get("title") or a.get("songTitle") or a.get("song_title") or "").strip()
+    artist = str(a.get("artist") or a.get("singer") or "").strip()
+    title, artist = _normalize_exact_bgm_request(title, artist)
+    if not session_id:
+        raise CassetteError("missing_required_arg", "session_id is required")
+    if not instruction:
+        raise CassetteError("missing_required_arg", "instruction is required")
+    if not title:
+        raise CassetteError("missing_required_arg", "title is required")
+    continue_after_match = a.get("continue_after_match", True)
+    continue_after_match = True if continue_after_match is None else bool(continue_after_match)
+    download = bool(a.get("download", True))
+    optimization_enabled = bool(a.get("optimization_enabled"))
+    session_hash = _debug_session_hash(session_id)
+    started = time.monotonic()
+    _log_cassette_debug_event(
+        "bgm_exact_search_started",
+        session_hash=session_hash,
+        title=title,
+        artist=artist,
+        download=download,
+        continue_after_match=continue_after_match,
+        optimization_enabled=optimization_enabled,
+    )
+    language = _cassette_language_for_session(session_id)
+    try:
+        result = exact_bgm.match_exact_bgm(
+            session_id=session_id,
+            instruction=instruction,
             title=title,
             artist=artist,
             download=download,
-            continue_after_match=continue_after_match,
-            optimization_enabled=optimization_enabled,
         )
-        language = _cassette_language_for_session(session_id)
-        try:
-            result = exact_bgm.match_exact_bgm(
-                session_id=session_id,
-                instruction=instruction,
-                title=title,
-                artist=artist,
-                download=download,
-            )
-            effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
-            if continue_after_match and download and result.get("status") == "downloaded":
-                if optimization_enabled:
-                    _save_pending_edit(
-                        session_id,
-                        effective_instruction,
-                        _gateway_asset_count(session_id),
-                        "awaiting_optimized_brief_confirmation",
-                        optimization_enabled=True,
-                    )
-                else:
-                    _clear_pending_edit(session_id)
-            user_message = _smart_bgm_status_message(result, continue_after_match=continue_after_match, language=language)
-            notification = _notify_smart_bgm_result(session_id, user_message) if download else {"status": "skipped", "reason": "download_false"}
-            data = {
-                "status": result.get("status") or "matched",
-                "provider": result.get("provider") or "musicsquare_exact",
-                "selected": {
-                    "artist": result.get("artist") or "",
-                    "title": result.get("title") or "",
-                    "query": result.get("query") or "",
-                    "source": result.get("source") or "",
-                    "track_id": result.get("track_id") or "",
-                },
-                "asset_count": _gateway_asset_count(session_id),
-                "effective_instruction": effective_instruction,
-                "user_message": user_message,
-                "notification": notification,
-                "metadata_path": result.get("metadata_path") or "",
-                "attempts": result.get("attempts") or [],
-                "hermes_next_step": _bgm_next_step_guidance(
-                    optimization_enabled,
-                    continue_after_match=continue_after_match,
-                    language=language,
-                ),
-            }
-            if not download:
-                data["eligibleCandidates"] = result.get("eligibleCandidates") or []
-                data["candidateCount"] = result.get("candidateCount") or 0
-            _log_cassette_debug_event(
-                "bgm_exact_search_done",
-                session_hash=session_hash,
-                status=data["status"],
-                provider=data["provider"],
-                title=title,
-                artist=artist,
-                selected=data["selected"],
-                candidate_count=result.get("candidateCount") or 0,
-                attempts=_summarize_exact_bgm_attempts(result.get("attempts") or []),
-                notification_status=notification.get("status") if isinstance(notification, dict) else "",
-                metadata_saved=bool(result.get("metadata_path")),
-                download=download,
-                duration_ms=int((time.monotonic() - started) * 1000),
-            )
-            return ok(data)
-        except CassetteError as exc:
-            _log_cassette_debug_event(
-                "bgm_exact_search_failed",
-                session_hash=session_hash,
-                code=exc.code,
-                message=str(exc),
-                recoverable=exc.recoverable,
-                title=title,
-                artist=artist,
-                attempts=_summarize_exact_bgm_attempts(exc.details.get("attempts") or []),
-                details=exc.details,
-                download=download,
-                duration_ms=int((time.monotonic() - started) * 1000),
-            )
-            raise
-        except Exception as exc:
-            _log_cassette_debug_event(
-                "bgm_exact_search_failed",
-                session_hash=session_hash,
-                code="internal_error",
-                error_type=type(exc).__name__,
-                message=str(exc),
-                title=title,
-                artist=artist,
-                download=download,
-                duration_ms=int((time.monotonic() - started) * 1000),
-            )
-            raise
-
-    return _safe_call("cassette_match_exact_bgm", run, args, **kwargs)
+        effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
+        if continue_after_match and download and result.get("status") == "downloaded":
+            if optimization_enabled:
+                _save_pending_edit(
+                    session_id,
+                    effective_instruction,
+                    _gateway_asset_count(session_id),
+                    "awaiting_optimized_brief_confirmation",
+                    optimization_enabled=True,
+                )
+            else:
+                _clear_pending_edit(session_id)
+        user_message = _smart_bgm_status_message(result, continue_after_match=continue_after_match, language=language)
+        notification = _notify_smart_bgm_result(session_id, user_message) if download else {"status": "skipped", "reason": "download_false"}
+        data = {
+            "status": result.get("status") or "matched",
+            "provider": result.get("provider") or "musicsquare_exact",
+            "selected": {
+                "artist": result.get("artist") or "",
+                "title": result.get("title") or "",
+                "query": result.get("query") or "",
+                "source": result.get("source") or "",
+                "track_id": result.get("track_id") or "",
+            },
+            "asset_count": _gateway_asset_count(session_id),
+            "effective_instruction": effective_instruction,
+            "user_message": user_message,
+            "notification": notification,
+            "metadata_path": result.get("metadata_path") or "",
+            "attempts": result.get("attempts") or [],
+            "hermes_next_step": _bgm_next_step_guidance(
+                optimization_enabled,
+                continue_after_match=continue_after_match,
+                language=language,
+            ),
+        }
+        if not download:
+            data["eligibleCandidates"] = result.get("eligibleCandidates") or []
+            data["candidateCount"] = result.get("candidateCount") or 0
+        _log_cassette_debug_event(
+            "bgm_exact_search_done",
+            session_hash=session_hash,
+            status=data["status"],
+            provider=data["provider"],
+            title=title,
+            artist=artist,
+            selected=data["selected"],
+            candidate_count=result.get("candidateCount") or 0,
+            attempts=_summarize_exact_bgm_attempts(result.get("attempts") or []),
+            notification_status=notification.get("status") if isinstance(notification, dict) else "",
+            metadata_saved=bool(result.get("metadata_path")),
+            download=download,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return ok(data)
+    except CassetteError as exc:
+        _log_cassette_debug_event(
+            "bgm_exact_search_failed",
+            session_hash=session_hash,
+            code=exc.code,
+            message=str(exc),
+            recoverable=exc.recoverable,
+            title=title,
+            artist=artist,
+            attempts=_summarize_exact_bgm_attempts(exc.details.get("attempts") or []),
+            details=exc.details,
+            download=download,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        raise
+    except Exception as exc:
+        _log_cassette_debug_event(
+            "bgm_exact_search_failed",
+            session_hash=session_hash,
+            code="internal_error",
+            error_type=type(exc).__name__,
+            message=str(exc),
+            title=title,
+            artist=artist,
+            download=download,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        raise
 
 
 def _normalize_exact_bgm_request(title: str, artist: str = "") -> tuple[str, str]:
@@ -481,57 +478,55 @@ def _strip_exact_bgm_wrappers(value: str) -> str:
     return text
 
 
-def jamendo_music_matcher(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        user_query = str(
-            a.get("userQuery")
-            or a.get("user_query")
-            or a.get("query")
-            or ""
-        ).strip()
-        if not user_query:
-            raise CassetteError("missing_required_arg", "userQuery is required")
-        planner = jamendo.HermesJamendoPlanner()
-        plan_payload = (
-            a.get("searchPlan")
-            or a.get("search_plan")
-            or a.get("hermesJson")
-            or a.get("hermes_json")
+@safe_tool
+def jamendo_music_matcher(a: dict, **kw) -> str:
+    user_query = str(
+        a.get("userQuery")
+        or a.get("user_query")
+        or a.get("query")
+        or ""
+    ).strip()
+    if not user_query:
+        raise CassetteError("missing_required_arg", "userQuery is required")
+    planner = jamendo.HermesJamendoPlanner()
+    plan_payload = (
+        a.get("searchPlan")
+        or a.get("search_plan")
+        or a.get("hermesJson")
+        or a.get("hermes_json")
+    )
+    repair_payload = a.get("repairJson") or a.get("repair_json")
+    if plan_payload is None:
+        plan = jamendo.build_search_plan_from_form(
+            user_query=user_query,
+            search_terms=_string_list_arg(a.get("searchTerms") or a.get("search_terms") or a.get("terms")),
+            fuzzy_tags=_string_list_arg(a.get("fuzzyTags") or a.get("fuzzy_tags")),
+            exclude_terms=_string_list_arg(a.get("excludeTerms") or a.get("exclude_terms")),
+            vocalinstrumental=a.get("vocalInstrumental") or a.get("vocalinstrumental"),
+            limit=_optional_int_arg(a.get("limit"), "limit"),
         )
-        repair_payload = a.get("repairJson") or a.get("repair_json")
-        if plan_payload is None:
-            plan = jamendo.build_search_plan_from_form(
-                user_query=user_query,
-                search_terms=_string_list_arg(a.get("searchTerms") or a.get("search_terms") or a.get("terms")),
-                fuzzy_tags=_string_list_arg(a.get("fuzzyTags") or a.get("fuzzy_tags")),
-                exclude_terms=_string_list_arg(a.get("excludeTerms") or a.get("exclude_terms")),
-                vocalinstrumental=a.get("vocalInstrumental") or a.get("vocalinstrumental"),
-                limit=_optional_int_arg(a.get("limit"), "limit"),
-            )
-        else:
-            plan = planner.build_search_plan(user_query, plan_payload, repair_payload)
-        download = bool(a.get("download", True))
-        seed = _optional_int_arg(a.get("seed"), "seed")
-        limit_override = _optional_int_arg(a.get("limitOverride", a.get("limit_override")), "limitOverride")
-        output_dir_value = a.get("outputDir") or a.get("output_dir")
-        output_dir = Path(str(output_dir_value)).expanduser() if output_dir_value else None
-        try:
-            result = jamendo.match_jamendo_music(
-                user_query=user_query,
-                search_plan=plan,
-                download=download,
-                seed=seed,
-                limit_override=limit_override,
-                output_dir=output_dir,
-                session_id=str(a.get("session_id") or kw.get("task_id") or "").strip() or None,
-            )
-        except CassetteError as exc:
-            if _jamendo_error_disables_provider(exc):
-                _disable_jamendo_bgm(exc.code)
-            raise
-        return ok(result)
-
-    return _safe_call("jamendo_music_matcher", run, args, **kwargs)
+    else:
+        plan = planner.build_search_plan(user_query, plan_payload, repair_payload)
+    download = bool(a.get("download", True))
+    seed = _optional_int_arg(a.get("seed"), "seed")
+    limit_override = _optional_int_arg(a.get("limitOverride", a.get("limit_override")), "limitOverride")
+    output_dir_value = a.get("outputDir") or a.get("output_dir")
+    output_dir = Path(str(output_dir_value)).expanduser() if output_dir_value else None
+    try:
+        result = jamendo.match_jamendo_music(
+            user_query=user_query,
+            search_plan=plan,
+            download=download,
+            seed=seed,
+            limit_override=limit_override,
+            output_dir=output_dir,
+            session_id=str(a.get("session_id") or kw.get("task_id") or "").strip() or None,
+        )
+    except CassetteError as exc:
+        if _jamendo_error_disables_provider(exc):
+            _disable_jamendo_bgm(exc.code)
+        raise
+    return ok(result)
 
 
 def _optional_int_arg(value: Any, name: str) -> int | None:
@@ -615,10 +610,6 @@ def _asset_paths_for_session(session_id: str | None, chat_id: str | None, task_i
     ], dict(session_manifest.get("delivery") or {})
 
 
-def _normalize_cassette_model(value: str | None) -> str:
-    return (value or "").strip()
-
-
 def _normalize_thinking_level(value: str | None, text: str = "") -> str:
     explicit = (value or "").strip().lower()
     if explicit in {"high", "deep", "高", "高思考", "深度", "重度"}:
@@ -648,7 +639,7 @@ def _cassette_model_selection(args: dict, delivery: dict | None = None) -> dict:
         str(args.get(key) or "")
         for key in ("chat_message", "cassette_message", "instruction", "prompt")
     )
-    model = _normalize_cassette_model(args.get("cassette_model") or args.get("model"))
+    model = (args.get("cassette_model") or args.get("model") or "").strip()
     thinking_level = _normalize_thinking_level(args.get("thinking_level"), text)
     return {
         "model": model,
@@ -762,81 +753,79 @@ def _start_inprocess_cassette_job(job: dict, *, runtime_host: str = "gateway") -
     return job
 
 
-def cassette_run_job(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        prompt_text = (a.get("prompt") or "").strip()
-        chat_message = (a.get("chat_message") or a.get("cassette_message") or "").strip()
-        if not prompt_text and chat_message:
-            prompt_text = chat_message
-        if not prompt_text:
-            raise CassetteError("missing_required_arg", "prompt is required")
-        raw_session_id = str(a.get("session_id") or kw.get("task_id") or "").strip()
-        session_hash, asset_paths, delivery = _asset_paths_for_session(a.get("session_id"), a.get("chat_id"), kw.get("task_id"))
-        if raw_session_id:
-            active_job = _latest_active_job_for_session(raw_session_id)
-            if active_job:
-                raise CassetteError(
-                    "cassette_job_already_running",
-                    _fixed_flow_busy_message(_cassette_language_for_run(a, delivery)),
-                    {"job_id": active_job.get("job_id") or "", "status": active_job.get("status") or ""},
-                    True,
-                )
-        job = jobs.create_job(
-            session_hash=session_hash,
-            prompt=prompt_text,
-            instruction=a.get("instruction"),
-            asset_paths=asset_paths,
-            options={
-                "chat_message": chat_message,
-                "url": a.get("url"),
-                "timeout_sec": a.get("timeout_sec"),
-                "selectors": a.get("selectors") or {},
-                "delivery": delivery,
-                "cassette_session_id": a.get("session_id"),
-                "model_selection": _cassette_model_selection(a, delivery),
-                "cassette_language": _cassette_language_for_run(a, delivery),
+@safe_tool
+def cassette_run_job(a: dict, **kw) -> str:
+    prompt_text = (a.get("prompt") or "").strip()
+    chat_message = (a.get("chat_message") or a.get("cassette_message") or "").strip()
+    if not prompt_text and chat_message:
+        prompt_text = chat_message
+    if not prompt_text:
+        raise CassetteError("missing_required_arg", "prompt is required")
+    raw_session_id = str(a.get("session_id") or kw.get("task_id") or "").strip()
+    session_hash, asset_paths, delivery = _asset_paths_for_session(a.get("session_id"), a.get("chat_id"), kw.get("task_id"))
+    if raw_session_id:
+        active_job = _latest_active_job_for_session(raw_session_id)
+        if active_job:
+            raise CassetteError(
+                "cassette_job_already_running",
+                _fixed_flow_busy_message(_cassette_language_for_run(a, delivery)),
+                {"job_id": active_job.get("job_id") or "", "status": active_job.get("status") or ""},
+                True,
+            )
+    job = jobs.create_job(
+        session_hash=session_hash,
+        prompt=prompt_text,
+        instruction=a.get("instruction"),
+        asset_paths=asset_paths,
+        options={
+            "chat_message": chat_message,
+            "url": a.get("url"),
+            "timeout_sec": a.get("timeout_sec"),
+            "selectors": a.get("selectors") or {},
+            "delivery": delivery,
+            "cassette_session_id": a.get("session_id"),
+            "model_selection": _cassette_model_selection(a, delivery),
+            "cassette_language": _cassette_language_for_run(a, delivery),
+        },
+    )
+    if _should_run_gateway_job_in_background(a, delivery):
+        job = _start_inprocess_cassette_job(job)
+        scrubbed = _scrub_job(job)
+        return ok(
+            {
+                "job": scrubbed,
+                "background": True,
+                "hermes_next_step": _gateway_background_next_step(),
             },
+            job_id=job["job_id"],
         )
-        if _should_run_gateway_job_in_background(a, delivery):
-            job = _start_inprocess_cassette_job(job)
-            scrubbed = _scrub_job(job)
-            return ok(
-                {
-                    "job": scrubbed,
-                    "background": True,
-                    "hermes_next_step": _gateway_background_next_step(),
-                },
-                job_id=job["job_id"],
-            )
-        if (
-            kw.get("runtime_host") == "mcp"
-            and a.get("wait", False) is False
-            and transport.selected_transport() == transport.TRANSPORT_BROWSER
-        ):
-            job = _start_inprocess_cassette_job(job, runtime_host="mcp")
-            return ok(
-                {"job": _scrub_job(job), "background": True},
-                job_id=job["job_id"],
-            )
-        if a.get("wait", True) is False:
-            job = jobs.start_worker(job["job_id"])
-            scrubbed = _scrub_job(job)
-            return ok({"job": scrubbed}, job_id=job["job_id"])
+    if (
+        kw.get("runtime_host") == "mcp"
+        and a.get("wait", False) is False
+        and transport.selected_transport() == transport.TRANSPORT_BROWSER
+    ):
+        job = _start_inprocess_cassette_job(job, runtime_host="mcp")
+        return ok(
+            {"job": _scrub_job(job), "background": True},
+            job_id=job["job_id"],
+        )
+    if a.get("wait", True) is False:
+        job = jobs.start_worker(job["job_id"])
+        scrubbed = _scrub_job(job)
+        return ok({"job": scrubbed}, job_id=job["job_id"])
 
-        job["status"] = "running"
-        job["started_at"] = job.get("started_at") or jobs.now_iso()
-        jobs.save_job(job)
-        result = transport.get_transport().run_job(job)
-        job = jobs.merge_persisted_runtime_fields(job)
-        job.update(result)
-        job["status"] = result.get("status", "failed")
-        job["finished_at"] = jobs.now_iso()
-        jobs.save_job(job)
-        job["notification"] = notifier.notify_terminal_job(job)
-        jobs.save_job(job)
-        return ok({"job": _scrub_job(job)}, job_id=job["job_id"])
-
-    return _safe_call("cassette_run_job", run, args, **kwargs)
+    job["status"] = "running"
+    job["started_at"] = job.get("started_at") or jobs.now_iso()
+    jobs.save_job(job)
+    result = transport.get_transport().run_job(job)
+    job = jobs.merge_persisted_runtime_fields(job)
+    job.update(result)
+    job["status"] = result.get("status", "failed")
+    job["finished_at"] = jobs.now_iso()
+    jobs.save_job(job)
+    job["notification"] = notifier.notify_terminal_job(job)
+    jobs.save_job(job)
+    return ok({"job": _scrub_job(job)}, job_id=job["job_id"])
 
 
 def _scrub_job(job: dict) -> dict:
@@ -926,86 +915,80 @@ def _job_report(job: dict) -> dict:
     return report
 
 
-def cassette_job_status(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        if a.get("job_id"):
-            job = jobs.load_job(a["job_id"])
-            data = {"job": _scrub_job(job)}
-            if _is_gateway_background_job(job) and _is_active_job(job):
-                data["background"] = True
-                data["hermes_next_step"] = _gateway_background_next_step()
-            return ok(data, job_id=a["job_id"])
-        sess_hash = None
-        if a.get("session_id"):
-            sess_hash = manifest.resolve_session_hash(a.get("session_id"), None, kw.get("task_id"))
-        return ok({"jobs": jobs.list_jobs(sess_hash, int(a.get("limit") or 10))})
-
-    return _safe_call("cassette_job_status", run, args, **kwargs)
+@safe_tool
+def cassette_job_status(a: dict, **kw) -> str:
+    if a.get("job_id"):
+        job = jobs.load_job(a["job_id"])
+        data = {"job": _scrub_job(job)}
+        if _is_gateway_background_job(job) and _is_active_job(job):
+            data["background"] = True
+            data["hermes_next_step"] = _gateway_background_next_step()
+        return ok(data, job_id=a["job_id"])
+    sess_hash = None
+    if a.get("session_id"):
+        sess_hash = manifest.resolve_session_hash(a.get("session_id"), None, kw.get("task_id"))
+    return ok({"jobs": jobs.list_jobs(sess_hash, int(a.get("limit") or 10))})
 
 
-def cassette_review_completion(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        del kw
-        job_id = str(a.get("job_id") or "").strip()
-        if not job_id:
-            raise CassetteError("missing_required_arg", "job_id is required")
-        decision = str(a.get("decision") or "").strip().lower()
-        if decision not in {"export", "continue", "needs_user", "failed"}:
-            raise CassetteError("missing_required_arg", "decision must be one of export, continue, needs_user, or failed")
-        reason = redact_for_log(str(a.get("reason") or "").strip())
-        summary = redact_for_log(str(a.get("summary") or "").strip())
-        if not reason:
-            raise CassetteError("missing_required_arg", "reason is required")
-        job = jobs.load_job(job_id)
-        review = {"decision": decision, "reason": reason, "summary": summary}
-        if decision == "export":
-            result = transport.get_transport().export(job, review)
-            job = jobs.merge_persisted_runtime_fields(job)
-            job.update(result)
-            job["status"] = result.get("status", "failed")
-            job["finished_at"] = jobs.now_iso()
-            jobs.save_job(job)
-            job["notification"] = notifier.notify_terminal_job(job)
-            jobs.save_job(job)
-            return ok({"job": _scrub_job(job), "completion_review": review}, job_id=job_id)
-
-        questions = list(job.get("questions") or [])
-        errors = list(job.get("errors") or [])
-        quality = dict(job.get("quality") or {})
-        quality["completion_review"] = review
-        quality["completion_source"] = "hermes_completion_review"
-        quality["progress_summary"] = summary or reason
-        if decision == "failed":
-            errors.append({
-                "code": "hermes_completion_review_failed",
-                "message": "Hermes judged that Cassette did not complete the edit.",
-                "details": {"reason": reason},
-            })
-            job.update({"status": "failed", "errors": errors, "quality": quality, "finished_at": jobs.now_iso()})
-        else:
-            questions.append({
-                "question": summary or reason,
-                "requires_user": decision == "needs_user",
-                "reason": f"hermes_completion_review_{decision}",
-                "answer": reason,
-            })
-            job.update({"status": "needs_user", "questions": questions, "quality": quality, "finished_at": jobs.now_iso()})
+@safe_tool
+def cassette_review_completion(a: dict, **kw) -> str:
+    del kw
+    job_id = str(a.get("job_id") or "").strip()
+    if not job_id:
+        raise CassetteError("missing_required_arg", "job_id is required")
+    decision = str(a.get("decision") or "").strip().lower()
+    if decision not in {"export", "continue", "needs_user", "failed"}:
+        raise CassetteError("missing_required_arg", "decision must be one of export, continue, needs_user, or failed")
+    reason = redact_for_log(str(a.get("reason") or "").strip())
+    summary = redact_for_log(str(a.get("summary") or "").strip())
+    if not reason:
+        raise CassetteError("missing_required_arg", "reason is required")
+    job = jobs.load_job(job_id)
+    review = {"decision": decision, "reason": reason, "summary": summary}
+    if decision == "export":
+        result = transport.get_transport().export(job, review)
+        job = jobs.merge_persisted_runtime_fields(job)
+        job.update(result)
+        job["status"] = result.get("status", "failed")
+        job["finished_at"] = jobs.now_iso()
         jobs.save_job(job)
         job["notification"] = notifier.notify_terminal_job(job)
         jobs.save_job(job)
         return ok({"job": _scrub_job(job), "completion_review": review}, job_id=job_id)
 
-    return _safe_call("cassette_review_completion", run, args, **kwargs)
+    questions = list(job.get("questions") or [])
+    errors = list(job.get("errors") or [])
+    quality = dict(job.get("quality") or {})
+    quality["completion_review"] = review
+    quality["completion_source"] = "hermes_completion_review"
+    quality["progress_summary"] = summary or reason
+    if decision == "failed":
+        errors.append({
+            "code": "hermes_completion_review_failed",
+            "message": "Hermes judged that Cassette did not complete the edit.",
+            "details": {"reason": reason},
+        })
+        job.update({"status": "failed", "errors": errors, "quality": quality, "finished_at": jobs.now_iso()})
+    else:
+        questions.append({
+            "question": summary or reason,
+            "requires_user": decision == "needs_user",
+            "reason": f"hermes_completion_review_{decision}",
+            "answer": reason,
+        })
+        job.update({"status": "needs_user", "questions": questions, "quality": quality, "finished_at": jobs.now_iso()})
+    jobs.save_job(job)
+    job["notification"] = notifier.notify_terminal_job(job)
+    jobs.save_job(job)
+    return ok({"job": _scrub_job(job), "completion_review": review}, job_id=job_id)
 
 
-def cassette_cancel_job(args: dict, **kwargs) -> str:
-    def run(a: dict, **kw) -> str:
-        if not a.get("job_id"):
-            raise CassetteError("missing_required_arg", "job_id is required")
-        job = jobs.request_cancel(a["job_id"])
-        return ok({"job_id": job["job_id"], "status": job["status"]}, job_id=job["job_id"])
-
-    return _safe_call("cassette_cancel_job", run, args, **kwargs)
+@safe_tool
+def cassette_cancel_job(a: dict, **kw) -> str:
+    if not a.get("job_id"):
+        raise CassetteError("missing_required_arg", "job_id is required")
+    job = jobs.request_cancel(a["job_id"])
+    return ok({"job_id": job["job_id"], "status": job["status"]}, job_id=job["job_id"])
 
 
 def check_playwright() -> bool:
@@ -1125,24 +1108,7 @@ def _validate_qq_attachment_url(url: str) -> None:
 
 
 def _qq_media_headers(gateway: Any, event: Any) -> dict[str, str]:
-    source = getattr(event, "source", None)
-    adapter = None
-    adapters = getattr(gateway, "adapters", None) if gateway is not None else None
-    if isinstance(adapters, dict) and source is not None:
-        platform = getattr(source, "platform", None)
-        try:
-            adapter = adapters.get(platform)
-        except TypeError:
-            adapter = None
-        if adapter is None:
-            platform_value = _platform_value(source)
-            for key, candidate in adapters.items():
-                key_value = str(getattr(key, "value", key))
-                candidate_value = str(getattr(getattr(candidate, "platform", None), "value", getattr(candidate, "platform", "")))
-                if platform_value in {key_value, candidate_value}:
-                    adapter = candidate
-                    break
-
+    adapter = _gateway_adapter(gateway, getattr(event, "source", None), fallback_to_default=False)
     headers = {"User-Agent": "Hermes-Cassette/1.0"}
     header_getter = getattr(adapter, "_qq_media_headers", None)
     if callable(header_getter):
@@ -1506,7 +1472,7 @@ def _gateway_assets(session_id: str) -> list[dict]:
     return [asset for asset in assets if asset.get("exists", True)]
 
 
-def _gateway_adapter(gateway: Any, source: Any) -> Any:
+def _gateway_adapter(gateway: Any, source: Any, *, fallback_to_default: bool = True) -> Any:
     adapters = getattr(gateway, "adapters", None) if gateway is not None else None
     if isinstance(adapters, dict) and source is not None:
         platform = getattr(source, "platform", None)
@@ -1522,7 +1488,7 @@ def _gateway_adapter(gateway: Any, source: Any) -> Any:
             candidate_value = str(getattr(getattr(candidate, "platform", None), "value", getattr(candidate, "platform", "")))
             if platform_value in {key_value, candidate_value}:
                 return candidate
-    return getattr(gateway, "adapter", None)
+    return getattr(gateway, "adapter", None) if fallback_to_default else None
 
 
 def _send_gateway_fixed_reply(gateway: Any, event: Any, text: str) -> bool:
@@ -1859,11 +1825,6 @@ def _fixed_asset_status_message(session_id: str, language: str = "zh") -> str:
         message += f" 已保存：{detail}。"
     message += " 如果你预期数量更多，请重新发送缺失素材，或稍等上传完成再检查。"
     return message
-
-
-def _looks_like_edit_instruction(text: str) -> bool:
-    """Positive edit-intent classification is delegated to Hermes."""
-    return False
 
 
 def _obviously_not_edit_instruction(text: str) -> bool:
@@ -3934,11 +3895,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                 "Do not emit MEDIA tags or guess local export paths; cassette_run_job notification handles the stored gateway delivery target and reports any delivery failure.]"
             )
             return {"action": "rewrite", "text": text}
-        if not _looks_like_edit_instruction(user_text):
-            if _obviously_not_edit_instruction(user_text):
-                return None
-            return _rewrite_semantic_edit_instruction_judgment(session_id, user_text, asset_count, cassette_language)
-        return _start_gateway_edit_instruction(session_id, user_text, asset_count, gateway, event, language=cassette_language)
+        if _obviously_not_edit_instruction(user_text):
+            return None
+        return _rewrite_semantic_edit_instruction_judgment(session_id, user_text, asset_count, cassette_language)
 
     ingested: list[dict[str, Any]] = []
     failures: list[str] = list(raw_media_failures)
@@ -4055,7 +4014,7 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             "reply_sent": reply_sent,
             **({"warnings": sorted(set(failures))} if failures else {}),
         }
-    if forced_edit is None and forced_refine is None and not _looks_like_edit_instruction(edit_text):
+    if forced_edit is None and forced_refine is None:
         total_count = _gateway_asset_count(session_id)
         if not _obviously_not_edit_instruction(edit_text):
             result = _rewrite_semantic_edit_instruction_judgment(session_id, edit_text, total_count, cassette_language)
