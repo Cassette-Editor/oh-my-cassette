@@ -33,7 +33,9 @@ from cassette.errors import CassetteError  # noqa: E402
 # Build it with web_demo/build_frontend.sh (or `npm run build` in web_demo/frontend).
 STATIC_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 _ACTIVE_JOB_STATUSES = {"queued", "running", "cancel_requested"}
-_LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=int(os.getenv("OMC_WEB_LLM_WORKERS", "4")), thread_name_prefix="omc-web-llm")
+_LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=int(os.getenv("OMC_WEB_LLM_WORKERS", "4")), thread_name_prefix="omc-web-llm"
+)
 
 app = FastAPI(title="Oh My Cassette Web Demo")
 # Mount only when the frontend has been built so the module still imports
@@ -152,7 +154,9 @@ class _WebAdapter:
     def send(self, chat_id: str, text: str, metadata: dict | None = None) -> dict:
         del metadata
         event = session_store.add_event(str(chat_id), role="assistant", text=text, kind="message")
-        logging_utils.log_event("web_outbox_send", session_id=str(chat_id), event_id=event.get("id"), text_len=len(text or ""))
+        logging_utils.log_event(
+            "web_outbox_send", session_id=str(chat_id), event_id=event.get("id"), text_len=len(text or "")
+        )
         return {"success": True, "message_id": str(event["id"])}
 
 
@@ -160,7 +164,9 @@ def _web_gateway() -> SimpleNamespace:
     return SimpleNamespace(_is_user_authorized=lambda _event: True, adapters={"web": _WebAdapter()})
 
 
-def _make_event(session_id: str, *, text: str = "", media_paths: list[str] | None = None, media_types: list[str] | None = None) -> SimpleNamespace:
+def _make_event(
+    session_id: str, *, text: str = "", media_paths: list[str] | None = None, media_types: list[str] | None = None
+) -> SimpleNamespace:
     return SimpleNamespace(
         source=_public_source(session_id),
         media_urls=media_paths or [],
@@ -199,7 +205,9 @@ def _latest_assistant_message_after(session_id: str, after_event_id: int) -> str
     return ""
 
 
-def _bridge_fixed_reply_to_llm_history(session_id: str, user_text: str, user_event: dict[str, Any], result: dict[str, Any]) -> None:
+def _bridge_fixed_reply_to_llm_history(
+    session_id: str, user_text: str, user_event: dict[str, Any], result: dict[str, Any]
+) -> None:
     reason = str((result or {}).get("reason") or "")
     if reason not in _LLM_BRIDGED_SKIP_REASONS:
         return
@@ -207,10 +215,12 @@ def _bridge_fixed_reply_to_llm_history(session_id: str, user_text: str, user_eve
     if not assistant_text:
         return
     history = session_store.get_llm_messages(session_id)
-    history.extend([
-        {"role": "user", "content": user_text},
-        {"role": "assistant", "content": assistant_text},
-    ])
+    history.extend(
+        [
+            {"role": "user", "content": user_text},
+            {"role": "assistant", "content": assistant_text},
+        ]
+    )
     session_store.set_llm_messages(session_id, history)
     logging_utils.log_event("web_llm_history_bridged", session_id=session_id, reason=reason)
 
@@ -283,10 +293,12 @@ def _job_download_urls(job: dict, session_id: str) -> list[dict[str, str]]:
         if not local_path:
             continue
         path = _safe_asset_path(local_path)
-        outputs.append({
-            "filename": path.name,
-            "url": f"/api/jobs/{quote(str(job.get('job_id') or ''))}/outputs/{quote(path.name)}?session_id={quote(session_id)}",
-        })
+        outputs.append(
+            {
+                "filename": path.name,
+                "url": f"/api/jobs/{quote(str(job.get('job_id') or ''))}/outputs/{quote(path.name)}?session_id={quote(session_id)}",
+            }
+        )
     return outputs
 
 
@@ -316,8 +328,18 @@ def _public_job_log(job: dict) -> str:
     add("prompt_redacted", job.get("prompt_redacted"))
     add("instruction", job.get("instruction"))
     add("chat_message", job.get("chat_message"))
-    add("model_selection", json.dumps(job.get("model_selection"), ensure_ascii=False, sort_keys=True) if job.get("model_selection") else "")
-    add("language_selection", json.dumps(job.get("language_selection"), ensure_ascii=False, sort_keys=True) if job.get("language_selection") else "")
+    add(
+        "model_selection",
+        json.dumps(job.get("model_selection"), ensure_ascii=False, sort_keys=True)
+        if job.get("model_selection")
+        else "",
+    )
+    add(
+        "language_selection",
+        json.dumps(job.get("language_selection"), ensure_ascii=False, sort_keys=True)
+        if job.get("language_selection")
+        else "",
+    )
     if job.get("stage_timings"):
         lines.append("\n[stage_timings]")
         lines.append(json.dumps(job.get("stage_timings"), ensure_ascii=False, indent=2, sort_keys=True))
@@ -342,7 +364,9 @@ def _public_job_log(job: dict) -> str:
                 lines.append(json.dumps(event, ensure_ascii=False, sort_keys=True))
     if job.get("progress_snapshot_notifications"):
         lines.append("\n[progress_snapshot_notifications]")
-        lines.append(json.dumps(job.get("progress_snapshot_notifications"), ensure_ascii=False, indent=2, sort_keys=True))
+        lines.append(
+            json.dumps(job.get("progress_snapshot_notifications"), ensure_ascii=False, indent=2, sort_keys=True)
+        )
     if job.get("outputs"):
         lines.append("\n[outputs]")
         for output in job.get("outputs") or []:
@@ -426,16 +450,25 @@ def _add_web_event(session_id: str, *, role: str, text: str, kind: str = "messag
     try:
         session_store.add_event(session_id, role=role, text=text, kind=kind, **kwargs)
     except Exception as exc:
-        logging_utils.log_event("web_event_write_failed", session_id=session_id, kind=kind, error_type=type(exc).__name__)
+        logging_utils.log_event(
+            "web_event_write_failed", session_id=session_id, kind=kind, error_type=type(exc).__name__
+        )
 
 
 def _run_llm_background(session_id: str, prompt_text: str, api_key_override: str, flow_token: str) -> None:
-    logging_utils.log_event("llm_background_start", session_id=session_id, prompt_len=len(prompt_text or ""), has_api_key_override=bool(api_key_override))
+    logging_utils.log_event(
+        "llm_background_start",
+        session_id=session_id,
+        prompt_len=len(prompt_text or ""),
+        has_api_key_override=bool(api_key_override),
+    )
     try:
         if session_store.is_flow_cancelled(session_id, flow_token):
             logging_utils.log_event("llm_background_cancelled", session_id=session_id, phase="before_start")
             return
-        result = deepseek_client.run_turn(session_id, prompt_text, api_key_override=api_key_override, flow_token=flow_token)
+        result = deepseek_client.run_turn(
+            session_id, prompt_text, api_key_override=api_key_override, flow_token=flow_token
+        )
         if session_store.is_flow_cancelled(session_id, flow_token):
             logging_utils.log_event("llm_background_cancelled", session_id=session_id, phase="after_run")
             return
@@ -448,13 +481,19 @@ def _run_llm_background(session_id: str, prompt_text: str, api_key_override: str
     except deepseek_client.DeepSeekError as exc:
         if not session_store.is_flow_cancelled(session_id, flow_token):
             _add_web_event(session_id, role="assistant", text=_llm_error_message(session_id, str(exc)), kind="error")
-        logging_utils.log_event("llm_background_error", session_id=session_id, error_type=type(exc).__name__, error=str(exc))
+        logging_utils.log_event(
+            "llm_background_error", session_id=session_id, error_type=type(exc).__name__, error=str(exc)
+        )
     except Exception as exc:
         if not session_store.is_flow_cancelled(session_id, flow_token):
             _add_web_event(
                 session_id,
                 role="assistant",
-                text=_localized(session_id, f"Web demo 后台处理失败：{type(exc).__name__}", f"Web demo background processing failed: {type(exc).__name__}"),
+                text=_localized(
+                    session_id,
+                    f"Web demo 后台处理失败：{type(exc).__name__}",
+                    f"Web demo background processing failed: {type(exc).__name__}",
+                ),
                 kind="error",
             )
         logging_utils.log_event("llm_background_exception", session_id=session_id, error_type=type(exc).__name__)
@@ -570,7 +609,9 @@ def _handle_web_cut(session_id: str) -> dict[str, Any]:
             except Exception:
                 pass
     active = bool(flow_cancelled or pending_cancelled or active_job)
-    session_store.add_event(session_id, role="assistant", text=_web_cut_message(session_id, active), kind="message", job_id=job_id)
+    session_store.add_event(
+        session_id, role="assistant", text=_web_cut_message(session_id, active), kind="message", job_id=job_id
+    )
     logging_utils.log_event(
         "web_cut_requested",
         session_id=session_id,
@@ -624,15 +665,17 @@ def _timeout_stale_web_job(job: dict, *, session_id: str = "") -> dict:
         return job
     errors = list(job.get("errors") or [])
     if not any(isinstance(error, dict) and error.get("code") == "web_demo_job_timeout" for error in errors):
-        errors.append({
-            "code": "web_demo_job_timeout",
-            "message": f"Web demo marked this Cassette job timed out after {timeout_sec} seconds.",
-            "details": {
-                "current_stage": job.get("current_stage") or "",
-                "elapsed_sec": round(max(0.0, elapsed_sec), 1),
-                "timeout_sec": timeout_sec,
-            },
-        })
+        errors.append(
+            {
+                "code": "web_demo_job_timeout",
+                "message": f"Web demo marked this Cassette job timed out after {timeout_sec} seconds.",
+                "details": {
+                    "current_stage": job.get("current_stage") or "",
+                    "elapsed_sec": round(max(0.0, elapsed_sec), 1),
+                    "timeout_sec": timeout_sec,
+                },
+            }
+        )
     quality = dict(job.get("quality") or {})
     quality["web_demo_timeout_reconciled"] = True
     quality["timeout_sec"] = timeout_sec
@@ -787,7 +830,9 @@ def _cleanup_web_session(session_id: str, reason: str = "") -> dict[str, Any]:
 
     session_hash = manifest.resolve_session_hash(session_id=valid_session_id)
     session_store.close_session(valid_session_id)
-    browser_sessions_closed, browser_session_cleanup_attempts = _close_web_browser_sessions(valid_session_id, session_hash)
+    browser_sessions_closed, browser_session_cleanup_attempts = _close_web_browser_sessions(
+        valid_session_id, session_hash
+    )
 
     removed_uploads = _safe_remove_tree(_web_upload_root() / valid_session_id)
     removed_session_dir = False
@@ -875,8 +920,17 @@ def create_session(payload: dict[str, Any] | None = Body(default=None)) -> dict[
     language = str((payload or {}).get("language") or "").strip()
     if language:
         _set_web_language(state["session_id"], language)
-    response = {"session_id": state["session_id"], "language": _web_language(state["session_id"]), "cleanup": cleanup_result}
-    logging_utils.log_event("web_session_created", session_id=state["session_id"], language=response["language"], cleaned_previous=bool(cleanup_result))
+    response = {
+        "session_id": state["session_id"],
+        "language": _web_language(state["session_id"]),
+        "cleanup": cleanup_result,
+    }
+    logging_utils.log_event(
+        "web_session_created",
+        session_id=state["session_id"],
+        language=response["language"],
+        cleaned_previous=bool(cleanup_result),
+    )
     return response
 
 
@@ -926,7 +980,13 @@ def upload_media(
         filename = _safe_filename(upload.filename or "upload.bin")
         suffix = Path(filename).suffix.lower()
         if not suffix or suffix not in security.get_allowed_extensions():
-            logging_utils.log_event("web_upload_rejected", session_id=session_id, filename=filename, reason="extension_not_allowed", suffix=suffix)
+            logging_utils.log_event(
+                "web_upload_rejected",
+                session_id=session_id,
+                filename=filename,
+                reason="extension_not_allowed",
+                suffix=suffix,
+            )
             raise HTTPException(status_code=400, detail=f"extension not allowed: {suffix}")
         target = session_dir / f"{uuid.uuid4().hex}_{filename}"
         try:
@@ -955,7 +1015,13 @@ def upload_media(
         event=_make_event(session_id, media_paths=saved_paths, media_types=media_types),
         gateway=_web_gateway(),
     )
-    logging_utils.log_event("web_upload_done", session_id=session_id, saved_count=len(saved_paths), action=(result or {}).get("action"), reason=(result or {}).get("reason"))
+    logging_utils.log_event(
+        "web_upload_done",
+        session_id=session_id,
+        saved_count=len(saved_paths),
+        action=(result or {}).get("action"),
+        reason=(result or {}).get("reason"),
+    )
     return {"ok": True, "result": result, "events": session_store.get_events(session_id, 0)}
 
 
@@ -971,7 +1037,9 @@ def send_message(
     session_store.ensure_session(session_id)
     if payload.get("language"):
         _set_web_language(session_id, str(payload.get("language") or ""))
-    logging_utils.log_event("web_message_received", session_id=session_id, text_len=len(text), text_preview=_message_preview(text))
+    logging_utils.log_event(
+        "web_message_received", session_id=session_id, text_len=len(text), text_preview=_message_preview(text)
+    )
     client_event_id = str(payload.get("client_event_id") or "").strip()
     user_event = session_store.add_event(
         session_id,
@@ -1008,7 +1076,9 @@ def send_message(
             kind="message",
             job_id=str(active_job.get("job_id") or ""),
         )
-        logging_utils.log_event("web_message_rejected_busy", session_id=session_id, phase="active_job", job_id=active_job.get("job_id"))
+        logging_utils.log_event(
+            "web_message_rejected_busy", session_id=session_id, phase="active_job", job_id=active_job.get("job_id")
+        )
         return {
             "ok": True,
             "action": "skip",
@@ -1028,11 +1098,19 @@ def send_message(
     )
     if result is None:
         asset_payload = _tool_payload(tools.cassette_list_assets({"session_id": session_id}))
-        assets = (((asset_payload.get("data") or {}).get("manifest") or {}).get("assets") or [])
+        assets = ((asset_payload.get("data") or {}).get("manifest") or {}).get("assets") or []
         reply = (
-            _localized(session_id, "请先上传视频、图片或音频素材，然后发送剪辑指令。", "Please upload video, image, or audio assets first, then send an edit instruction.")
+            _localized(
+                session_id,
+                "请先上传视频、图片或音频素材，然后发送剪辑指令。",
+                "Please upload video, image, or audio assets first, then send an edit instruction.",
+            )
             if not assets
-            else _localized(session_id, "收到。可以继续发送剪辑指令，或使用 /check_assets 查看素材。", "Got it. You can continue with an edit instruction, or use /check_assets to inspect assets.")
+            else _localized(
+                session_id,
+                "收到。可以继续发送剪辑指令，或使用 /check_assets 查看素材。",
+                "Got it. You can continue with an edit instruction, or use /check_assets to inspect assets.",
+            )
         )
         session_store.add_event(session_id, role="assistant", text=reply, kind="message")
         return {"ok": True, "action": "local_reply", "result": result}
@@ -1052,7 +1130,12 @@ def send_message(
             }
         session_store.add_event(session_id, role="assistant", text=_processing_message(session_id), kind="status")
         _submit_llm_background(session_id, str(result.get("text") or text), api_key, flow_token)
-        logging_utils.log_event("web_message_llm_submitted", session_id=session_id, prompt_len=len(str(result.get("text") or text)), has_api_key_override=bool(api_key))
+        logging_utils.log_event(
+            "web_message_llm_submitted",
+            session_id=session_id,
+            prompt_len=len(str(result.get("text") or text)),
+            has_api_key_override=bool(api_key),
+        )
         return {"ok": True, "action": "llm_background", "result": result}
     return {"ok": True, "action": "ignored", "result": result}
 
@@ -1070,7 +1153,7 @@ def get_jobs(session_id: str = Query(...), limit: int = Query(10)) -> dict[str, 
     _reconcile_stale_web_jobs_globally()
     payload = _tool_payload(tools.cassette_job_status({"session_id": session_id, "limit": limit}))
     visible_jobs: list[dict[str, Any]] = []
-    for job in ((payload.get("data") or {}).get("jobs") or []):
+    for job in (payload.get("data") or {}).get("jobs") or []:
         if isinstance(job, dict) and job.get("job_id"):
             try:
                 full = jobs.load_job(str(job["job_id"]))
@@ -1098,7 +1181,9 @@ def cancel_job(job_id: str, payload: dict[str, Any] = Body(default_factory=dict)
     session_store.add_event(
         session_id,
         role="assistant",
-        text=_localized(session_id, "已请求暂停当前 Cassette 任务。", "Requested cancellation for the current Cassette job."),
+        text=_localized(
+            session_id, "已请求暂停当前 Cassette 任务。", "Requested cancellation for the current Cassette job."
+        ),
         kind="message",
         job_id=job_id,
     )

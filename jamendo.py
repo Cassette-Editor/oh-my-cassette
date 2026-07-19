@@ -113,12 +113,18 @@ class JamendoSearchStrategy:
     def from_dict(cls, data: dict[str, Any], index: int = 0) -> "JamendoSearchStrategy":
         if not isinstance(data, dict):
             raise CassetteError("jamendo_invalid_search_plan", "Each Jamendo strategy must be an object")
-        vocal = _optional_enum(_field(data, "vocalinstrumental", "vocalInstrumental"), _VALID_VOCAL, "vocalInstrumental")
-        acoustic = _optional_enum(_field(data, "acousticelectric", "acousticElectric"), _VALID_ACOUSTIC, "acousticElectric")
+        vocal = _optional_enum(
+            _field(data, "vocalinstrumental", "vocalInstrumental"), _VALID_VOCAL, "vocalInstrumental"
+        )
+        acoustic = _optional_enum(
+            _field(data, "acousticelectric", "acousticElectric"), _VALID_ACOUSTIC, "acousticElectric"
+        )
         speed = _string_list(_field(data, "speed") or [], "speed")
         invalid_speed = [item for item in speed if item not in _VALID_SPEED]
         if invalid_speed:
-            raise CassetteError("jamendo_invalid_search_plan", f"Invalid Jamendo speed values: {', '.join(invalid_speed)}")
+            raise CassetteError(
+                "jamendo_invalid_search_plan", f"Invalid Jamendo speed values: {', '.join(invalid_speed)}"
+            )
         limit = _optional_int(_field(data, "limit"), "limit")
         if limit is not None:
             limit = max(1, min(limit, 200))
@@ -161,13 +167,16 @@ class JamendoSearchPlan:
             raise CassetteError("jamendo_invalid_search_plan", "Jamendo SearchPlan.rawUserQuery is required")
         raw_strategies = _field(data, "strategies", "search_strategies", "searchStrategies")
         if not isinstance(raw_strategies, list) or not raw_strategies:
-            raise CassetteError("jamendo_invalid_search_plan", "Jamendo SearchPlan.strategies must contain at least one strategy")
+            raise CassetteError(
+                "jamendo_invalid_search_plan", "Jamendo SearchPlan.strategies must contain at least one strategy"
+            )
         strategies = [JamendoSearchStrategy.from_dict(item, index) for index, item in enumerate(raw_strategies)]
         return cls(
             raw_user_query=raw_query,
             strategies=strategies,
             audio_format=str(_field(data, "audio_format", "audioFormat") or _AUDIO_FORMAT).strip() or _AUDIO_FORMAT,
-            download_format=str(_field(data, "download_format", "downloadFormat") or _AUDIO_FORMAT).strip() or _AUDIO_FORMAT,
+            download_format=str(_field(data, "download_format", "downloadFormat") or _AUDIO_FORMAT).strip()
+            or _AUDIO_FORMAT,
             require_downloadable=_bool_value(_field(data, "require_downloadable", "requireDownloadable", default=True)),
         )
 
@@ -176,7 +185,9 @@ class JamendoSearchPlan:
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise CassetteError("jamendo_invalid_search_plan_json", "Hermes returned invalid Jamendo SearchPlan JSON") from exc
+            raise CassetteError(
+                "jamendo_invalid_search_plan_json", "Hermes returned invalid Jamendo SearchPlan JSON"
+            ) from exc
         return cls.from_dict(parsed)
 
     def to_dict(self) -> dict[str, Any]:
@@ -321,18 +332,20 @@ def build_search_plan_from_form(
     for term_index, term in enumerate(terms):
         active_variants = variants if term_index < 3 else variants[:1]
         for variant_name, boost, order in active_variants:
-            strategies.append(JamendoSearchStrategy(
-                name=f"fixed_form_{term_index + 1}_{variant_name}",
-                search=term,
-                fuzzytags=fuzzy,
-                tags=[],
-                exclude_terms=excludes,
-                vocalinstrumental=vocal,
-                boost=boost,
-                order=order,
-                limit=safe_limit,
-                type="single albumtrack",
-            ))
+            strategies.append(
+                JamendoSearchStrategy(
+                    name=f"fixed_form_{term_index + 1}_{variant_name}",
+                    search=term,
+                    fuzzytags=fuzzy,
+                    tags=[],
+                    exclude_terms=excludes,
+                    vocalinstrumental=vocal,
+                    boost=boost,
+                    order=order,
+                    limit=safe_limit,
+                    type="single albumtrack",
+                )
+            )
     return JamendoSearchPlan(
         raw_user_query=user_query,
         strategies=strategies,
@@ -343,7 +356,13 @@ def build_search_plan_from_form(
 
 
 class JamendoClient:
-    def __init__(self, client_id: str, timeout: float = 30.0, user_agent: str = "oh-my-cassette jamendo-matcher/0.1", base_url: str = JAMENDO_BASE_URL) -> None:
+    def __init__(
+        self,
+        client_id: str,
+        timeout: float = 30.0,
+        user_agent: str = "oh-my-cassette jamendo-matcher/0.1",
+        base_url: str = JAMENDO_BASE_URL,
+    ) -> None:
         self.client_id = client_id
         self.timeout = timeout
         self.user_agent = user_agent
@@ -358,10 +377,12 @@ class JamendoClient:
             headers = payload.get("headers") if isinstance(payload, dict) else {}
             status = str((headers or {}).get("status") or "").lower()
             if status and status != "success":
-                strategy_errors.append({
-                    "strategy": strategy.name,
-                    **_jamendo_error_details(headers),
-                })
+                strategy_errors.append(
+                    {
+                        "strategy": strategy.name,
+                        **_jamendo_error_details(headers),
+                    }
+                )
                 continue
             results = payload.get("results") if isinstance(payload, dict) else []
             if not isinstance(results, list):
@@ -411,7 +432,9 @@ class JamendoClient:
                 pass
             raise
 
-    def _track_params(self, plan: JamendoSearchPlan, strategy: JamendoSearchStrategy, *, limit_override: int | None = None) -> dict[str, Any]:
+    def _track_params(
+        self, plan: JamendoSearchPlan, strategy: JamendoSearchStrategy, *, limit_override: int | None = None
+    ) -> dict[str, Any]:
         limit = limit_override if limit_override is not None else strategy.limit if strategy.limit is not None else 10
         limit = max(1, min(int(limit), 200))
         params: dict[str, Any] = {
@@ -447,17 +470,25 @@ class JamendoClient:
                 status = getattr(response, "status", 200)
                 body = response.read()
         except HTTPError as exc:
-            raise CassetteError("jamendo_http_error", "Jamendo HTTP request failed", {"endpoint": path, "status": exc.code}) from exc
+            raise CassetteError(
+                "jamendo_http_error", "Jamendo HTTP request failed", {"endpoint": path, "status": exc.code}
+            ) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise CassetteError("jamendo_network_error", "Jamendo HTTP request failed", {"endpoint": path, "type": type(exc).__name__}) from exc
+            raise CassetteError(
+                "jamendo_network_error", "Jamendo HTTP request failed", {"endpoint": path, "type": type(exc).__name__}
+            ) from exc
         if int(status) < 200 or int(status) >= 300:
-            raise CassetteError("jamendo_http_error", "Jamendo HTTP request failed", {"endpoint": path, "status": int(status)})
+            raise CassetteError(
+                "jamendo_http_error", "Jamendo HTTP request failed", {"endpoint": path, "status": int(status)}
+            )
         try:
             parsed = json.loads(body.decode("utf-8"))
         except Exception as exc:
             raise CassetteError("jamendo_invalid_json", "Jamendo returned invalid JSON", {"endpoint": path}) from exc
         if not isinstance(parsed, dict):
-            raise CassetteError("jamendo_invalid_json", "Jamendo returned a non-object JSON payload", {"endpoint": path})
+            raise CassetteError(
+                "jamendo_invalid_json", "Jamendo returned a non-object JSON payload", {"endpoint": path}
+            )
         return parsed
 
     def _download_url(self, url: str, part_path: Path) -> None:
@@ -466,16 +497,22 @@ class JamendoClient:
             with urlopen(request, timeout=self.timeout) as response, part_path.open("wb") as fh:
                 status = getattr(response, "status", 200)
                 if int(status) < 200 or int(status) >= 300:
-                    raise CassetteError("jamendo_download_http_error", "Jamendo MP3 download failed", {"status": int(status)})
+                    raise CassetteError(
+                        "jamendo_download_http_error", "Jamendo MP3 download failed", {"status": int(status)}
+                    )
                 while True:
                     chunk = response.read(1024 * 128)
                     if not chunk:
                         break
                     fh.write(chunk)
         except HTTPError as exc:
-            raise CassetteError("jamendo_download_http_error", "Jamendo MP3 download failed", {"status": exc.code}) from exc
+            raise CassetteError(
+                "jamendo_download_http_error", "Jamendo MP3 download failed", {"status": exc.code}
+            ) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise CassetteError("jamendo_download_failed", "Jamendo MP3 download failed", {"type": type(exc).__name__}) from exc
+            raise CassetteError(
+                "jamendo_download_failed", "Jamendo MP3 download failed", {"type": type(exc).__name__}
+            ) from exc
 
 
 def filter_eligible_tracks(candidates: list[TrackCandidate], plan: JamendoSearchPlan) -> list[TrackCandidate]:
@@ -580,10 +617,12 @@ def match_jamendo_music(
         if relaxed_eligible:
             eligible = relaxed_eligible
             effective_plan = relaxed_filter_plan
-            fallbacks.append({
-                "code": "jamendo_filter_relaxed",
-                "message": "Relaxed local duration/exclude filters after Jamendo returned candidates but none remained eligible.",
-            })
+            fallbacks.append(
+                {
+                    "code": "jamendo_filter_relaxed",
+                    "message": "Relaxed local duration/exclude filters after Jamendo returned candidates but none remained eligible.",
+                }
+            )
     if not download:
         return {
             "searchPlan": effective_plan.to_dict(),
@@ -636,18 +675,20 @@ def match_jamendo_music(
         "candidate_pool_snapshot": [item.snapshot() for item in sorted(eligible, key=lambda item: item.id)],
         "manifest_asset": _scrub_manifest_asset(manifest_asset) if manifest_asset else None,
     }
-    data.update({
-        "status": "downloaded",
-        "provider": "jamendo",
-        "effective_instruction": _instruction_with_jamendo_bgm(search_plan.raw_user_query, selected),
-        "user_message": _jamendo_status_message(selected),
-        "fallbacks": fallbacks,
-        "hermes_next_step": (
-            "Use effective_instruction directly as the edit instruction for cassette_make_prompt, "
-            "or as the source text for prompt optimization if optimization is still enabled. "
-            "If this tool returned an error, fall back to the existing Free To Use cassette_match_bgm flow."
-        ),
-    })
+    data.update(
+        {
+            "status": "downloaded",
+            "provider": "jamendo",
+            "effective_instruction": _instruction_with_jamendo_bgm(search_plan.raw_user_query, selected),
+            "user_message": _jamendo_status_message(selected),
+            "fallbacks": fallbacks,
+            "hermes_next_step": (
+                "Use effective_instruction directly as the edit instruction for cassette_make_prompt, "
+                "or as the source text for prompt optimization if optimization is still enabled. "
+                "If this tool returned an error, fall back to the existing Free To Use cassette_match_bgm flow."
+            ),
+        }
+    )
     return data
 
 
@@ -673,8 +714,16 @@ def _search_candidates_with_fallbacks(
     broad_plan = _broad_api_plan(relaxed_plan)
     attempts = [
         ("jamendo_search_attempt_1", "Initial fixed-form Jamendo search.", plan),
-        ("jamendo_search_attempt_2_relaxed", "Retried Jamendo search with strict API parameters relaxed.", relaxed_plan),
-        ("jamendo_search_attempt_3_broad", "Retried Jamendo search with broader relevance/popularity/download ordering.", broad_plan),
+        (
+            "jamendo_search_attempt_2_relaxed",
+            "Retried Jamendo search with strict API parameters relaxed.",
+            relaxed_plan,
+        ),
+        (
+            "jamendo_search_attempt_3_broad",
+            "Retried Jamendo search with broader relevance/popularity/download ordering.",
+            broad_plan,
+        ),
     ]
     last_plan = plan
     for index, (code, message, attempt_plan) in enumerate(attempts):
@@ -686,19 +735,23 @@ def _search_candidates_with_fallbacks(
         except CassetteError as exc:
             if exc.code != "jamendo_api_error":
                 raise
-            fallbacks.append({
-                "code": code,
-                "message": f"{message} Jamendo API rejected this attempt: {exc.code}.",
-            })
+            fallbacks.append(
+                {
+                    "code": code,
+                    "message": f"{message} Jamendo API rejected this attempt: {exc.code}.",
+                }
+            )
             continue
         if candidates:
             if index > 0:
                 fallbacks.append({"code": code, "message": message})
             return candidates, attempt_plan, fallbacks
-        fallbacks.append({
-            "code": code,
-            "message": f"{message} Jamendo returned zero candidates.",
-        })
+        fallbacks.append(
+            {
+                "code": code,
+                "message": f"{message} Jamendo returned zero candidates.",
+            }
+        )
 
     return [], last_plan, fallbacks
 
@@ -706,23 +759,25 @@ def _search_candidates_with_fallbacks(
 def _relaxed_api_plan(plan: JamendoSearchPlan) -> JamendoSearchPlan:
     strategies: list[JamendoSearchStrategy] = []
     for strategy in plan.strategies:
-        strategies.append(JamendoSearchStrategy(
-            name=f"{strategy.name}_relaxed",
-            search=strategy.search,
-            fuzzytags=_dedupe_strings([*strategy.fuzzytags, *strategy.tags]),
-            tags=[],
-            exclude_terms=list(strategy.exclude_terms),
-            vocalinstrumental=strategy.vocalinstrumental,
-            acousticelectric=None,
-            speed=[],
-            duration_min=strategy.duration_min,
-            duration_max=strategy.duration_max,
-            boost=strategy.boost,
-            order=strategy.order,
-            limit=strategy.limit,
-            type=None,
-            extra_params={},
-        ))
+        strategies.append(
+            JamendoSearchStrategy(
+                name=f"{strategy.name}_relaxed",
+                search=strategy.search,
+                fuzzytags=_dedupe_strings([*strategy.fuzzytags, *strategy.tags]),
+                tags=[],
+                exclude_terms=list(strategy.exclude_terms),
+                vocalinstrumental=strategy.vocalinstrumental,
+                acousticelectric=None,
+                speed=[],
+                duration_min=strategy.duration_min,
+                duration_max=strategy.duration_max,
+                boost=strategy.boost,
+                order=strategy.order,
+                limit=strategy.limit,
+                type=None,
+                extra_params={},
+            )
+        )
     return JamendoSearchPlan(
         raw_user_query=plan.raw_user_query,
         strategies=strategies,
@@ -741,23 +796,25 @@ def _broad_api_plan(plan: JamendoSearchPlan) -> JamendoSearchPlan:
     ]
     for strategy in plan.strategies:
         for suffix, boost, order in variants:
-            strategies.append(JamendoSearchStrategy(
-                name=f"{strategy.name}_broad_{suffix}",
-                search=strategy.search,
-                fuzzytags=list(strategy.fuzzytags),
-                tags=[],
-                exclude_terms=list(strategy.exclude_terms),
-                vocalinstrumental=None,
-                acousticelectric=None,
-                speed=[],
-                duration_min=None,
-                duration_max=None,
-                boost=boost,
-                order=order,
-                limit=strategy.limit,
-                type=None,
-                extra_params={},
-            ))
+            strategies.append(
+                JamendoSearchStrategy(
+                    name=f"{strategy.name}_broad_{suffix}",
+                    search=strategy.search,
+                    fuzzytags=list(strategy.fuzzytags),
+                    tags=[],
+                    exclude_terms=list(strategy.exclude_terms),
+                    vocalinstrumental=None,
+                    acousticelectric=None,
+                    speed=[],
+                    duration_min=None,
+                    duration_max=None,
+                    boost=boost,
+                    order=order,
+                    limit=strategy.limit,
+                    type=None,
+                    extra_params={},
+                )
+            )
     return JamendoSearchPlan(
         raw_user_query=plan.raw_user_query,
         strategies=strategies,
@@ -770,23 +827,25 @@ def _broad_api_plan(plan: JamendoSearchPlan) -> JamendoSearchPlan:
 def _relaxed_filter_plan(plan: JamendoSearchPlan) -> JamendoSearchPlan:
     strategies: list[JamendoSearchStrategy] = []
     for strategy in plan.strategies:
-        strategies.append(JamendoSearchStrategy(
-            name=f"{strategy.name}_filter_relaxed",
-            search=strategy.search,
-            fuzzytags=list(strategy.fuzzytags),
-            tags=list(strategy.tags),
-            exclude_terms=[],
-            vocalinstrumental=strategy.vocalinstrumental,
-            acousticelectric=strategy.acousticelectric,
-            speed=list(strategy.speed),
-            duration_min=None,
-            duration_max=None,
-            boost=strategy.boost,
-            order=strategy.order,
-            limit=strategy.limit,
-            type=strategy.type,
-            extra_params=dict(strategy.extra_params),
-        ))
+        strategies.append(
+            JamendoSearchStrategy(
+                name=f"{strategy.name}_filter_relaxed",
+                search=strategy.search,
+                fuzzytags=list(strategy.fuzzytags),
+                tags=list(strategy.tags),
+                exclude_terms=[],
+                vocalinstrumental=strategy.vocalinstrumental,
+                acousticelectric=strategy.acousticelectric,
+                speed=list(strategy.speed),
+                duration_min=None,
+                duration_max=None,
+                boost=strategy.boost,
+                order=strategy.order,
+                limit=strategy.limit,
+                type=strategy.type,
+                extra_params=dict(strategy.extra_params),
+            )
+        )
     return JamendoSearchPlan(
         raw_user_query=plan.raw_user_query,
         strategies=strategies,
@@ -880,7 +939,9 @@ def _safe_output_dir(path: Path) -> Path:
     try:
         resolved.relative_to(root)
     except ValueError as exc:
-        raise CassetteError("jamendo_output_dir_outside_asset_root", "Jamendo output directories must live under CASSETTE_ASSET_ROOT") from exc
+        raise CassetteError(
+            "jamendo_output_dir_outside_asset_root", "Jamendo output directories must live under CASSETTE_ASSET_ROOT"
+        ) from exc
     resolved.mkdir(parents=True, exist_ok=True)
     return resolved
 
@@ -937,7 +998,12 @@ def _matches_duration_constraints(candidate: TrackCandidate, plan: JamendoSearch
 def _candidate_strategy_dicts(candidate: TrackCandidate, plan: JamendoSearchPlan) -> list[dict[str, Any]]:
     if candidate.source_strategies:
         candidate_has_constraints = any(
-            (strategy.get("exclude_terms") or strategy.get("excludeTerms") or strategy.get("duration_min") is not None or strategy.get("duration_max") is not None)
+            (
+                strategy.get("exclude_terms")
+                or strategy.get("excludeTerms")
+                or strategy.get("duration_min") is not None
+                or strategy.get("duration_max") is not None
+            )
             for strategy in candidate.source_strategies
         )
         if candidate_has_constraints:
@@ -1000,7 +1066,17 @@ def _optional_boost(value: Any) -> str | None:
 def _optional_order(value: Any) -> str | None:
     for text in _candidate_strings(value):
         normalized = _ORDER_ALIASES.get(text, text)
-        if normalized in {"relevance", "rating_desc", "rating_asc", "name_desc", "name_asc", "releasedate_desc", "releasedate_asc", "duration_desc", "duration_asc"}:
+        if normalized in {
+            "relevance",
+            "rating_desc",
+            "rating_asc",
+            "name_desc",
+            "name_asc",
+            "releasedate_desc",
+            "releasedate_asc",
+            "duration_desc",
+            "duration_asc",
+        }:
             return normalized
         if normalized in _VALID_BOOSTS:
             return normalized
@@ -1089,7 +1165,9 @@ def _safe_detail_value(value: Any) -> Any:
         return {str(key)[:64]: _safe_detail_value(item) for key, item in list(value.items())[:10]}
     text = str(value)
     text = re.sub(r"(?i)(client_id|client_secret|secret|token|key)=([^&\s]+)", r"\1=<redacted>", text)
-    text = re.sub(r"(?i)(client_id|client_secret|secret|token|key)['\"]?\s*:\s*['\"]?[^,'\"\s}]+", r"\1:<redacted>", text)
+    text = re.sub(
+        r"(?i)(client_id|client_secret|secret|token|key)['\"]?\s*:\s*['\"]?[^,'\"\s}]+", r"\1:<redacted>", text
+    )
     if len(text) > 240:
         return f"{text[:120]}...<redacted:{len(text)} chars>...{text[-40:]}"
     return text

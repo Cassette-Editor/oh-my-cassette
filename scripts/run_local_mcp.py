@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Idempotent entrypoint used by both Codex and Claude plugin manifests."""
+
 from __future__ import annotations
 
 import argparse
@@ -15,7 +16,6 @@ if str(PLUGIN_ROOT) not in sys.path:
 if str(PLUGIN_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
 
-import runtime_config  # noqa: E402
 from local_mcp_bootstrap import BootstrapError, bootstrap_runtime, select_python  # noqa: E402
 
 

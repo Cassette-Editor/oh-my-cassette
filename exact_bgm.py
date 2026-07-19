@@ -64,10 +64,19 @@ class ExactBgmConfig:
             kuwo_level=_runtime_env("CASSETTE_EXACT_BGM_KUWO_LEVEL", "exhigh"),
             search_limit=_bounded_int(_runtime_env("CASSETTE_EXACT_BGM_SEARCH_LIMIT", "10"), 1, 25, 10),
             timeout_seconds=_bounded_float(_runtime_env("CASSETTE_EXACT_BGM_TIMEOUT_SEC", "20"), 1.0, 120.0, 20.0),
-            max_bytes=_bounded_int(_runtime_env("CASSETTE_EXACT_BGM_MAX_BYTES", str(60 * 1024 * 1024)), 1, 512 * 1024 * 1024, 60 * 1024 * 1024),
+            max_bytes=_bounded_int(
+                _runtime_env("CASSETTE_EXACT_BGM_MAX_BYTES", str(60 * 1024 * 1024)),
+                1,
+                512 * 1024 * 1024,
+                60 * 1024 * 1024,
+            ),
             user_agent=_runtime_env("USER_AGENT", "oh-my-cassette exact-bgm/0.1"),
-            download_dir=_runtime_path("CASSETTE_EXACT_BGM_DOWNLOAD_DIR", manifest.get_asset_root() / "downloads" / "exact_bgm"),
-            metadata_dir=_runtime_path("CASSETTE_EXACT_BGM_METADATA_DIR", manifest.get_asset_root() / "metadata" / "exact_bgm"),
+            download_dir=_runtime_path(
+                "CASSETTE_EXACT_BGM_DOWNLOAD_DIR", manifest.get_asset_root() / "downloads" / "exact_bgm"
+            ),
+            metadata_dir=_runtime_path(
+                "CASSETTE_EXACT_BGM_METADATA_DIR", manifest.get_asset_root() / "metadata" / "exact_bgm"
+            ),
         )
 
 
@@ -136,12 +145,15 @@ class ExactBgmClient:
         return _dedupe_candidates(candidates)
 
     def search_netease(self, query: str, limit: int) -> list[ExactBgmCandidate]:
-        payload = self._get_json(self.config.netease_base_url, {
-            "type": "search",
-            "id": query,
-            "limit": limit,
-            "server": "netease",
-        })
+        payload = self._get_json(
+            self.config.netease_base_url,
+            {
+                "type": "search",
+                "id": query,
+                "limit": limit,
+                "server": "netease",
+            },
+        )
         if not isinstance(payload, list):
             return []
         results: list[ExactBgmCandidate] = []
@@ -154,19 +166,21 @@ class ExactBgmClient:
                 or _str(item.get("id") or item.get("songid") or item.get("song_id"))
                 or f"{security.safe_hash_id(query)}_{index}"
             )
-            results.append(ExactBgmCandidate(
-                provider="musicsquare_exact",
-                source="netease",
-                id=str(song_id),
-                title=_str(item.get("name")),
-                artist=_str(item.get("artist")),
-                audio_url=audio_url,
-                cover=_str(item.get("pic")),
-                query=query,
-                display_index=index,
-                raw=item,
-                source_strategies=[{"source": "netease", "query": query, "mode": "search"}],
-            ))
+            results.append(
+                ExactBgmCandidate(
+                    provider="musicsquare_exact",
+                    source="netease",
+                    id=str(song_id),
+                    title=_str(item.get("name")),
+                    artist=_str(item.get("artist")),
+                    audio_url=audio_url,
+                    cover=_str(item.get("pic")),
+                    query=query,
+                    display_index=index,
+                    raw=item,
+                    source_strategies=[{"source": "netease", "query": query, "mode": "search"}],
+                )
+            )
         return results
 
     def search_qq(self, query: str, limit: int) -> list[ExactBgmCandidate]:
@@ -181,18 +195,20 @@ class ExactBgmClient:
             song_mid = _str(item.get("song_mid"))
             if not song_mid:
                 continue
-            results.append(ExactBgmCandidate(
-                provider="musicsquare_exact",
-                source="qq",
-                id=song_mid,
-                title=_str(item.get("song_title")),
-                artist=_str(item.get("singer_name")),
-                quality=_str(item.get("pay")),
-                query=query,
-                display_index=index,
-                raw=item,
-                source_strategies=[{"source": "qq", "query": query, "mode": "search"}],
-            ))
+            results.append(
+                ExactBgmCandidate(
+                    provider="musicsquare_exact",
+                    source="qq",
+                    id=song_mid,
+                    title=_str(item.get("song_title")),
+                    artist=_str(item.get("singer_name")),
+                    quality=_str(item.get("pay")),
+                    query=query,
+                    display_index=index,
+                    raw=item,
+                    source_strategies=[{"source": "qq", "query": query, "mode": "search"}],
+                )
+            )
         return results
 
     def search_kuwo(self, query: str, limit: int) -> list[ExactBgmCandidate]:
@@ -206,29 +222,34 @@ class ExactBgmClient:
             rid = _str(item.get("rid"))
             if not rid:
                 continue
-            results.append(ExactBgmCandidate(
-                provider="musicsquare_exact",
-                source="kuwo",
-                id=rid,
-                title=_str(item.get("name")),
-                artist=_str(item.get("artist")),
-                album=_str(item.get("album")),
-                cover=_str(item.get("pic")),
-                query=query,
-                display_index=index,
-                raw=item,
-                source_strategies=[{"source": "kuwo", "query": query, "mode": "search"}],
-            ))
+            results.append(
+                ExactBgmCandidate(
+                    provider="musicsquare_exact",
+                    source="kuwo",
+                    id=rid,
+                    title=_str(item.get("name")),
+                    artist=_str(item.get("artist")),
+                    album=_str(item.get("album")),
+                    cover=_str(item.get("pic")),
+                    query=query,
+                    display_index=index,
+                    raw=item,
+                    source_strategies=[{"source": "kuwo", "query": query, "mode": "search"}],
+                )
+            )
         return results
 
     def search_joox(self, query: str, limit: int) -> list[ExactBgmCandidate]:
         if not self.config.joox_token:
             return []
-        payload = self._get_json(self.config.joox_base_url, {
-            "msg": query,
-            "token": self.config.joox_token,
-            "br": self.config.joox_bitrate,
-        })
+        payload = self._get_json(
+            self.config.joox_base_url,
+            {
+                "msg": query,
+                "token": self.config.joox_token,
+                "br": self.config.joox_bitrate,
+            },
+        )
         songs = payload.get("data", {}).get("songs") if isinstance(payload, dict) else []
         if not isinstance(songs, list):
             return []
@@ -240,18 +261,20 @@ class ExactBgmClient:
             song_id = _str(item.get("歌曲ID")) or song_mid
             if not song_id:
                 continue
-            results.append(ExactBgmCandidate(
-                provider="musicsquare_exact",
-                source="joox",
-                id=song_id,
-                title=_str(item.get("歌曲名称")),
-                artist=_str(item.get("歌手")),
-                album=_str(item.get("专辑")),
-                query=query,
-                display_index=index,
-                raw=item,
-                source_strategies=[{"source": "joox", "query": query, "mode": "search", "index": index}],
-            ))
+            results.append(
+                ExactBgmCandidate(
+                    provider="musicsquare_exact",
+                    source="joox",
+                    id=song_id,
+                    title=_str(item.get("歌曲名称")),
+                    artist=_str(item.get("歌手")),
+                    album=_str(item.get("专辑")),
+                    query=query,
+                    display_index=index,
+                    raw=item,
+                    source_strategies=[{"source": "joox", "query": query, "mode": "search", "index": index}],
+                )
+            )
         return results
 
     def ensure_audio_url(self, candidate: ExactBgmCandidate) -> ExactBgmCandidate:
@@ -259,11 +282,16 @@ class ExactBgmClient:
         if candidate.audio_url:
             return candidate
         if candidate.source == "netease":
-            candidate.audio_url = _normalize_audio_url(_build_url(self.config.netease_base_url, {
-                "server": "netease",
-                "type": "url",
-                "id": candidate.id,
-            }))
+            candidate.audio_url = _normalize_audio_url(
+                _build_url(
+                    self.config.netease_base_url,
+                    {
+                        "server": "netease",
+                        "type": "url",
+                        "id": candidate.id,
+                    },
+                )
+            )
             return candidate
         if candidate.source == "qq":
             return self._load_qq_detail(candidate)
@@ -277,10 +305,14 @@ class ExactBgmClient:
         candidate = self.ensure_audio_url(candidate)
         candidate.audio_url = _normalize_audio_url(candidate.audio_url)
         if not candidate.audio_url:
-            raise CassetteError("exact_bgm_audio_url_missing", "Exact BGM candidate did not include a playable audio URL")
+            raise CassetteError(
+                "exact_bgm_audio_url_missing", "Exact BGM candidate did not include a playable audio URL"
+            )
         output_dir = _safe_output_dir(output_dir)
         extension = _extension_from_url(candidate.audio_url)
-        dest = output_dir / _safe_music_filename(candidate.artist, candidate.title, f"{candidate.source}-{candidate.id}", extension)
+        dest = output_dir / _safe_music_filename(
+            candidate.artist, candidate.title, f"{candidate.source}-{candidate.id}", extension
+        )
         if dest.exists() and dest.stat().st_size > 0:
             return dest
         part_path = dest.with_name(dest.name + ".part")
@@ -298,11 +330,14 @@ class ExactBgmClient:
             raise
 
     def _load_qq_detail(self, candidate: ExactBgmCandidate) -> ExactBgmCandidate:
-        payload = self._get_json(self.config.qq_base_url, {
-            "msg": candidate.query or f"{candidate.title} {candidate.artist}".strip(),
-            "type": "json",
-            "mid": candidate.id,
-        })
+        payload = self._get_json(
+            self.config.qq_base_url,
+            {
+                "msg": candidate.query or f"{candidate.title} {candidate.artist}".strip(),
+                "type": "json",
+                "mid": candidate.id,
+            },
+        )
         data = payload if isinstance(payload, dict) else {}
         if not data:
             return candidate
@@ -317,12 +352,15 @@ class ExactBgmClient:
         return candidate
 
     def _load_kuwo_detail(self, candidate: ExactBgmCandidate) -> ExactBgmCandidate:
-        payload = self._get_json(self.config.kuwo_base_url, {
-            "id": candidate.id,
-            "type": "song",
-            "level": self.config.kuwo_level,
-            "format": "json",
-        })
+        payload = self._get_json(
+            self.config.kuwo_base_url,
+            {
+                "id": candidate.id,
+                "type": "song",
+                "level": self.config.kuwo_level,
+                "format": "json",
+            },
+        )
         data = payload.get("data") if isinstance(payload, dict) and payload.get("code") == 200 else {}
         if not isinstance(data, dict):
             return candidate
@@ -339,12 +377,15 @@ class ExactBgmClient:
         if not self.config.joox_token:
             return candidate
         index = candidate.display_index or 1
-        payload = self._get_json(self.config.joox_base_url, {
-            "msg": candidate.query or f"{candidate.title} {candidate.artist}".strip(),
-            "n": index,
-            "token": self.config.joox_token,
-            "br": self.config.joox_bitrate,
-        })
+        payload = self._get_json(
+            self.config.joox_base_url,
+            {
+                "msg": candidate.query or f"{candidate.title} {candidate.artist}".strip(),
+                "n": index,
+                "token": self.config.joox_token,
+                "br": self.config.joox_bitrate,
+            },
+        )
         data = payload.get("data") if isinstance(payload, dict) else {}
         if not isinstance(data, dict):
             return candidate
@@ -353,7 +394,9 @@ class ExactBgmClient:
         candidate.album = _str(data.get("专辑") or candidate.album)
         candidate.audio_url, candidate.quality = _pick_joox_audio_url(data.get("播放链接") or {})
         candidate.raw = {**candidate.raw, "detail": data}
-        candidate.source_strategies.append({"source": "joox", "query": candidate.query, "mode": "detail", "index": index})
+        candidate.source_strategies.append(
+            {"source": "joox", "query": candidate.query, "mode": "detail", "index": index}
+        )
         return candidate
 
     def _get_json(self, base_url: str, params: dict[str, Any]) -> Any:
@@ -364,15 +407,31 @@ class ExactBgmClient:
                 status = getattr(response, "status", 200)
                 body = response.read()
         except HTTPError as exc:
-            raise CassetteError("exact_bgm_http_error", "Exact BGM API request failed", {"status": exc.code, "source_url_host": urlparse(base_url).netloc}) from exc
+            raise CassetteError(
+                "exact_bgm_http_error",
+                "Exact BGM API request failed",
+                {"status": exc.code, "source_url_host": urlparse(base_url).netloc},
+            ) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise CassetteError("exact_bgm_network_error", "Exact BGM API request failed", {"type": type(exc).__name__, "source_url_host": urlparse(base_url).netloc}) from exc
+            raise CassetteError(
+                "exact_bgm_network_error",
+                "Exact BGM API request failed",
+                {"type": type(exc).__name__, "source_url_host": urlparse(base_url).netloc},
+            ) from exc
         if int(status) < 200 or int(status) >= 300:
-            raise CassetteError("exact_bgm_http_error", "Exact BGM API request failed", {"status": int(status), "source_url_host": urlparse(base_url).netloc})
+            raise CassetteError(
+                "exact_bgm_http_error",
+                "Exact BGM API request failed",
+                {"status": int(status), "source_url_host": urlparse(base_url).netloc},
+            )
         try:
             return json.loads(body.decode("utf-8"))
         except Exception as exc:
-            raise CassetteError("exact_bgm_invalid_json", "Exact BGM API returned invalid JSON", {"source_url_host": urlparse(base_url).netloc}) from exc
+            raise CassetteError(
+                "exact_bgm_invalid_json",
+                "Exact BGM API returned invalid JSON",
+                {"source_url_host": urlparse(base_url).netloc},
+            ) from exc
 
     def _download_url(self, url: str, part_path: Path, *, seen_urls: set[str]) -> None:
         raw_url = _str(url)
@@ -391,7 +450,9 @@ class ExactBgmClient:
             with urlopen(request, timeout=self.config.timeout_seconds) as response:
                 status = getattr(response, "status", 200)
                 if int(status) < 200 or int(status) >= 300:
-                    raise CassetteError("exact_bgm_download_http_error", "Exact BGM download failed", {"status": int(status)})
+                    raise CassetteError(
+                        "exact_bgm_download_http_error", "Exact BGM download failed", {"status": int(status)}
+                    )
                 content_type = str(response.headers.get("content-type") or "").lower()
                 if "json" in content_type or ("text" in content_type and "audio" not in content_type):
                     body = response.read(min(self.config.max_bytes, 1024 * 1024) + 1)
@@ -399,9 +460,13 @@ class ExactBgmClient:
                     if resolved:
                         self._download_url(resolved, part_path, seen_urls=seen_urls)
                         return
-                    raise CassetteError("exact_bgm_download_unexpected_content_type", "Exact BGM download returned a non-audio response")
+                    raise CassetteError(
+                        "exact_bgm_download_unexpected_content_type", "Exact BGM download returned a non-audio response"
+                    )
                 if content_type and "audio" not in content_type and "octet-stream" not in content_type:
-                    raise CassetteError("exact_bgm_download_unexpected_content_type", "Exact BGM download returned a non-audio response")
+                    raise CassetteError(
+                        "exact_bgm_download_unexpected_content_type", "Exact BGM download returned a non-audio response"
+                    )
                 written = 0
                 with part_path.open("wb") as fh:
                     while True:
@@ -410,10 +475,14 @@ class ExactBgmClient:
                             break
                         written += len(chunk)
                         if written > self.config.max_bytes:
-                            raise CassetteError("exact_bgm_download_too_large", "Exact BGM download exceeded the configured size limit")
+                            raise CassetteError(
+                                "exact_bgm_download_too_large", "Exact BGM download exceeded the configured size limit"
+                            )
                         fh.write(chunk)
         except HTTPError as exc:
-            raise CassetteError("exact_bgm_download_http_error", "Exact BGM download failed", {"status": exc.code}) from exc
+            raise CassetteError(
+                "exact_bgm_download_http_error", "Exact BGM download failed", {"status": exc.code}
+            ) from exc
         except ValueError as exc:
             raise CassetteError(
                 "exact_bgm_invalid_audio_url",
@@ -421,7 +490,9 @@ class ExactBgmClient:
                 {"type": type(exc).__name__, "message": str(exc), "url": _audio_url_log_snapshot(raw_url)},
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise CassetteError("exact_bgm_download_failed", "Exact BGM download failed", {"type": type(exc).__name__}) from exc
+            raise CassetteError(
+                "exact_bgm_download_failed", "Exact BGM download failed", {"type": type(exc).__name__}
+            ) from exc
 
 
 def match_exact_bgm(
@@ -492,7 +563,9 @@ def match_exact_bgm(
     manifest_asset = manifest.ingest_internal_asset(
         str(local_file),
         session_id=session_id,
-        original_name=_safe_music_filename(selected.artist, selected.title, f"{selected.source}-{selected.id}", local_file.suffix),
+        original_name=_safe_music_filename(
+            selected.artist, selected.title, f"{selected.source}-{selected.id}", local_file.suffix
+        ),
         media_type="audio",
         caption=f"Smart BGM matched by exact song search: {selected.artist} - {selected.title}.",
         metadata={
@@ -559,15 +632,19 @@ def search_exact_song(
             require_artist=require_artist,
             strict_title=bool(clean_title),
         )
-        attempts.append({
-            "mode": mode,
-            "query": query,
-            "candidate_count": len(candidates),
-            "eligible_count": len(eligible),
-            "strict_title": bool(clean_title),
-        })
+        attempts.append(
+            {
+                "mode": mode,
+                "query": query,
+                "candidate_count": len(candidates),
+                "eligible_count": len(eligible),
+                "strict_title": bool(clean_title),
+            }
+        )
         all_eligible.extend(eligible)
-        for candidate in _sort_exact_candidates(eligible, title=clean_title, artist=clean_artist, require_artist=require_artist):
+        for candidate in _sort_exact_candidates(
+            eligible, title=clean_title, artist=clean_artist, require_artist=require_artist
+        ):
             candidate.query = query
             try:
                 candidate = client.ensure_audio_url(candidate)
@@ -580,7 +657,9 @@ def search_exact_song(
                 return _dedupe_candidates(all_eligible), candidate, attempts
             failure = _candidate_failure_snapshot(
                 candidate,
-                CassetteError("exact_bgm_audio_url_missing", "Exact BGM candidate did not include a playable audio URL"),
+                CassetteError(
+                    "exact_bgm_audio_url_missing", "Exact BGM candidate did not include a playable audio URL"
+                ),
                 audio_url=raw_audio_url,
             )
             _record_candidate_failure(attempts, candidate, failure)
@@ -746,7 +825,9 @@ def _record_candidate_failure(
             failures.append(failure)
 
 
-def _candidate_failure_snapshot(candidate: ExactBgmCandidate, exc: CassetteError, *, audio_url: Any | None = None) -> dict[str, Any]:
+def _candidate_failure_snapshot(
+    candidate: ExactBgmCandidate, exc: CassetteError, *, audio_url: Any | None = None
+) -> dict[str, Any]:
     return {
         "source": candidate.source,
         "track_id": candidate.id,
@@ -767,13 +848,16 @@ def _sort_exact_candidates(
     artist: str = "",
     require_artist: bool = True,
 ) -> list[ExactBgmCandidate]:
-    return sorted(candidates, key=lambda item: (
-        _match_rank(title, item.title),
-        _match_rank(artist, item.artist) if require_artist and artist else 0,
-        _SOURCE_PRIORITY.get(item.source, 99),
-        item.display_index or 9999,
-        item.id,
-    ))
+    return sorted(
+        candidates,
+        key=lambda item: (
+            _match_rank(title, item.title),
+            _match_rank(artist, item.artist) if require_artist and artist else 0,
+            _SOURCE_PRIORITY.get(item.source, 99),
+            item.display_index or 9999,
+            item.id,
+        ),
+    )
 
 
 def _dedupe_candidates(candidates: list[ExactBgmCandidate]) -> list[ExactBgmCandidate]:
@@ -954,7 +1038,10 @@ def _safe_output_dir(path: Path) -> Path:
     try:
         resolved.relative_to(root)
     except ValueError as exc:
-        raise CassetteError("exact_bgm_output_dir_outside_asset_root", "Exact BGM output directories must live under CASSETTE_ASSET_ROOT") from exc
+        raise CassetteError(
+            "exact_bgm_output_dir_outside_asset_root",
+            "Exact BGM output directories must live under CASSETTE_ASSET_ROOT",
+        ) from exc
     resolved.mkdir(parents=True, exist_ok=True)
     return resolved
 

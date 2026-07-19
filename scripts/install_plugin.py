@@ -12,7 +12,14 @@ from pathlib import Path
 
 
 COPY_IGNORE = shutil.ignore_patterns(
-    ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "__pycache__", ".env.e2e", "*.pyc",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    ".env.e2e",
+    "*.pyc",
 )
 CASSETTE_DEFAULT_URL = "https://sg.trycassette.online/agent"
 CASSETTE_URL_OPTIONS = (
@@ -73,9 +80,9 @@ def read_env_values(path: Path) -> dict[str, str]:
             prefix = f"{key}="
             export_prefix = f"export {key}="
             if stripped.startswith(export_prefix):
-                values[key] = _unquote_env_value(stripped[len(export_prefix):])
+                values[key] = _unquote_env_value(stripped[len(export_prefix) :])
             elif stripped.startswith(prefix):
-                values[key] = _unquote_env_value(stripped[len(prefix):])
+                values[key] = _unquote_env_value(stripped[len(prefix) :])
     return values
 
 
@@ -151,11 +158,13 @@ def _find_executable(name: str, existing: str = "") -> str:
     found = shutil.which(name)
     if found:
         candidates.append(found)
-    candidates.extend([
-        f"/opt/homebrew/bin/{name}",
-        f"/usr/local/bin/{name}",
-        f"/usr/bin/{name}",
-    ])
+    candidates.extend(
+        [
+            f"/opt/homebrew/bin/{name}",
+            f"/usr/local/bin/{name}",
+            f"/usr/bin/{name}",
+        ]
+    )
     seen: set[str] = set()
     for candidate in candidates:
         if not candidate or candidate in seen:
@@ -184,7 +193,9 @@ def configure_transcoder_paths(home: Path) -> bool:
         if ffprobe_bin:
             print(f"saved ffprobe path to {env_path}: {ffprobe_bin}")
         return True
-    print("ffmpeg was not found. Install it with `brew install ffmpeg` on macOS or `sudo apt-get install -y ffmpeg` on Debian/Ubuntu.")
+    print(
+        "ffmpeg was not found. Install it with `brew install ffmpeg` on macOS or `sudo apt-get install -y ffmpeg` on Debian/Ubuntu."
+    )
     return False
 
 
@@ -299,7 +310,9 @@ def configure_cassette_auth(
         interactive = sys.stdin.isatty() and sys.stdout.isatty()
     env_path = home / ".env"
     if not interactive:
-        print(f"skip interactive Cassette auth setup; edit {env_path} to set CASSETTE_AUTH_EMAIL and CASSETTE_AUTH_PASSWORD.")
+        print(
+            f"skip interactive Cassette auth setup; edit {env_path} to set CASSETTE_AUTH_EMAIL and CASSETTE_AUTH_PASSWORD."
+        )
         return False
 
     existing = read_env_values(env_path)
@@ -400,9 +413,7 @@ def configure_jamendo_auth(
     client_id_prompt = f"Jamendo Client ID [{current_client_id}]: " if current_client_id else "Jamendo Client ID: "
     client_id = input_func(client_id_prompt).strip() or current_client_id
     secret_prompt = (
-        "Jamendo Client Secret [leave blank to keep existing]: "
-        if current_client_secret
-        else "Jamendo Client Secret: "
+        "Jamendo Client Secret [leave blank to keep existing]: " if current_client_secret else "Jamendo Client Secret: "
     )
     client_secret = password_func(secret_prompt).strip() or current_client_secret
     if not client_id:
@@ -457,13 +468,23 @@ def main() -> int:
         help="skip plugin file installation and run only the setup steps (use after `hermes plugins install`)",
     )
     parser.add_argument("--dry-run", action="store_true", help="show the destination without changing files")
-    parser.add_argument("--skip-plugin-enable", action="store_true", help="do not prompt to enable the Cassette plugin in Hermes")
+    parser.add_argument(
+        "--skip-plugin-enable", action="store_true", help="do not prompt to enable the Cassette plugin in Hermes"
+    )
     parser.add_argument("--skip-cassette-url", action="store_true", help="do not prompt for Cassette agent URL")
-    parser.add_argument("--skip-cassette-auth", action="store_true", help="do not prompt for Cassette login credentials")
+    parser.add_argument(
+        "--skip-cassette-auth", action="store_true", help="do not prompt for Cassette login credentials"
+    )
     parser.add_argument("--skip-jamendo-auth", action="store_true", help="do not prompt for Jamendo API credentials")
-    parser.add_argument("--skip-playwright-install", action="store_true", help="do not install Playwright into the Hermes Python environment")
+    parser.add_argument(
+        "--skip-playwright-install",
+        action="store_true",
+        help="do not install Playwright into the Hermes Python environment",
+    )
     parser.add_argument("--skip-ffmpeg-detect", action="store_true", help="do not detect and save ffmpeg/ffprobe paths")
-    parser.add_argument("--skip-gateway-restart", action="store_true", help="do not restart Hermes gateway after installation")
+    parser.add_argument(
+        "--skip-gateway-restart", action="store_true", help="do not restart Hermes gateway after installation"
+    )
     args = parser.parse_args()
 
     source = repo_root()

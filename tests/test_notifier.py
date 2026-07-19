@@ -8,13 +8,16 @@ from cassette import notifier
 
 
 def test_weixin_final_message_contains_status_without_delivery_target():
-    message = notifier.format_platform_final_message({
-        "job_id": "cassette_test",
-        "status": "failed",
-        "errors": [{"code": "asset_upload_failed"}],
-        "delivery": {"chat_id": "wxid_chat_raw", "user_id": "wxid_user_raw"},
-        "quality": {"progress_summary": "Cassette upload status reported 0 ready, 1 failed."},
-    }, platform="weixin")
+    message = notifier.format_platform_final_message(
+        {
+            "job_id": "cassette_test",
+            "status": "failed",
+            "errors": [{"code": "asset_upload_failed"}],
+            "delivery": {"chat_id": "wxid_chat_raw", "user_id": "wxid_user_raw"},
+            "quality": {"progress_summary": "Cassette upload status reported 0 ready, 1 failed."},
+        },
+        platform="weixin",
+    )
 
     assert "asset_upload_failed" in message
     assert "Cassette upload status" in message
@@ -26,12 +29,15 @@ def test_weixin_final_message_mentions_export_without_local_path(tmp_path: Path)
     exported = tmp_path / "result.mp4"
     exported.write_bytes(b"video")
 
-    message = notifier.format_platform_final_message({
-        "job_id": "cassette_test",
-        "status": "succeeded",
-        "outputs": [{"local_path": str(exported), "download": exported.name}],
-        "quality": {"progress_summary": "剪辑完成，可以导出。"},
-    }, platform="weixin")
+    message = notifier.format_platform_final_message(
+        {
+            "job_id": "cassette_test",
+            "status": "succeeded",
+            "outputs": [{"local_path": str(exported), "download": exported.name}],
+            "quality": {"progress_summary": "剪辑完成，可以导出。"},
+        },
+        platform="weixin",
+    )
 
     assert "导出视频已生成" in message
     assert str(exported) not in message
@@ -94,8 +100,7 @@ def test_runtime_env_reads_hermes_dotenv_without_exporting(tmp_path: Path, monke
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
     (hermes_home / ".env").write_text(
-        "QQ_APP_ID=dotenv-app\n"
-        "export QQ_CLIENT_SECRET='dotenv-secret'\n",
+        "QQ_APP_ID=dotenv-app\nexport QQ_CLIENT_SECRET='dotenv-secret'\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
@@ -156,13 +161,15 @@ def test_notify_terminal_job_reports_weixin_video_send_failure(tmp_path: Path, m
     monkeypatch.setattr(notifier, "_send_weixin_video_attachment", fake_send_video)
     monkeypatch.setattr(notifier, "_send_weixin_text", fake_send_text)
 
-    result = notifier.notify_terminal_job({
-        "job_id": "cassette_test",
-        "status": "succeeded",
-        "outputs": [{"local_path": str(exported), "download": exported.name}],
-        "delivery": {"platform": "weixin", "chat_id": "wxid_chat_raw"},
-        "quality": {"progress_summary": "剪辑完成，可以导出。"},
-    })
+    result = notifier.notify_terminal_job(
+        {
+            "job_id": "cassette_test",
+            "status": "succeeded",
+            "outputs": [{"local_path": str(exported), "download": exported.name}],
+            "delivery": {"platform": "weixin", "chat_id": "wxid_chat_raw"},
+            "quality": {"progress_summary": "剪辑完成，可以导出。"},
+        }
+    )
 
     assert result["status"] == "partial"
     assert result["code"] == "weixin_video_send_failed"
@@ -190,13 +197,15 @@ def test_notify_terminal_job_sends_weixin_export_as_video(tmp_path: Path, monkey
     monkeypatch.setattr(notifier, "_send_weixin_video_attachment", fake_send_video)
     monkeypatch.setattr(notifier, "_send_weixin_text", fake_send_text)
 
-    result = notifier.notify_terminal_job({
-        "job_id": "cassette_test",
-        "status": "succeeded",
-        "outputs": [{"local_path": str(exported), "download": exported.name}],
-        "delivery": {"platform": "weixin", "chat_id": "wxid_chat_raw"},
-        "quality": {"progress_summary": "剪辑完成，可以导出。"},
-    })
+    result = notifier.notify_terminal_job(
+        {
+            "job_id": "cassette_test",
+            "status": "succeeded",
+            "outputs": [{"local_path": str(exported), "download": exported.name}],
+            "delivery": {"platform": "weixin", "chat_id": "wxid_chat_raw"},
+            "quality": {"progress_summary": "剪辑完成，可以导出。"},
+        }
+    )
 
     assert result["status"] == "sent"
     assert result["message_id"] == "text-ok"
@@ -231,12 +240,14 @@ def test_notify_terminal_job_reports_weixin_compatible_video_mode(tmp_path: Path
     monkeypatch.setattr(notifier, "_send_weixin_file_attachment", fake_send_file)
     monkeypatch.setattr(notifier, "_send_weixin_text", fake_send_text)
 
-    result = notifier.notify_terminal_job({
-        "job_id": "cassette_test",
-        "status": "succeeded",
-        "outputs": [{"local_path": str(exported), "download": exported.name}],
-        "delivery": {"platform": "weixin", "chat_id": "wxid_chat_raw"},
-    })
+    result = notifier.notify_terminal_job(
+        {
+            "job_id": "cassette_test",
+            "status": "succeeded",
+            "outputs": [{"local_path": str(exported), "download": exported.name}],
+            "delivery": {"platform": "weixin", "chat_id": "wxid_chat_raw"},
+        }
+    )
 
     assert result["status"] == "sent"
     assert result["media_mode"] == "weixin_compatible_mp4"
@@ -270,12 +281,14 @@ def test_notify_terminal_job_does_not_send_original_zip_by_default(tmp_path: Pat
     monkeypatch.setattr(notifier, "_send_weixin_file_attachment", fake_send_file)
     monkeypatch.setattr(notifier, "_send_weixin_text", fake_send_text)
 
-    result = notifier.notify_terminal_job({
-        "job_id": "cassette_test",
-        "status": "succeeded",
-        "outputs": [{"local_path": str(exported), "download": exported.name}],
-        "delivery": {"platform": "weixin", "chat_id": "wxid_chat_raw"},
-    })
+    result = notifier.notify_terminal_job(
+        {
+            "job_id": "cassette_test",
+            "status": "succeeded",
+            "outputs": [{"local_path": str(exported), "download": exported.name}],
+            "delivery": {"platform": "weixin", "chat_id": "wxid_chat_raw"},
+        }
+    )
 
     assert result["status"] == "sent"
     assert result["media_mode"] == "weixin_compatible_mp4"
@@ -307,12 +320,14 @@ def test_notify_terminal_job_reports_preview_when_original_zip_fails(tmp_path: P
     monkeypatch.setattr(notifier, "_send_weixin_file_attachment", fake_send_file)
     monkeypatch.setattr(notifier, "_send_weixin_text", fake_send_text)
 
-    result = notifier.notify_terminal_job({
-        "job_id": "cassette_test",
-        "status": "succeeded",
-        "outputs": [{"local_path": str(exported), "download": exported.name}],
-        "delivery": {"platform": "weixin", "chat_id": "wxid_chat_raw"},
-    })
+    result = notifier.notify_terminal_job(
+        {
+            "job_id": "cassette_test",
+            "status": "succeeded",
+            "outputs": [{"local_path": str(exported), "download": exported.name}],
+            "delivery": {"platform": "weixin", "chat_id": "wxid_chat_raw"},
+        }
+    )
 
     assert result["status"] == "sent"
     assert result["zip_error"] == "file upload failed"
@@ -337,13 +352,15 @@ def test_notify_terminal_job_sends_qq_export_as_video(tmp_path: Path, monkeypatc
     monkeypatch.setattr(notifier, "_send_qq_video_attachment", fake_send_video)
     monkeypatch.setattr(notifier, "_send_qq_text", fake_send_text)
 
-    result = notifier.notify_terminal_job({
-        "job_id": "cassette_test",
-        "status": "succeeded",
-        "outputs": [{"local_path": str(exported), "download": exported.name}],
-        "delivery": {"platform": "qqbot", "chat_id": "qq_openid_raw", "chat_type": "dm"},
-        "quality": {"progress_summary": "剪辑完成，可以导出。"},
-    })
+    result = notifier.notify_terminal_job(
+        {
+            "job_id": "cassette_test",
+            "status": "succeeded",
+            "outputs": [{"local_path": str(exported), "download": exported.name}],
+            "delivery": {"platform": "qqbot", "chat_id": "qq_openid_raw", "chat_type": "dm"},
+            "quality": {"progress_summary": "剪辑完成，可以导出。"},
+        }
+    )
 
     assert result["status"] == "sent"
     assert result["platform"] == "qqbot"
@@ -372,14 +389,16 @@ def test_notify_terminal_job_sends_telegram_export_as_video_with_english_message
     monkeypatch.setattr(notifier, "_send_telegram_video_attachment", fake_send_video)
     monkeypatch.setattr(notifier, "_send_telegram_text", fake_send_text)
 
-    result = notifier.notify_terminal_job({
-        "job_id": "cassette_test",
-        "status": "succeeded",
-        "cassette_language": "en",
-        "outputs": [{"local_path": str(exported), "download": exported.name}],
-        "delivery": {"platform": "telegram", "chat_id": "telegram_chat_raw", "thread_id": "topic_raw"},
-        "quality": {"progress_summary": "The edit is complete and ready to export."},
-    })
+    result = notifier.notify_terminal_job(
+        {
+            "job_id": "cassette_test",
+            "status": "succeeded",
+            "cassette_language": "en",
+            "outputs": [{"local_path": str(exported), "download": exported.name}],
+            "delivery": {"platform": "telegram", "chat_id": "telegram_chat_raw", "thread_id": "topic_raw"},
+            "quality": {"progress_summary": "The edit is complete and ready to export."},
+        }
+    )
 
     assert result["status"] == "sent"
     assert result["platform"] == "telegram"
@@ -466,14 +485,16 @@ def test_notify_terminal_job_sends_telegram_preview_when_export_exceeds_limit(tm
     monkeypatch.setattr(notifier, "_send_telegram_video_attachment", fake_send_video)
     monkeypatch.setattr(notifier, "_send_telegram_text", fake_send_text)
 
-    result = notifier.notify_terminal_job({
-        "job_id": "cassette_test",
-        "status": "succeeded",
-        "cassette_language": "en",
-        "outputs": [{"local_path": str(exported), "download": exported.name}],
-        "delivery": {"platform": "telegram", "chat_id": "telegram_chat_raw", "thread_id": "123"},
-        "quality": {"progress_summary": "Travel vlog assembled with chill BGM and subtitles."},
-    })
+    result = notifier.notify_terminal_job(
+        {
+            "job_id": "cassette_test",
+            "status": "succeeded",
+            "cassette_language": "en",
+            "outputs": [{"local_path": str(exported), "download": exported.name}],
+            "delivery": {"platform": "telegram", "chat_id": "telegram_chat_raw", "thread_id": "123"},
+            "quality": {"progress_summary": "Travel vlog assembled with chill BGM and subtitles."},
+        }
+    )
 
     assert result["status"] == "sent"
     assert result["original_too_large"] is True
@@ -534,12 +555,14 @@ def test_notify_terminal_job_reports_qq_video_send_failure(tmp_path: Path, monke
     monkeypatch.setattr(notifier, "_send_qq_video_attachment", fake_send_video)
     monkeypatch.setattr(notifier, "_send_qq_text", fake_send_text)
 
-    result = notifier.notify_terminal_job({
-        "job_id": "cassette_test",
-        "status": "succeeded",
-        "outputs": [{"local_path": str(exported), "download": exported.name}],
-        "delivery": {"platform": "qqbot", "chat_id": "qq_openid_raw"},
-    })
+    result = notifier.notify_terminal_job(
+        {
+            "job_id": "cassette_test",
+            "status": "succeeded",
+            "outputs": [{"local_path": str(exported), "download": exported.name}],
+            "delivery": {"platform": "qqbot", "chat_id": "qq_openid_raw"},
+        }
+    )
 
     assert result["status"] == "partial"
     assert result["platform"] == "qqbot"
@@ -626,11 +649,13 @@ def test_notify_model_selection_sends_quick_qq_text(monkeypatch):
     monkeypatch.setenv("QQ_CLIENT_SECRET", "secret")
     monkeypatch.setattr(notifier, "_send_qq_text", fake_send_text)
 
-    result = notifier.notify_model_selection({
-        "job_id": "cassette_test",
-        "model_selection": {"model": "Kimi K2.6", "thinking_level": "Medium"},
-        "delivery": {"platform": "qqbot", "chat_id": "qq_openid_raw", "chat_type": "dm"},
-    })
+    result = notifier.notify_model_selection(
+        {
+            "job_id": "cassette_test",
+            "model_selection": {"model": "Kimi K2.6", "thinking_level": "Medium"},
+            "delivery": {"platform": "qqbot", "chat_id": "qq_openid_raw", "chat_type": "dm"},
+        }
+    )
 
     assert result["status"] == "sent"
     assert result["message_id"] == "model-ok"
@@ -649,12 +674,14 @@ def test_notify_model_selection_sends_quick_telegram_text(monkeypatch):
 
     monkeypatch.setattr(notifier, "_send_telegram_text", fake_send_text)
 
-    result = notifier.notify_model_selection({
-        "job_id": "cassette_test",
-        "cassette_language": "en",
-        "model_selection": {"model": "DeepSeek V4 Flash", "thinking_level": "Low"},
-        "delivery": {"platform": "telegram", "chat_id": "telegram_chat_raw", "thread_id": "topic_raw"},
-    })
+    result = notifier.notify_model_selection(
+        {
+            "job_id": "cassette_test",
+            "cassette_language": "en",
+            "model_selection": {"model": "DeepSeek V4 Flash", "thinking_level": "Low"},
+            "delivery": {"platform": "telegram", "chat_id": "telegram_chat_raw", "thread_id": "topic_raw"},
+        }
+    )
 
     assert result["status"] == "sent"
     assert result["message_id"] == "tg-model-ok"
@@ -738,8 +765,12 @@ def test_qq_direct_senders_mark_short_lived_adapter_connected(tmp_path: Path, mo
     image.write_bytes(b"png")
 
     text_result = notifier._run_async_send(lambda: notifier._send_qq_text("qq_openid_raw", "hello", "dm"))
-    video_result = notifier._run_async_send(lambda: notifier._send_qq_video_attachment("qq_openid_raw", str(video), "dm"))
-    image_result = notifier._run_async_send(lambda: notifier._send_qq_image_attachment("qq_openid_raw", str(image), "caption", "dm"))
+    video_result = notifier._run_async_send(
+        lambda: notifier._send_qq_video_attachment("qq_openid_raw", str(video), "dm")
+    )
+    image_result = notifier._run_async_send(
+        lambda: notifier._send_qq_image_attachment("qq_openid_raw", str(image), "caption", "dm")
+    )
 
     assert text_result["success"] is True
     assert video_result["success"] is True

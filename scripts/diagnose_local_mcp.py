@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Credential-free diagnostics for the local Codex/Claude MCP installation."""
+
 from __future__ import annotations
 
 import json

@@ -74,9 +74,9 @@ def _hermes_dotenv_value(name: str) -> str:
         if not stripped or stripped.startswith("#"):
             continue
         if stripped.startswith(export_prefix):
-            return _unquote_env_value(stripped[len(export_prefix):])
+            return _unquote_env_value(stripped[len(export_prefix) :])
         if stripped.startswith(prefix):
-            return _unquote_env_value(stripped[len(prefix):])
+            return _unquote_env_value(stripped[len(prefix) :])
     return ""
 
 
@@ -303,7 +303,9 @@ def _prepare_telegram_preview_video(file_path: str) -> Path:
         if proc.returncode == 0 and tmp_path.exists() and 0 < tmp_path.stat().st_size <= max_bytes:
             os.replace(tmp_path, dest)
             return dest
-        last_detail = (proc.stderr or "").strip()[-300:] or f"size={tmp_path.stat().st_size if tmp_path.exists() else 0}"
+        last_detail = (proc.stderr or "").strip()[
+            -300:
+        ] or f"size={tmp_path.stat().st_size if tmp_path.exists() else 0}"
         try:
             tmp_path.unlink()
         except OSError:
@@ -398,22 +400,24 @@ def _prepare_weixin_video_delivery_file(file_path: str, profile: dict[str, str |
         cmd.extend(["-map", "0:a?"])
     else:
         cmd.append("-an")
-    cmd.extend([
-        "-map",
-        "-0:d?",
-        "-vf",
-        scale_filter,
-        "-c:v",
-        "libx264",
-        "-profile:v",
-        os.getenv("CASSETTE_WEIXIN_DELIVERY_PROFILE", "high"),
-        "-level",
-        os.getenv("CASSETTE_WEIXIN_DELIVERY_LEVEL", "3.1"),
-        "-preset",
-        os.getenv("CASSETTE_WEIXIN_DELIVERY_PRESET", "veryfast"),
-        "-crf",
-        str(profile["crf"]),
-    ])
+    cmd.extend(
+        [
+            "-map",
+            "-0:d?",
+            "-vf",
+            scale_filter,
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            os.getenv("CASSETTE_WEIXIN_DELIVERY_PROFILE", "high"),
+            "-level",
+            os.getenv("CASSETTE_WEIXIN_DELIVERY_LEVEL", "3.1"),
+            "-preset",
+            os.getenv("CASSETTE_WEIXIN_DELIVERY_PRESET", "veryfast"),
+            "-crf",
+            str(profile["crf"]),
+        ]
+    )
     if profile.get("audio"):
         cmd.extend(["-c:a", "aac", "-b:a", str(profile["audio_bitrate"])])
     cmd.append(str(tmp_path))
@@ -576,7 +580,7 @@ def _trim_generic_completion_prefix(summary: str) -> str:
     lowered = cleaned.lower()
     for prefix in prefixes:
         if lowered.startswith(prefix.lower()):
-            trimmed = cleaned[len(prefix):].strip()
+            trimmed = cleaned[len(prefix) :].strip()
             return trimmed or cleaned
     return cleaned
 
@@ -673,7 +677,9 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
                 else:
                     delivery_line = "Exported video was generated and is being sent."
             elif output_count:
-                delivery_line = f"Detected {output_count} output link(s), but no local exported video file was confirmed."
+                delivery_line = (
+                    f"Detected {output_count} output link(s), but no local exported video file was confirmed."
+                )
             elif export_pending:
                 delivery_line = "No exported video file was detected yet."
             _append_delivery_block(lines, delivery_line, language=language)
@@ -707,7 +713,9 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
             elif media_delivery == "sent_compatible":
                 delivery_line = "原始导出视频不被微信 CDN 接受，已转换为微信兼容 MP4 并发送。"
             elif media_delivery == "sent_preview_zip":
-                delivery_line = "已发送低码率 MP4 预览；随后发送的 zip 文件包含原始大小导出视频，请解压后查看/保存原片。"
+                delivery_line = (
+                    "已发送低码率 MP4 预览；随后发送的 zip 文件包含原始大小导出视频，请解压后查看/保存原片。"
+                )
             elif media_delivery == "sent_preview_zip_failed":
                 delivery_line = "已发送低码率 MP4 预览；原始导出视频 zip 文件发送失败。"
             elif media_delivery == "sent_preview":
@@ -814,10 +822,7 @@ async def _send_weixin_video_attachment(chat_id: str, file_path: str) -> dict:
             message_id = await adapter._send_file(str(chat_id), file_path, "")
             return {"success": True, "message_id": message_id, "mode": "native"}
         except Exception as first_exc:
-            if (
-                not _is_video_export(file_path)
-                or _is_disabled(os.getenv("CASSETTE_WEIXIN_DELIVERY_TRANSCODE", "1"))
-            ):
+            if not _is_video_export(file_path) or _is_disabled(os.getenv("CASSETTE_WEIXIN_DELIVERY_TRANSCODE", "1")):
                 return {"success": False, "error": str(first_exc)[:300]}
             try:
                 errors = []
@@ -861,7 +866,9 @@ async def _qq_send_with_adapter(chat_id: str, chat_type: str | None, call):
     if not client_secret:
         return {"success": False, "error": "missing_qq_client_secret"}
 
-    adapter = QQAdapter(PlatformConfig(enabled=True, token="", extra={"app_id": app_id, "client_secret": client_secret}))
+    adapter = QQAdapter(
+        PlatformConfig(enabled=True, token="", extra={"app_id": app_id, "client_secret": client_secret})
+    )
     adapter._chat_type_map[str(chat_id)] = _normalize_qq_chat_type(chat_type)
     _enable_qq_direct_rest_mode(adapter)
     adapter._http_client = httpx.AsyncClient(timeout=30.0, follow_redirects=True, limits=platform_httpx_limits())
@@ -894,7 +901,9 @@ async def _send_qq_video_attachment(chat_id: str, file_path: str, chat_type: str
     return await _qq_send_with_adapter(chat_id, chat_type, _call)
 
 
-async def _send_qq_image_attachment(chat_id: str, file_path: str, caption: str = "", chat_type: str | None = None) -> dict:
+async def _send_qq_image_attachment(
+    chat_id: str, file_path: str, caption: str = "", chat_type: str | None = None
+) -> dict:
     async def _call(adapter):
         result = await adapter.send_image_file(str(chat_id), file_path, caption=caption)
         if result.success:
@@ -958,7 +967,9 @@ async def _send_telegram_text(chat_id: str, message: str, thread_id: str | None 
     return await _telegram_send_with_adapter(_call)
 
 
-async def _send_telegram_image_attachment(chat_id: str, file_path: str, caption: str = "", thread_id: str | None = None) -> dict:
+async def _send_telegram_image_attachment(
+    chat_id: str, file_path: str, caption: str = "", thread_id: str | None = None
+) -> dict:
     async def _call(adapter):
         return await adapter.send_image_file(
             str(chat_id),
@@ -1114,7 +1125,12 @@ def notify_model_selection(job: dict) -> dict:
     try:
         result = _run_async_send(_send)
     except Exception as exc:
-        return {"status": "failed", "platform": platform, "code": f"{platform}_model_selection_send_failed", "error": type(exc).__name__}
+        return {
+            "status": "failed",
+            "platform": platform,
+            "code": f"{platform}_model_selection_send_failed",
+            "error": type(exc).__name__,
+        }
     if result.get("success"):
         return {"status": "sent", "platform": platform, "message_id": result.get("message_id")}
     return {
@@ -1159,7 +1175,12 @@ def notify_gateway_text(delivery: dict, message: str, reason: str = "text") -> d
     try:
         result = _run_async_send(_send)
     except Exception as exc:
-        return {"status": "failed", "platform": platform, "code": f"{platform}_{reason}_send_failed", "error": type(exc).__name__}
+        return {
+            "status": "failed",
+            "platform": platform,
+            "code": f"{platform}_{reason}_send_failed",
+            "error": type(exc).__name__,
+        }
     if result.get("success"):
         return {"status": "sent", "platform": platform, "message_id": result.get("message_id"), "reason": reason}
     return {
@@ -1193,7 +1214,12 @@ def notify_progress_snapshot(job: dict, screenshot_path: str, summary: str = "")
             job_id=str(job.get("job_id") or ""),
         )
         if result.get("success"):
-            return {"status": "sent", "platform": platform, "message_id": result.get("message_id"), "media_mode": "web_outbox"}
+            return {
+                "status": "sent",
+                "platform": platform,
+                "message_id": result.get("message_id"),
+                "media_mode": "web_outbox",
+            }
         return {
             "status": "failed",
             "platform": platform,
@@ -1207,15 +1233,24 @@ def notify_progress_snapshot(job: dict, screenshot_path: str, summary: str = "")
 
     async def _send() -> dict:
         if platform == "qqbot":
-            return await _send_qq_image_attachment(str(chat_id), screenshot_path, caption=message, chat_type=str(chat_type or ""))
+            return await _send_qq_image_attachment(
+                str(chat_id), screenshot_path, caption=message, chat_type=str(chat_type or "")
+            )
         if platform == "telegram":
-            return await _send_telegram_image_attachment(str(chat_id), screenshot_path, caption=message, thread_id=str(thread_id or ""))
+            return await _send_telegram_image_attachment(
+                str(chat_id), screenshot_path, caption=message, thread_id=str(thread_id or "")
+            )
         return await _send_weixin_image_attachment(str(chat_id), screenshot_path, caption=message)
 
     try:
         result = _run_async_send(_send)
     except Exception as exc:
-        return {"status": "failed", "platform": platform, "code": f"{platform}_progress_snapshot_failed", "error": type(exc).__name__}
+        return {
+            "status": "failed",
+            "platform": platform,
+            "code": f"{platform}_progress_snapshot_failed",
+            "error": type(exc).__name__,
+        }
     if result.get("success"):
         return {
             "status": "sent",
@@ -1245,7 +1280,9 @@ def notify_terminal_job(job: dict) -> dict:
     thread_id = delivery.get("thread_id")
     if platform == "web":
         exported_paths = _exported_media_paths(job) if job.get("status") == "succeeded" else []
-        message = format_platform_final_message(job, media_delivery="sent" if exported_paths else None, platform=platform)
+        message = format_platform_final_message(
+            job, media_delivery="sent" if exported_paths else None, platform=platform
+        )
         result = _send_web_outbox(
             str(chat_id),
             message,
@@ -1302,7 +1339,9 @@ def notify_terminal_job(job: dict) -> dict:
                 if platform == "qqbot":
                     media_result = await _send_qq_video_attachment(str(chat_id), delivery_path, str(chat_type or ""))
                 elif platform == "telegram":
-                    media_result = await _send_telegram_video_attachment(str(chat_id), delivery_path, str(thread_id or ""))
+                    media_result = await _send_telegram_video_attachment(
+                        str(chat_id), delivery_path, str(thread_id or "")
+                    )
                 else:
                     media_result = await _send_weixin_video_attachment(str(chat_id), delivery_path)
             if not media_result.get("success"):
@@ -1327,7 +1366,11 @@ def notify_terminal_job(job: dict) -> dict:
                     "error": str(text_result.get("error") or media_result.get("error") or "unknown")[:200],
                 }
             zip_result = None
-            if platform == "weixin" and media_result.get("mode") == "weixin_compatible_mp4" and _send_original_zip_enabled():
+            if (
+                platform == "weixin"
+                and media_result.get("mode") == "weixin_compatible_mp4"
+                and _send_original_zip_enabled()
+            ):
                 try:
                     zip_path = _zip_original_export(exported_paths[0])
                     zip_result = await _send_weixin_file_attachment(str(chat_id), str(zip_path))
@@ -1360,8 +1403,16 @@ def notify_terminal_job(job: dict) -> dict:
                     "media_message_id": media_result.get("message_id"),
                     "media_mode": media_result.get("mode") or "native",
                     **({"original_too_large": True} if telegram_preview_info else {}),
-                    **({"original_size_bytes": telegram_preview_info.get("original_size_bytes")} if telegram_preview_info else {}),
-                    **({"zip_message_id": zip_result.get("message_id")} if zip_result and zip_result.get("success") else {}),
+                    **(
+                        {"original_size_bytes": telegram_preview_info.get("original_size_bytes")}
+                        if telegram_preview_info
+                        else {}
+                    ),
+                    **(
+                        {"zip_message_id": zip_result.get("message_id")}
+                        if zip_result and zip_result.get("success")
+                        else {}
+                    ),
                 }
             return {
                 "success": True,
@@ -1369,10 +1420,24 @@ def notify_terminal_job(job: dict) -> dict:
                 "media_message_id": media_result.get("message_id"),
                 "media_mode": media_result.get("mode") or "native",
                 **({"original_too_large": True} if telegram_preview_info else {}),
-                **({"original_size_bytes": telegram_preview_info.get("original_size_bytes")} if telegram_preview_info else {}),
-                **({"preview_size_bytes": Path(str(telegram_preview_info.get("preview_path"))).stat().st_size} if telegram_preview_info and Path(str(telegram_preview_info.get("preview_path"))).exists() else {}),
-                **({"original_reference": telegram_preview_info.get("original_reference")} if telegram_preview_info else {}),
-                **({"zip_message_id": zip_result.get("message_id")} if zip_result and zip_result.get("success") else {}),
+                **(
+                    {"original_size_bytes": telegram_preview_info.get("original_size_bytes")}
+                    if telegram_preview_info
+                    else {}
+                ),
+                **(
+                    {"preview_size_bytes": Path(str(telegram_preview_info.get("preview_path"))).stat().st_size}
+                    if telegram_preview_info and Path(str(telegram_preview_info.get("preview_path"))).exists()
+                    else {}
+                ),
+                **(
+                    {"original_reference": telegram_preview_info.get("original_reference")}
+                    if telegram_preview_info
+                    else {}
+                ),
+                **(
+                    {"zip_message_id": zip_result.get("message_id")} if zip_result and zip_result.get("success") else {}
+                ),
                 **({"zip_error": zip_result.get("error")} if zip_result and not zip_result.get("success") else {}),
             }
         message = format_platform_final_message(job, platform=platform)
@@ -1385,7 +1450,12 @@ def notify_terminal_job(job: dict) -> dict:
     try:
         result = _run_async_send(_send)
     except Exception as exc:
-        return {"status": "failed", "platform": platform, "code": f"{platform}_send_failed", "error": type(exc).__name__}
+        return {
+            "status": "failed",
+            "platform": platform,
+            "code": f"{platform}_send_failed",
+            "error": type(exc).__name__,
+        }
     if result.get("success"):
         payload = {"status": "sent", "platform": platform, "message_id": result.get("message_id")}
         if result.get("media_message_id"):

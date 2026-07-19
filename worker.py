@@ -10,7 +10,9 @@ if __package__:
     from . import browser, jobs, notifier, transport
 else:
     root = Path(__file__).resolve().parent
-    spec = importlib.util.spec_from_file_location("cassette", root / "__init__.py", submodule_search_locations=[str(root)])
+    spec = importlib.util.spec_from_file_location(
+        "cassette", root / "__init__.py", submodule_search_locations=[str(root)]
+    )
     module = importlib.util.module_from_spec(spec)
     sys.modules["cassette"] = module
     assert spec.loader is not None
@@ -51,7 +53,13 @@ def run(job_id: str, action: str = "run") -> dict:
         job = jobs.update_job(
             job_id,
             status="failed",
-            errors=[{"code": "internal_error", "message": str(exc), "details": {"type": type(exc).__name__, "trace": traceback.format_exc(limit=3)}}],
+            errors=[
+                {
+                    "code": "internal_error",
+                    "message": str(exc),
+                    "details": {"type": type(exc).__name__, "trace": traceback.format_exc(limit=3)},
+                }
+            ],
             finished_at=jobs.now_iso(),
         )
         job["notification"] = notifier.notify_terminal_job(job)

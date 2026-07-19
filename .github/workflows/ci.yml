@@ -32,6 +32,7 @@ jobs:
           filters: |
             python:
               - '**/*.py'
+              - 'pyproject.toml'
               - 'requirements-web.txt'
               - 'requirements-mcp.in'
               - 'requirements-mcp.lock'
@@ -94,6 +95,22 @@ jobs:
               - '.gitignore'
               - '.env.example'
               - '.github/workflows/ci.yml'
+
+  lint:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      # Pinned so formatter-output changes in new ruff releases can't break CI.
+      - name: Install ruff
+        run: python -m pip install ruff==0.15.22
+      - run: ruff check .
+      - run: ruff format --check .
 
   test:
     needs: changes
@@ -299,7 +316,7 @@ jobs:
   # never expand their matrix, so their per-leg check names don't exist on
   # docs-only PRs — this aggregate tolerates skips but fails on any failure.
   ci-ok:
-    needs: [changes, test, mcp-macos-smoke, native-packaging, install-smoke, frontend]
+    needs: [changes, lint, test, mcp-macos-smoke, native-packaging, install-smoke, frontend]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 3

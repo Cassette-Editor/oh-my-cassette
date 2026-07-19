@@ -1,4 +1,5 @@
 """Locked, idempotent virtual-environment bootstrap for the local MCP plugin."""
+
 from __future__ import annotations
 
 import hashlib

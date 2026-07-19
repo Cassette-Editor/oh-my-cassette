@@ -24,16 +24,18 @@ def _tool_payload(result: str) -> dict:
 
 
 def _failure(code: str, message: str, job: dict | None = None, result_path: str = "") -> int:
-    json_stdout({
-        "success": False,
-        "transport": os.getenv("CASSETTE_TRANSPORT", "browser"),
-        "job_id": str((job or {}).get("job_id") or ""),
-        "status": str((job or {}).get("status") or code),
-        "manifest_path": "",
-        "result_path": result_path,
-        "output_links": output_links(job or {}),
-        "errors": [{"code": code, "message": message}],
-    })
+    json_stdout(
+        {
+            "success": False,
+            "transport": os.getenv("CASSETTE_TRANSPORT", "browser"),
+            "job_id": str((job or {}).get("job_id") or ""),
+            "status": str((job or {}).get("status") or code),
+            "manifest_path": "",
+            "result_path": result_path,
+            "output_links": output_links(job or {}),
+            "errors": [{"code": code, "message": message}],
+        }
+    )
     return 1
 
 
@@ -65,41 +67,55 @@ def main() -> int:
     if media_parent not in roots:
         roots.append(media_parent)
     os.environ["CASSETTE_ALLOWED_SOURCE_ROOTS"] = os.pathsep.join(roots)
-    os.environ.setdefault("CASSETTE_ALLOWED_EXTENSIONS", ".mp4,.mov,.m4v,.webm,.jpg,.jpeg,.png,.webp,.gif,.mp3,.wav,.m4a,.aac")
+    os.environ.setdefault(
+        "CASSETTE_ALLOWED_EXTENSIONS", ".mp4,.mov,.m4v,.webm,.jpg,.jpeg,.png,.webp,.gif,.mp3,.wav,.m4a,.aac"
+    )
     os.environ.setdefault("CASSETTE_MAX_BYTES", "2147483648")
     load_cassette_package()
 
     from cassette import manifest as cassette_manifest
     from cassette import tools
 
-    ingest = _tool_payload(tools.cassette_ingest_media({
-        "source_path": str(media),
-        "original_name": media.name,
-        "media_type": "video",
-        "session_id": args.session_id,
-        "caption": "local e2e fixture",
-    }))
+    ingest = _tool_payload(
+        tools.cassette_ingest_media(
+            {
+                "source_path": str(media),
+                "original_name": media.name,
+                "media_type": "video",
+                "session_id": args.session_id,
+                "caption": "local e2e fixture",
+            }
+        )
+    )
     if not ingest.get("ok"):
         error = ingest.get("error") or {}
         return _failure(str(error.get("code") or "ingest_failed"), "cassette_ingest_media failed")
 
-    made = _tool_payload(tools.cassette_make_prompt({
-        "instruction": args.instruction,
-        "session_id": args.session_id,
-        "requires_assets": True,
-    }))
+    made = _tool_payload(
+        tools.cassette_make_prompt(
+            {
+                "instruction": args.instruction,
+                "session_id": args.session_id,
+                "requires_assets": True,
+            }
+        )
+    )
     if not made.get("ok"):
         error = made.get("error") or {}
         return _failure(str(error.get("code") or "make_prompt_failed"), "cassette_make_prompt failed")
 
     wait = _parse_bool(str(args.wait))
-    run = _tool_payload(tools.cassette_run_job({
-        "prompt": made["data"]["prompt"],
-        "instruction": args.instruction,
-        "session_id": args.session_id,
-        "wait": wait,
-        "timeout_sec": args.timeout_sec,
-    }))
+    run = _tool_payload(
+        tools.cassette_run_job(
+            {
+                "prompt": made["data"]["prompt"],
+                "instruction": args.instruction,
+                "session_id": args.session_id,
+                "wait": wait,
+                "timeout_sec": args.timeout_sec,
+            }
+        )
+    )
     if not run.get("ok"):
         error = run.get("error") or {}
         return _failure(str(error.get("code") or "run_job_failed"), "cassette_run_job failed")
@@ -130,16 +146,20 @@ def main() -> int:
     elif status in {"failed", "timed_out", "timeout", "cancelled"} and not errors:
         errors.append({"code": status})
 
-    json_stdout({
-        "success": success,
-        "transport": os.getenv("CASSETTE_TRANSPORT", "browser"),
-        "job_id": str(job.get("job_id") or ""),
-        "status": status,
-        "manifest_path": made["data"].get("manifest_path", ""),
-        "result_path": str(cassette_manifest.get_asset_root() / "jobs" / f"{job.get('job_id')}.json") if job.get("job_id") else "",
-        "output_links": links,
-        "errors": errors,
-    })
+    json_stdout(
+        {
+            "success": success,
+            "transport": os.getenv("CASSETTE_TRANSPORT", "browser"),
+            "job_id": str(job.get("job_id") or ""),
+            "status": status,
+            "manifest_path": made["data"].get("manifest_path", ""),
+            "result_path": str(cassette_manifest.get_asset_root() / "jobs" / f"{job.get('job_id')}.json")
+            if job.get("job_id")
+            else "",
+            "output_links": links,
+            "errors": errors,
+        }
+    )
     return 0 if success else 1
 
 

@@ -29,6 +29,7 @@ same session id. A run is executed by the upstream LangGraph queue worker: if it
 'pending' (queue not draining) the transport fails fast with 'agent_run_not_started' rather than
 hanging until the job timeout.
 """
+
 from __future__ import annotations
 
 import json
@@ -70,11 +71,13 @@ _NAVIGATE_NOOP_RESULT = {
 # plugin's model_selection holds UI labels (or is empty), so it is only forwarded when it already
 # names a product model id; otherwise the configured/default model is used.
 DEFAULT_AGENT_MODEL_ID = "deepseek/deepseek-v4-flash"
-_SUPPORTED_AGENT_MODEL_IDS = frozenset({
-    "deepseek/deepseek-v4-flash",
-    "deepseek/deepseek-v4-pro",
-    "openai/gpt-5.4-mini",
-})
+_SUPPORTED_AGENT_MODEL_IDS = frozenset(
+    {
+        "deepseek/deepseek-v4-flash",
+        "deepseek/deepseek-v4-pro",
+        "openai/gpt-5.4-mini",
+    }
+)
 # The plugin's model_selection stores a UI *label* (browser.py scrapes only the label, not the id),
 # so map the label -> agent model id to honor the user's model choice on the api path. Labels are
 # locale-independent brand names (cassette-config MODEL_OPTIONS i18n; identical in zh and en).
@@ -120,12 +123,20 @@ def _model_id_from_label(label: str) -> str | None:
         return "openai/gpt-5.4-mini"
     return None
 
+
 # Quality subkeys that _result computes from the current outcome — never carry these forward from a
 # prior job's quality (they would clobber the fresh values with stale ones).
-_RESULT_COMPUTED_QUALITY_KEYS = frozenset({
-    "transport", "completion_observed", "export_completed", "export_pending",
-    "output_link_count", "local_output_count", "risk",
-})
+_RESULT_COMPUTED_QUALITY_KEYS = frozenset(
+    {
+        "transport",
+        "completion_observed",
+        "export_completed",
+        "export_pending",
+        "output_link_count",
+        "local_output_count",
+        "risk",
+    }
+)
 
 
 class ApiTransportError(RuntimeError):
@@ -160,6 +171,7 @@ def _env(name: str) -> str:
         pass
     try:
         from . import notifier
+
         getter = getattr(notifier, "_runtime_env", None)
         if callable(getter):
             return str(getter(name) or "").strip()
@@ -251,9 +263,12 @@ class ApiTransport:
             outputs = self._export_project(session_id, job_id, deadline=export_deadline)
         except _JobCancelled:
             return self._result(
-                _CANCELLED, questions=questions, errors=errors,
+                _CANCELLED,
+                questions=questions,
+                errors=errors,
                 completion_observed=bool(prior_quality.get("completion_observed")),
-                export_completed=False, risk="medium",
+                export_completed=False,
+                risk="medium",
                 extra_quality={k: v for k, v in prior_quality.items() if k not in _RESULT_COMPUTED_QUALITY_KEYS},
                 final_screenshot=job.get("final_screenshot"),
             )
@@ -270,7 +285,8 @@ class ApiTransport:
                 "decision": str(decision.get("decision") or "export"),
                 "reason": str(decision.get("reason") or "")[:500],
             },
-            "progress_summary": str(decision.get("summary") or prior_quality.get("progress_summary") or "")[:700] or None,
+            "progress_summary": str(decision.get("summary") or prior_quality.get("progress_summary") or "")[:700]
+            or None,
             "current_stage": "export",
         }
         return self._result(
@@ -322,17 +338,47 @@ class ApiTransport:
             questions.extend(run_questions)
 
             if run_status == _NEEDS_USER:
-                return self._result(_NEEDS_USER, questions=questions, errors=errors,
-                                    completion_observed=True, export_completed=False, risk="medium",
-                                    extra_quality={"progress_summary": self._questions_summary(questions)})
+                return self._result(
+                    _NEEDS_USER,
+                    questions=questions,
+                    errors=errors,
+                    completion_observed=True,
+                    export_completed=False,
+                    risk="medium",
+                    extra_quality={"progress_summary": self._questions_summary(questions)},
+                )
             if run_status == _TIMED_OUT:
-                errors.append({"code": "agent_run_timeout", "message": "Agent run did not finish before the job timeout", "details": {}})
-                return self._result(_TIMED_OUT, questions=questions, errors=errors,
-                                    completion_observed=False, export_completed=False, risk="medium")
+                errors.append(
+                    {
+                        "code": "agent_run_timeout",
+                        "message": "Agent run did not finish before the job timeout",
+                        "details": {},
+                    }
+                )
+                return self._result(
+                    _TIMED_OUT,
+                    questions=questions,
+                    errors=errors,
+                    completion_observed=False,
+                    export_completed=False,
+                    risk="medium",
+                )
             if run_status != _SUCCEEDED:
-                errors.append({"code": "agent_run_incomplete", "message": f"Agent run ended with status '{run_status}'", "details": {}})
-                return self._result(_FAILED, questions=questions, errors=errors,
-                                    completion_observed=True, export_completed=False, risk="high")
+                errors.append(
+                    {
+                        "code": "agent_run_incomplete",
+                        "message": f"Agent run ended with status '{run_status}'",
+                        "details": {},
+                    }
+                )
+                return self._result(
+                    _FAILED,
+                    questions=questions,
+                    errors=errors,
+                    completion_observed=True,
+                    export_completed=False,
+                    risk="high",
+                )
 
             edit_summary = self._latest_agent_summary(thread_id) or "Cassette reports the requested edit is complete."
 
@@ -342,23 +388,43 @@ class ApiTransport:
             # resolves. Only auto-export when CASSETTE_API_AUTO_EXPORT is set (the api-success signal is
             # authoritative) — that path is NOT browser-parity and is documented as such.
             if _export_on_complete(job) and not _auto_export():
-                questions.append({
-                    "question": edit_summary[:500],
-                    "requires_user": False,
-                    "reason": "completion_requires_hermes_review",
-                    "answer": ("The latest Cassette reply needs Hermes supervisor semantic review before deciding "
-                               "whether to export, continue, fail, or ask the user."),
-                })
-                return self._result(_NEEDS_USER, questions=questions, errors=errors,
-                                    completion_observed=False, export_completed=False, risk="medium",
-                                    extra_quality={"completion_review_required": True,
-                                                   "completion_source": "cassette_agent_success",
-                                                   "progress_summary": edit_summary, "current_stage": "agent"})
+                questions.append(
+                    {
+                        "question": edit_summary[:500],
+                        "requires_user": False,
+                        "reason": "completion_requires_hermes_review",
+                        "answer": (
+                            "The latest Cassette reply needs Hermes supervisor semantic review before deciding "
+                            "whether to export, continue, fail, or ask the user."
+                        ),
+                    }
+                )
+                return self._result(
+                    _NEEDS_USER,
+                    questions=questions,
+                    errors=errors,
+                    completion_observed=False,
+                    export_completed=False,
+                    risk="medium",
+                    extra_quality={
+                        "completion_review_required": True,
+                        "completion_source": "cassette_agent_success",
+                        "progress_summary": edit_summary,
+                        "current_stage": "agent",
+                    },
+                )
             if not _export_on_complete(job):
                 # Export not requested for this job — finish without rendering (browser parity).
-                return self._result(_SUCCEEDED, questions=questions, errors=errors, completion_observed=True,
-                                    export_completed=False, export_pending=False, risk="medium",
-                                    extra_quality={"progress_summary": edit_summary, "current_stage": "agent"})
+                return self._result(
+                    _SUCCEEDED,
+                    questions=questions,
+                    errors=errors,
+                    completion_observed=True,
+                    export_completed=False,
+                    export_pending=False,
+                    risk="medium",
+                    extra_quality={"progress_summary": edit_summary, "current_stage": "agent"},
+                )
 
             # Auto-export (opt-in). If it fails, the edit still happened, so report 'succeeded' with
             # export_pending rather than masking it as a failure (consumed by _job_report).
@@ -369,10 +435,20 @@ class ApiTransport:
                 raise
             except ApiTransportError as exc:
                 errors.append(self._error(exc))
-                return self._result(_SUCCEEDED, questions=questions, errors=errors,
-                                    completion_observed=True, export_completed=False, export_pending=True, risk="medium",
-                                    extra_quality={"progress_summary": edit_summary or "Cassette edit committed; the export did not complete in time.",
-                                                   "current_stage": "export"})
+                return self._result(
+                    _SUCCEEDED,
+                    questions=questions,
+                    errors=errors,
+                    completion_observed=True,
+                    export_completed=False,
+                    export_pending=True,
+                    risk="medium",
+                    extra_quality={
+                        "progress_summary": edit_summary
+                        or "Cassette edit committed; the export did not complete in time.",
+                        "current_stage": "export",
+                    },
+                )
             has_local = any(o.get("local_path") for o in outputs)
             return self._result(
                 _SUCCEEDED,
@@ -387,17 +463,35 @@ class ApiTransport:
                 final_screenshot=self._export_thumbnail(outputs),
             )
         except _JobCancelled:
-            return self._result(_CANCELLED, questions=questions, errors=errors,
-                                completion_observed=False, export_completed=False, risk="medium",
-                                extra_quality={"progress_summary": "Cassette job was cancelled before it finished."})
+            return self._result(
+                _CANCELLED,
+                questions=questions,
+                errors=errors,
+                completion_observed=False,
+                export_completed=False,
+                risk="medium",
+                extra_quality={"progress_summary": "Cassette job was cancelled before it finished."},
+            )
         except ApiTransportError as exc:
             errors.append(self._error(exc))
-            return self._result(_FAILED, questions=questions, errors=errors,
-                                completion_observed=False, export_completed=False, risk="high")
+            return self._result(
+                _FAILED,
+                questions=questions,
+                errors=errors,
+                completion_observed=False,
+                export_completed=False,
+                risk="high",
+            )
         except Exception as exc:  # noqa: BLE001
             errors.append(self._error(exc))
-            return self._result(_FAILED, questions=questions, errors=errors,
-                                completion_observed=False, export_completed=False, risk="high")
+            return self._result(
+                _FAILED,
+                questions=questions,
+                errors=errors,
+                completion_observed=False,
+                export_completed=False,
+                risk="high",
+            )
 
     def resume(self, job: dict, response: str) -> dict:
         """Resume a persisted API ``ask_user`` interrupt on the same LangGraph thread."""
@@ -566,8 +660,12 @@ class ApiTransport:
             return
         email, password = _credentials()
         if not email or not password:
-            raise ApiTransportError("auth_missing_credentials", "CASSETTE_AUTH_EMAIL/PASSWORD are required for the API transport")
-        status, body = self._request("POST", "/api/agent-auth/verify", json_body={"email": email, "password": password}, authed=False)
+            raise ApiTransportError(
+                "auth_missing_credentials", "CASSETTE_AUTH_EMAIL/PASSWORD are required for the API transport"
+            )
+        status, body = self._request(
+            "POST", "/api/agent-auth/verify", json_body={"email": email, "password": password}, authed=False
+        )
         if status != 200 or not isinstance(body, dict):
             raise ApiTransportError("auth_failed", f"Cassette sign-in failed (HTTP {status})")
         session = body.get("session") or {}
@@ -590,8 +688,13 @@ class ApiTransport:
         # uploaded media is visible to the agent run AND bound to the project that gets exported.
         headers = {"x-session-id": session_id, "x-project-id": session_id}
 
-        _, init = self._request("POST", "/api/media/upload/init",
-                                json_body={"fileName": file_name, "mimeType": mime}, headers=headers, expect=200)
+        _, init = self._request(
+            "POST",
+            "/api/media/upload/init",
+            json_body={"fileName": file_name, "mimeType": mime},
+            headers=headers,
+            expect=200,
+        )
         if not isinstance(init, dict) or not init.get("uploadUrl") or not init.get("key"):
             raise ApiTransportError("upload_init_failed", f"upload/init returned an unexpected body for {file_name}")
         key = str(init["key"])
@@ -601,14 +704,22 @@ class ApiTransport:
 
         self._put_bytes(str(init["uploadUrl"]), file_path.read_bytes(), upload_content_type)
 
-        complete_body = {"key": key, "fileName": file_name, "mimeType": mime,
-                         "storageBackend": storage_backend, "metadata": {}}
+        complete_body = {
+            "key": key,
+            "fileName": file_name,
+            "mimeType": mime,
+            "storageBackend": storage_backend,
+            "metadata": {},
+        }
         if upload_attempt_id:
             complete_body["uploadAttemptId"] = upload_attempt_id
-        _, complete = self._request("POST", "/api/media/upload/complete",
-                                    json_body=complete_body, headers=headers, expect=200)
+        _, complete = self._request(
+            "POST", "/api/media/upload/complete", json_body=complete_body, headers=headers, expect=200
+        )
         if not isinstance(complete, dict) or not complete.get("mediaFileId"):
-            raise ApiTransportError("upload_complete_failed", f"upload/complete returned no mediaFileId for {file_name}")
+            raise ApiTransportError(
+                "upload_complete_failed", f"upload/complete returned no mediaFileId for {file_name}"
+            )
 
         media_file_id = str(complete["mediaFileId"])
         if str(mime).startswith("video/") and complete.get("uploadStatus") != "completed":
@@ -627,13 +738,14 @@ class ApiTransport:
             if upload_status == "completed":
                 return
             if upload_status == "failed" or status_code == 409:
-                raise ApiTransportError("upload_processing_failed",
-                                        str((body or {}).get("error") or f"Media processing failed for key {key}"))
+                raise ApiTransportError(
+                    "upload_processing_failed",
+                    str((body or {}).get("error") or f"Media processing failed for key {key}"),
+                )
             time.sleep(self._poll_interval())
         raise ApiTransportError("upload_processing_timeout", f"Media processing did not complete for key {key}")
 
-    def _await_media_ready(self, session_id: str, media_file_ids: list[str], deadline: float,
-                           job_id: str = "") -> None:
+    def _await_media_ready(self, session_id: str, media_file_ids: list[str], deadline: float, job_id: str = "") -> None:
         """Wait until every uploaded media file is fully processed before starting the agent run.
 
         GET /api/media/operations/status?ids= reports per-file readiness: aiReady/analysisReady (the
@@ -660,13 +772,19 @@ class ApiTransport:
                 # A failed analysis or render derivative won't self-heal (same bytes re-fail), and the
                 # server leaves terminalState 'active' on a failed analyze chunk — so surface the real
                 # error fast instead of spinning until the media-ready timeout.
-                if (s.get("terminalState") == "failed" or s.get("renderStatus") == "failed"
-                        or s.get("analyzeStatus") == "analyze_failed"):
+                if (
+                    s.get("terminalState") == "failed"
+                    or s.get("renderStatus") == "failed"
+                    or s.get("analyzeStatus") == "analyze_failed"
+                ):
                     raise ApiTransportError(
                         "media_processing_failed",
                         str(s.get("errorMessage") or f"Media {mid} failed processing"),
-                        details={"media_file_id": mid, "analyze_status": s.get("analyzeStatus"),
-                                 "render_status": s.get("renderStatus")},
+                        details={
+                            "media_file_id": mid,
+                            "analyze_status": s.get("analyzeStatus"),
+                            "render_status": s.get("renderStatus"),
+                        },
                     )
                 if s.get("fullyReady") or (self._ai_ready(s) and self._export_ready(s)):
                     ready.add(mid)
@@ -774,15 +892,20 @@ class ApiTransport:
         if _env("CASSETTE_API_EXPORT_THUMBNAIL").lower() in {"0", "false", "no", "off"}:
             return None
         try:
-            path = next((o.get("local_path") for o in (outputs or [])
-                         if isinstance(o, dict) and o.get("local_path")), None)
+            path = next(
+                (o.get("local_path") for o in (outputs or []) if isinstance(o, dict) and o.get("local_path")), None
+            )
             if not path or not Path(path).exists():
                 return None
             import subprocess
+
             ffmpeg = _env("CASSETTE_FFMPEG_BIN") or "ffmpeg"
             target = Path(path).with_suffix(".thumb.jpg")
-            subprocess.run([ffmpeg, "-v", "error", "-y", "-ss", "0.5", "-i", path,
-                            "-frames:v", "1", str(target)], capture_output=True, timeout=30)
+            subprocess.run(
+                [ffmpeg, "-v", "error", "-y", "-ss", "0.5", "-i", path, "-frames:v", "1", str(target)],
+                capture_output=True,
+                timeout=30,
+            )
             return str(target) if target.exists() and target.stat().st_size > 0 else None
         except Exception:  # noqa: BLE001
             return None
@@ -806,8 +929,9 @@ class ApiTransport:
             "mediaSessionId": session_id,
             "chatSessionId": session_id,
         }
-        _, body = self._request("POST", "/api/langgraph/threads",
-                                json_body={"metadata": metadata, "if_exists": "do_nothing"}, expect=200)
+        _, body = self._request(
+            "POST", "/api/langgraph/threads", json_body={"metadata": metadata, "if_exists": "do_nothing"}, expect=200
+        )
         thread_id = (body.get("thread_id") or body.get("threadId")) if isinstance(body, dict) else None
         if not thread_id:
             raise ApiTransportError("thread_create_failed", "LangGraph thread create returned no thread_id")
@@ -914,8 +1038,9 @@ class ApiTransport:
         env_default = _env("CASSETTE_DEFAULT_THINKING_LEVEL").lower()
         return env_default if env_default in valid else _DEFAULT_THINKING
 
-    def _run_agent(self, thread_id: str, session_id: str, prompt: str, job: dict,
-                   deadline: float) -> tuple[str, list[dict]]:
+    def _run_agent(
+        self, thread_id: str, session_id: str, prompt: str, job: dict, deadline: float
+    ) -> tuple[str, list[dict]]:
         """Start the run, satisfy interrupts headlessly, return (terminal_status, questions).
 
         Uploaded media is NOT passed as ids — the cassette-chat graph reads the session-scoped media
@@ -971,11 +1096,15 @@ class ApiTransport:
                     # Interrupted with nothing pending == treat as needing user. Carry a summary so the
                     # terminal message is not a bare headline (parity with the browser needs_user path).
                     summary = self._latest_agent_summary(thread_id) or "Cassette paused and needs input to continue."
-                    questions.append({"question": summary[:500], "requires_user": True,
-                                      "reason": "cassette_agent_question", "answer": ""})
-                    self._persist_continuation(
-                        job_id, thread_id, session_id, config, run_id, interrupts=[]
+                    questions.append(
+                        {
+                            "question": summary[:500],
+                            "requires_user": True,
+                            "reason": "cassette_agent_question",
+                            "answer": "",
+                        }
                     )
+                    self._persist_continuation(job_id, thread_id, session_id, config, run_id, interrupts=[])
                     return _NEEDS_USER, questions
                 resume_value, new_questions, needs_user = self._resume_value(interrupts)
                 questions.extend(new_questions)
@@ -991,15 +1120,16 @@ class ApiTransport:
                         interrupts=interrupts,
                     )
                     return _NEEDS_USER, questions
-                run_id = self._post_run(thread_id, {
-                    "assistant_id": "cassette-chat",
-                    "command": {"resume": resume_value},
-                    "config": config,
-                    "multitask_strategy": "interrupt",
-                })
-                self._persist_continuation(
-                    job_id, thread_id, session_id, config, run_id, interrupts=[]
+                run_id = self._post_run(
+                    thread_id,
+                    {
+                        "assistant_id": "cassette-chat",
+                        "command": {"resume": resume_value},
+                        "config": config,
+                        "multitask_strategy": "interrupt",
+                    },
                 )
+                self._persist_continuation(job_id, thread_id, session_id, config, run_id, interrupts=[])
                 continue
             if status == "success":
                 self._clear_continuation(job_id)
@@ -1132,8 +1262,9 @@ class ApiTransport:
         """Best-effort server-side cancel of an in-flight LangGraph run (so it actually stops,
         not just locally abandoned). Failures are swallowed — the job is already terminating."""
         try:
-            self._request("POST", f"/api/langgraph/threads/{thread_id}/runs/{run_id}/cancel?action=interrupt",
-                          json_body={})
+            self._request(
+                "POST", f"/api/langgraph/threads/{thread_id}/runs/{run_id}/cancel?action=interrupt", json_body={}
+            )
         except Exception:  # noqa: BLE001
             pass
 
@@ -1152,13 +1283,13 @@ class ApiTransport:
         for task in state.get("tasks") or []:
             if not isinstance(task, dict):
                 continue
-            for interrupt in (task.get("interrupts") or []):
+            for interrupt in task.get("interrupts") or []:
                 value = interrupt.get("value") if isinstance(interrupt, dict) else None
                 if isinstance(value, dict):
                     out.append({"id": interrupt.get("id"), "value": value})
         # Some LangGraph versions surface interrupts on the top-level __interrupt__ channel. Guard
         # against an explicit null (values["__interrupt__"] == None) which .get(..., []) would return.
-        for interrupt in ((state.get("values") or {}).get("__interrupt__") or []):
+        for interrupt in (state.get("values") or {}).get("__interrupt__") or []:
             if isinstance(interrupt, dict) and isinstance(interrupt.get("value"), dict):
                 out.append({"id": interrupt.get("id"), "value": interrupt["value"]})
         return out
@@ -1189,16 +1320,34 @@ class ApiTransport:
             # Each auto-handled interrupt leaves an audit record (requires_user=False), matching the
             # browser path's routine-approval question entries.
             if kind == "edit_plan_review":
-                questions.append({"question": "Cassette requested plan approval.", "requires_user": False,
-                                  "reason": "routine_plan_approval", "answer": "Auto-approved the edit plan."})
+                questions.append(
+                    {
+                        "question": "Cassette requested plan approval.",
+                        "requires_user": False,
+                        "reason": "routine_plan_approval",
+                        "answer": "Auto-approved the edit plan.",
+                    }
+                )
                 return {"action": "approve"}, questions, False
             if kind == "mode_switch":
-                questions.append({"question": "Cassette requested a mode switch.", "requires_user": False,
-                                  "reason": "routine_mode_switch", "answer": "Auto-switched to auto mode."})
+                questions.append(
+                    {
+                        "question": "Cassette requested a mode switch.",
+                        "requires_user": False,
+                        "reason": "routine_mode_switch",
+                        "answer": "Auto-switched to auto mode.",
+                    }
+                )
                 return {"action": "switch_mode", "selectedMode": "auto"}, questions, False
             if kind == "init_questions":
-                questions.append({"question": "Cassette asked initialization questions.", "requires_user": False,
-                                  "reason": "routine_init_questions", "answer": "Proceeded with defaults."})
+                questions.append(
+                    {
+                        "question": "Cassette asked initialization questions.",
+                        "requires_user": False,
+                        "reason": "routine_init_questions",
+                        "answer": "Proceeded with defaults.",
+                    }
+                )
                 return {}, questions, False
             if kind == "ask_user":
                 text = str(value.get("prompt") or value.get("question") or "")
@@ -1206,21 +1355,25 @@ class ApiTransport:
                 # is auto-answered with a safe default and the run continues; only a genuine user
                 # choice or a missing-required-asset returns needs_user (carrying the specific reason).
                 from . import prompt as _prompt
+
                 classification = _prompt.classify_cassette_question(text)
                 reason = classification.get("reason") or "cassette_agent_question"
                 default_answer = classification.get("answer") or ""
                 auto_reply = _env("CASSETTE_API_DEFAULT_ASK_USER_REPLY")
                 if not classification.get("requires_user"):
                     reply = auto_reply or default_answer or "Please proceed using your best judgment."
-                    questions.append({"question": text[:500], "requires_user": False,
-                                      "reason": reason, "answer": reply})
+                    questions.append(
+                        {"question": text[:500], "requires_user": False, "reason": reason, "answer": reply}
+                    )
                     return {"action": "respond", "userResponse": reply}, questions, False
                 if auto_reply:  # operator opted into unattended auto-answering even real questions
-                    questions.append({"question": text[:500], "requires_user": False,
-                                      "reason": reason, "answer": auto_reply})
+                    questions.append(
+                        {"question": text[:500], "requires_user": False, "reason": reason, "answer": auto_reply}
+                    )
                     return {"action": "respond", "userResponse": auto_reply}, questions, False
-                questions.append({"question": text[:500], "requires_user": True,
-                                  "reason": reason, "answer": default_answer})
+                questions.append(
+                    {"question": text[:500], "requires_user": True, "reason": reason, "answer": default_answer}
+                )
                 return None, questions, True
         if keyed:
             return keyed, questions, False
@@ -1232,8 +1385,10 @@ class ApiTransport:
         if deadline is None:
             deadline = time.monotonic() + 600.0
         from urllib.parse import quote
-        _, created = self._request("POST", f"/api/export/projects/{quote(str(session_id), safe='')}/jobs",
-                                   json_body={}, expect=202)
+
+        _, created = self._request(
+            "POST", f"/api/export/projects/{quote(str(session_id), safe='')}/jobs", json_body={}, expect=202
+        )
         export_job_id = created.get("jobId") if isinstance(created, dict) else None
         if not export_job_id:
             raise ApiTransportError("export_create_failed", "Export create returned no jobId")
@@ -1252,26 +1407,33 @@ class ApiTransport:
             if status == "error":
                 raise ApiTransportError("export_failed", str((body or {}).get("error") or "Export job failed"))
             pct = (body or {}).get("progressPercent") if isinstance(body, dict) else None
-            self._tick(job_id, "Rendering the export (" + (status or "rendering")
-                       + (f" {pct}%" if pct is not None else "") + ")")
+            self._tick(
+                job_id,
+                "Rendering the export (" + (status or "rendering") + (f" {pct}%" if pct is not None else "") + ")",
+            )
             time.sleep(self._poll_interval())
         if not file_url:
             raise ApiTransportError("export_timeout", "Export job did not complete in time")
 
         target = _exports_dir(job_id) / f"{job_id}.mp4"
         self._download(f"/api/export/jobs/{export_job_id}/file", target)
-        return [{
-            "text": target.name,
-            "href": file_url,
-            "download": target.name,
-            "local_path": str(target),
-            "kind": "video",
-        }]
+        return [
+            {
+                "text": target.name,
+                "href": file_url,
+                "download": target.name,
+                "local_path": str(target),
+                "kind": "video",
+            }
+        ]
 
     def _download(self, path: str, target: Path, *, _retried: bool = False) -> None:
         request = Request(_api_base() + path, method="GET", headers=self._auth_headers({}))
         try:
-            with urlopen(request, timeout=max(120.0, self._http_timeout_for_upload(0))) as response, target.open("wb") as fh:
+            with (
+                urlopen(request, timeout=max(120.0, self._http_timeout_for_upload(0))) as response,
+                target.open("wb") as fh,
+            ):
                 while True:
                     chunk = response.read(1024 * 256)
                     if not chunk:
@@ -1294,8 +1456,8 @@ class ApiTransport:
         self._stage_timings: dict[str, dict] = {}
         self._current_stage = ""
         now = time.monotonic()
-        self._last_event = 0.0        # force an event on the first stage
-        self._last_heartbeat = now    # first heartbeat waits one full interval
+        self._last_event = 0.0  # force an event on the first stage
+        self._last_heartbeat = now  # first heartbeat waits one full interval
         self._run_started = now
 
     def _enter_stage(self, job_id: str, stage: str, summary: str) -> None:
@@ -1317,8 +1479,9 @@ class ApiTransport:
         self._last_event = 0.0  # always emit an event at a stage boundary
         self._tick(job_id, summary, force_event=True)
 
-    def _tick(self, job_id: str, summary: str, status: str = "running", outputs: list | None = None,
-              force_event: bool = False) -> None:
+    def _tick(
+        self, job_id: str, summary: str, status: str = "running", outputs: list | None = None, force_event: bool = False
+    ) -> None:
         """Called from phase boundaries and inside the poll loops. Appends a bounded progress_events
         entry on the event interval and sends a TEXT progress heartbeat on the snapshot interval (the
         api path has no browser, so the screenshot heartbeat becomes a text heartbeat)."""
@@ -1327,7 +1490,8 @@ class ApiTransport:
         now = time.monotonic()
         if self._current_stage in self._stage_timings:
             self._stage_timings[self._current_stage]["duration_sec"] = round(
-                now - self._stage_timings[self._current_stage].get("started_mono", now), 1)
+                now - self._stage_timings[self._current_stage].get("started_mono", now), 1
+            )
         if force_event or (now - self._last_event) >= self._event_interval():
             self._last_event = now
             self._append_event(job_id, summary, status, outputs)
@@ -1338,16 +1502,23 @@ class ApiTransport:
     def _append_event(self, job_id: str, summary: str, status: str, outputs: list | None) -> None:
         try:
             from . import jobs
+
             events = list(jobs.load_job(job_id).get("progress_events") or [])[-9:]
-            events.append({
-                "at": self._now_iso(),
-                "status": status,
-                "summary": str(summary)[:500],
-                "stage": self._current_stage,
-                "output_link_count": len(outputs or []),
-            })
-            jobs.update_job(job_id, progress_events=events, current_stage=self._current_stage,
-                            stage_timings=self._public_stage_timings())
+            events.append(
+                {
+                    "at": self._now_iso(),
+                    "status": status,
+                    "summary": str(summary)[:500],
+                    "stage": self._current_stage,
+                    "output_link_count": len(outputs or []),
+                }
+            )
+            jobs.update_job(
+                job_id,
+                progress_events=events,
+                current_stage=self._current_stage,
+                stage_timings=self._public_stage_timings(),
+            )
         except Exception:  # noqa: BLE001 — progress recording must never break the run
             pass
 
@@ -1360,6 +1531,7 @@ class ApiTransport:
             return
         try:
             from . import notifier
+
             elapsed = int(time.monotonic() - getattr(self, "_run_started", time.monotonic()))
             stage = self._current_stage or "running"
             message = f"Cassette job in progress — {stage} ({elapsed}s elapsed)."
@@ -1370,8 +1542,7 @@ class ApiTransport:
             pass
 
     def _public_stage_timings(self) -> dict:
-        return {k: {kk: vv for kk, vv in v.items() if kk != "started_mono"}
-                for k, v in self._stage_timings.items()}
+        return {k: {kk: vv for kk, vv in v.items() if kk != "started_mono"} for k, v in self._stage_timings.items()}
 
     def _notify_model_selection(self, job: dict, model_id: str, thinking: str) -> None:
         # Mirror browser.py: deliver the 'Cassette model selected' gateway notice and persist it.
@@ -1381,6 +1552,7 @@ class ApiTransport:
             return
         try:
             from . import jobs, notifier
+
             enriched = dict(job)
             enriched["model_selection"] = {**selection, "resolved_model_id": model_id, "resolved_thinking": thinking}
             result = notifier.notify_model_selection(enriched)
@@ -1392,6 +1564,7 @@ class ApiTransport:
     @staticmethod
     def _now_iso() -> str:
         from . import jobs
+
         return jobs.now_iso()
 
     @staticmethod
@@ -1441,8 +1614,16 @@ class ApiTransport:
             if status == 401 and authed and not _retried:
                 self._token = None
                 self._authenticate()
-                return self._request(method, path, json_body=json_body, headers=headers,
-                                     authed=authed, expect=expect, timeout=timeout, _retried=True)
+                return self._request(
+                    method,
+                    path,
+                    json_body=json_body,
+                    headers=headers,
+                    authed=authed,
+                    expect=expect,
+                    timeout=timeout,
+                    _retried=True,
+                )
         except URLError as exc:
             raise ApiTransportError("network_error", f"{method} {path} failed: {exc.reason}") from exc
 
@@ -1461,8 +1642,11 @@ class ApiTransport:
             )
         if expect is not None and status != expect:
             detail = body.get("error") if isinstance(body, dict) else None
-            raise ApiTransportError("http_error", f"{method} {path} -> HTTP {status}{f': {detail}' if detail else ''}",
-                                    details={"status": status, "path": path})
+            raise ApiTransportError(
+                "http_error",
+                f"{method} {path} -> HTTP {status}{f': {detail}' if detail else ''}",
+                details={"status": status, "path": path},
+            )
         return status, body
 
     def _result(
@@ -1514,6 +1698,7 @@ class ApiTransport:
             return False
         try:
             from . import jobs
+
             return bool(jobs.is_cancel_requested(job_id))
         except Exception:  # noqa: BLE001 — never let a cancel probe crash the run
             return False

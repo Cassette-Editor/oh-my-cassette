@@ -8,7 +8,16 @@ import pytest
 from cassette import exact_bgm, manifest
 
 
-def _candidate(source: str, track_id: str, title: str, artist: str, *, query: str = "", display_index: int = 1, audio_url: str = "https://music.test/song.mp3") -> exact_bgm.ExactBgmCandidate:
+def _candidate(
+    source: str,
+    track_id: str,
+    title: str,
+    artist: str,
+    *,
+    query: str = "",
+    display_index: int = 1,
+    audio_url: str = "https://music.test/song.mp3",
+) -> exact_bgm.ExactBgmCandidate:
     return exact_bgm.ExactBgmCandidate(
         provider="musicsquare_exact",
         source=source,

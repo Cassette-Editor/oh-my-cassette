@@ -41,7 +41,9 @@ def build_cassette_prompt(
 
     constraints = options.get("constraints") or {}
     preserve = constraints.get("preserve", "main subjects, user intent, useful spoken content, and brand-safe framing")
-    avoid = constraints.get("avoid", "unnecessary confirmation questions, unsafe claims, broken timing, and cropped faces")
+    avoid = constraints.get(
+        "avoid", "unnecessary confirmation questions, unsafe claims, broken timing, and cropped faces"
+    )
     subtitles = constraints.get("captions", "add clear subtitles when speech or text would benefit the output")
     audio = constraints.get("audio", "balance voice, music, and effects; choose sensible music only when appropriate")
     branding = constraints.get("branding", "use uploaded logo/brand assets when present and relevant")
@@ -77,9 +79,9 @@ Cassette assets already ingested by {ingested_by}:
 {chr(10).join(asset_lines)}
 
 Output target:
-- Format/platform/aspect ratio: {options.get('output_format') or 'choose the best fit for the user goal and source media'}
-- Duration/pacing: {options.get('duration') or 'keep concise, energetic, and faithful to the requested edit'}
-- Style: {options.get('style') or 'polished, clear, platform-ready, and not overproduced'}
+- Format/platform/aspect ratio: {options.get("output_format") or "choose the best fit for the user goal and source media"}
+- Duration/pacing: {options.get("duration") or "keep concise, energetic, and faithful to the requested edit"}
+- Style: {options.get("style") or "polished, clear, platform-ready, and not overproduced"}
 - Cassette UI and response language: {cassette_language_label}
 
 User-facing edit objective:
@@ -138,17 +140,44 @@ Requirements:
 def classify_cassette_question(question: str, context: dict[str, Any] | None = None) -> dict:
     q = (question or "").lower()
     critical_terms = [
-        "missing asset", "upload failed", "need file", "please upload", "缺少素材", "请上传",
-        "required asset", "cannot recover", "render failed", "workspace has zero media",
-        "zero media files", "without source media", "no source media",
-        "no video, audio, or images", "0 media files", "没有素材", "未找到素材",
+        "missing asset",
+        "upload failed",
+        "need file",
+        "please upload",
+        "缺少素材",
+        "请上传",
+        "required asset",
+        "cannot recover",
+        "render failed",
+        "workspace has zero media",
+        "zero media files",
+        "without source media",
+        "no source media",
+        "no video, audio, or images",
+        "0 media files",
+        "没有素材",
+        "未找到素材",
     ]
     choice_terms = [
-        "choose a or b", "select one", "must choose", "which version", "你要哪个版本",
-        "必须选择", "请选择", "二选一",
+        "choose a or b",
+        "select one",
+        "must choose",
+        "which version",
+        "你要哪个版本",
+        "必须选择",
+        "请选择",
+        "二选一",
     ]
     if any(term in q for term in critical_terms):
-        return {"requires_user": True, "reason": "missing_required_asset", "answer": "Cassette needs the user to provide or re-upload the required asset."}
+        return {
+            "requires_user": True,
+            "reason": "missing_required_asset",
+            "answer": "Cassette needs the user to provide or re-upload the required asset.",
+        }
     if any(term in q for term in choice_terms):
-        return {"requires_user": True, "reason": "explicit_user_choice_required", "answer": "Cassette needs the user to choose between materially different options."}
+        return {
+            "requires_user": True,
+            "reason": "explicit_user_choice_required",
+            "answer": "Cassette needs the user to choose between materially different options.",
+        }
     return {"requires_user": False, "reason": "routine_ambiguity", "answer": ROUTINE_ANSWER}

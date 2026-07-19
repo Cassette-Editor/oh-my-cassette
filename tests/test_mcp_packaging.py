@@ -43,9 +43,7 @@ def test_host_configs_use_one_stdio_server_and_no_network_listener():
         assert any("run_local_mcp.py" in item for item in config["args"])
         assert "url" not in config and "port" not in config
     assert "cwd" not in codex["cassette"]
-    assert {"CODEX_HOME", "CASSETTE_CONFIG_HOME", "CASSETTE_DATA_HOME"} <= set(
-        codex["cassette"]["env_vars"]
-    )
+    assert {"CODEX_HOME", "CASSETTE_CONFIG_HOME", "CASSETTE_DATA_HOME"} <= set(codex["cassette"]["env_vars"])
     assert "${CLAUDE_PLUGIN_ROOT}" in claude["cassette"]["args"][0]
     assert claude["cassette"]["env"]["CASSETTE_PROJECT_ROOT"] == "${CLAUDE_PROJECT_DIR}"
 

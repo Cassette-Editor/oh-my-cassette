@@ -3,6 +3,7 @@
 Protocol messages are written only by the MCP SDK on stdout.  All human-readable
 diagnostics go to stderr.
 """
+
 import asyncio
 import sys
 from contextlib import asynccontextmanager

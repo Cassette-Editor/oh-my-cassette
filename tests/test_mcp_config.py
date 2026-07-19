@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import os
 import stat
-from pathlib import Path
 
 import pytest
 
@@ -54,9 +53,7 @@ def test_protected_config_permissions_and_environment_precedence(local_config, m
 
 
 def test_rejects_overly_permissive_and_symlinked_credential_files(local_config, tmp_path):
-    runtime_config.write_protected_json(
-        runtime_config.credentials_path(), {"email": "a", "password": "b"}
-    )
+    runtime_config.write_protected_json(runtime_config.credentials_path(), {"email": "a", "password": "b"})
     os.chmod(runtime_config.credentials_path(), 0o644)
     with pytest.raises(runtime_config.RuntimeConfigError, match="0600") as too_open:
         runtime_config.load_credentials()
@@ -78,9 +75,7 @@ def test_rejects_symlinked_config_directory_before_writing(local_config, tmp_pat
     config.symlink_to(target, target_is_directory=True)
 
     with pytest.raises(runtime_config.RuntimeConfigError) as linked:
-        runtime_config.write_protected_json(
-            runtime_config.credentials_path(), {"email": "a", "password": "b"}
-        )
+        runtime_config.write_protected_json(runtime_config.credentials_path(), {"email": "a", "password": "b"})
     assert linked.value.code == "config_symlink"
     assert not (target / "credentials.json").exists()
 

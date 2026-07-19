@@ -6,7 +6,10 @@ from cassette import prompt
 def test_prompt_contains_non_blocking_rules():
     result = prompt.build_cassette_prompt(
         "cut to 30 seconds",
-        {"session_hash": "abc", "assets": [{"asset_id": "asset_1", "media_type": "video", "original_name": "clip.mp4", "caption": "main"}]},
+        {
+            "session_hash": "abc",
+            "assets": [{"asset_id": "asset_1", "media_type": "video", "original_name": "clip.mp4", "caption": "main"}],
+        },
         {"output_format": "vertical 9:16"},
     )
     assert result["asset_count"] == 1
@@ -23,7 +26,10 @@ def test_prompt_contains_non_blocking_rules():
 def test_prompt_separates_internal_prompt_from_cassette_chat_message():
     result = prompt.build_cassette_prompt(
         "剪成 10 秒以内的短视频，加中文字幕",
-        {"session_hash": "abc", "assets": [{"asset_id": "asset_1", "media_type": "video", "original_name": "clip.mp4"}]},
+        {
+            "session_hash": "abc",
+            "assets": [{"asset_id": "asset_1", "media_type": "video", "original_name": "clip.mp4"}],
+        },
     )
 
     assert "You are Hermes" in result["prompt"]
@@ -37,7 +43,10 @@ def test_prompt_separates_internal_prompt_from_cassette_chat_message():
 def test_prompt_can_target_english_cassette_chat():
     result = prompt.build_cassette_prompt(
         "Make a 5 second reel with clean subtitles",
-        {"session_hash": "abc", "assets": [{"asset_id": "asset_1", "media_type": "video", "original_name": "clip.mp4"}]},
+        {
+            "session_hash": "abc",
+            "assets": [{"asset_id": "asset_1", "media_type": "video", "original_name": "clip.mp4"}],
+        },
         {"cassette_language": "en"},
     )
 
@@ -51,7 +60,10 @@ def test_prompt_can_target_english_cassette_chat():
 def test_prompt_has_host_neutral_mcp_variant_without_changing_chat_message():
     result = prompt.build_cassette_prompt(
         "Make a short captioned reel",
-        {"session_hash": "abc", "assets": [{"asset_id": "asset_1", "media_type": "video", "original_name": "clip.mp4"}]},
+        {
+            "session_hash": "abc",
+            "assets": [{"asset_id": "asset_1", "media_type": "video", "original_name": "clip.mp4"}],
+        },
         {"cassette_language": "en"},
         runtime_host="mcp",
     )
