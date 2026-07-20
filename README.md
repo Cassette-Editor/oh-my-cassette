@@ -29,6 +29,15 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket AI Co-editor fo
   <a href="https://github.com/nousresearch/hermes-agent">
     <img src="https://img.shields.io/badge/Hermes%20Agent-Compatible-7c3aed?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZD0iTTUgNGgzdjZoOFY0aDN2MTZoLTN2LTdIOHY3SDV6IiBmaWxsPSJ3aGl0ZSIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjIiIGZpbGw9IiMxMTEiLz48L3N2Zz4%3D&logoColor=white" alt="Hermes Agent Compatible">
   </a>
+  <a href="https://github.com/openai/codex">
+    <img src="https://img.shields.io/badge/Codex-Compatible-000000?style=flat-square&logo=openai&logoColor=white" alt="Codex Compatible">
+  </a>
+  <a href="https://claude.com/claude-code">
+    <img src="https://img.shields.io/badge/Claude%20Code-Compatible-d97757?style=flat-square&logo=anthropic&logoColor=white" alt="Claude Code Compatible">
+  </a>
+  <a href="https://opencode.ai">
+    <img src="https://img.shields.io/badge/OpenCode-Compatible-0b0b0b?style=flat-square&logo=opencode&logoColor=white" alt="OpenCode Compatible">
+  </a>
 </p>
 
 <p align="center">
