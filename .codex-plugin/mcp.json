@@ -79,7 +79,8 @@
         "CASSETTE_MCP_PYTHON",
         "CASSETTE_MCP_SKIP_BOOTSTRAP",
         "CASSETTE_MCP_SETUP_COMMAND",
-        "CASSETTE_MCP_MONITOR_BUDGET_SEC"
+        "CASSETTE_MCP_MONITOR_BUDGET_SEC",
+        "CASSETTE_MCP_NOTIFY"
       ],
       "startup_timeout_sec": 240,
       "tool_timeout_sec": 1800

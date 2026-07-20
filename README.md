@@ -321,8 +321,8 @@ Oh My Cassette currently supports QQ and Telegram gateways.
 
 ## Requirements
 
-- macOS or Linux.
-- Codex or Claude Code for the local MCP plugin, or Hermes Agent with its gateway configured.
+- macOS, Linux, or Windows for the local MCP plugin (Codex, Claude Code, or OpenCode). The Hermes Agent gateway path is macOS/Linux only.
+- Codex, Claude Code, or OpenCode for the local MCP plugin, or Hermes Agent with its gateway configured.
 - Python 3.11–3.13.
 - `ffmpeg`, required for Hermes gateway normalization and optional API export thumbnails.
 
@@ -338,6 +338,12 @@ brew install uv ffmpeg
 sudo apt-get update
 sudo apt-get install -y ffmpeg
 curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+winget install Python.Python.3.13
+winget install Gyan.FFmpeg
 ```
 
 ## Install
@@ -363,6 +369,30 @@ Restart Claude Code after installation. You can verify the installation with:
 ```bash
 claude plugin details oh-my-cassette@cassette-editor
 ```
+
+### OpenCode
+
+OpenCode has no plugin marketplace for MCP servers, so add the server and skill from a checkout. Clone the repository, then point OpenCode at the launcher from your project's `opencode.json` (a copy is committed at the repo root):
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "cassette": {
+      "type": "local",
+      "command": ["python3", "/absolute/path/to/oh-my-cassette/scripts/run_local_mcp.py"],
+      "enabled": true,
+      "environment": { "CASSETTE_MCP_HOST": "opencode" }
+    }
+  }
+}
+```
+
+OpenCode discovers the host-neutral `cassette-video-edit` skill from the repository's `.agents/skills/` directory, or copy it to `~/.config/opencode/skills/cassette-video-edit/` for global use. On Windows, use `"python"` instead of `"python3"` in `command`.
+
+### Any other MCP host
+
+The runtime is host-neutral, so any client that launches a local stdio MCP server can use it. Point the client at `scripts/run_local_mcp.py` (run with `python3`, or `python` on Windows) and set `CASSETTE_RUNTIME_ADAPTER=mcp`. The server ships full workflow guidance in its MCP `instructions`, and every tool returns a typed `phase`/`next_action` so a host without the packaged skill can still drive the flow. For the best experience, also install the `cassette-video-edit` skill (or equivalent system prompt) so the guided-choice and review steps are followed.
 
 ### Hermes
 
@@ -451,10 +481,12 @@ The setup command creates config directories with mode `0700` and credential fil
 1. Ask Codex or Claude to edit one or more media files in the current project.
 2. The plugin ingests only media inside the active project or another explicitly trusted root. It canonicalizes paths and rejects traversal and symlink escapes.
 3. Describe the edit, answer any guided choices, and start the job. MCP jobs run in the background by default.
-4. The host checks status with bounded 30-second long polls. The skill monitors for up to 25 minutes, then returns the still-running job ID so you can continue later without tight-polling.
-5. If Cassette needs a real user decision, answer it with the returned job ID. API jobs persist their private continuation metadata across host restarts.
+4. The host checks status with bounded 30-second long polls. During a long poll the runtime emits MCP progress notifications (visible in hosts that request them), so the wait shows live stage updates instead of a silent block. The skill monitors for up to 25 minutes, then returns the still-running job ID so you can continue later without tight-polling.
+5. If Cassette needs a real user decision, answer it with the returned job ID. On hosts that support MCP elicitation, `cassette_job_status` collects the answer inline and returns the already-resumed status; other hosts use the `cassette_answer_question` round-trip. API jobs persist their private continuation metadata across host restarts.
 6. When editing completes, review the result. Rendering starts only after an explicit `export` decision.
 7. The result contains validated absolute paths, file URIs, MIME type, size, and an MCP resource link for each exported artifact. Large media bytes are never embedded in the tool response.
+
+When a background job reaches a terminal state (finished, needs input, failed, or cancelled), the MCP runtime posts a best-effort local desktop notification — `osascript` on macOS, `notify-send` on Linux — so you learn a long render is done even after the monitor budget hands the job back. Set `CASSETTE_MCP_NOTIFY=0` to disable it.
 
 Sessions are isolated by a cryptographically random session ID. Codex and Claude share host-neutral storage, so you can deliberately hand a session or job ID from one host to the other; nothing is shared implicitly.
 

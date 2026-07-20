@@ -51,7 +51,16 @@ def select_python() -> tuple[str, tuple[int, int, int]]:
     if override:
         candidates.append(str(Path(override).expanduser()))
     candidates.append(sys.executable)
-    for name in ("python3.13", "python3.12", "python3.11"):
+    names = (
+        ("python3.13", "python3.12", "python3.11", "python")
+        if sys.platform == "win32"
+        else (
+            "python3.13",
+            "python3.12",
+            "python3.11",
+        )
+    )
+    for name in names:
         found = shutil.which(name)
         if found:
             candidates.append(found)
@@ -70,7 +79,42 @@ def select_python() -> tuple[str, tuple[int, int, int]]:
 
 
 def _venv_python(venv: Path) -> Path:
+    if sys.platform == "win32":
+        return venv / "Scripts" / "python.exe"
     return venv / "bin" / "python"
+
+
+def _lock_exclusive(handle) -> None:
+    """Block until an exclusive lock is held on the open handle, on any platform."""
+    if sys.platform == "win32":
+        import msvcrt
+        import time
+
+        # ponytail: msvcrt LK_LOCK gives up after ~10s; retry so a concurrent
+        # first-run pip install (minutes) is waited out instead of crashing.
+        deadline = time.monotonic() + 600
+        while True:
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                return
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise BootstrapError("Timed out waiting for another bootstrap to finish.") from None
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock(handle) -> None:
+    if sys.platform == "win32":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _fingerprint(lock_path: Path, version: tuple[int, int, int]) -> str:
@@ -108,8 +152,6 @@ def _write_marker(path: Path, value: dict) -> None:
 
 
 def bootstrap_runtime(*, with_browser: bool = False, output: TextIO | None = None) -> Path:
-    if sys.platform not in {"darwin", "linux"}:
-        raise BootstrapError("The local MCP launcher currently supports macOS and Linux only.")
     selected, version = select_python()
     data = runtime_config.ensure_private_dir(runtime_config.data_root())
     root = runtime_config.ensure_private_dir(data / "runtime")
@@ -120,16 +162,15 @@ def bootstrap_runtime(*, with_browser: bool = False, output: TextIO | None = Non
     if lock_file.is_symlink():
         raise BootstrapError("The runtime bootstrap lock must not be a symlink.")
 
-    import fcntl
-
     flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     try:
         lock_fd = os.open(lock_file, flags, 0o600)
     except OSError as exc:
         raise BootstrapError("Could not open the protected runtime bootstrap lock.") from exc
-    os.fchmod(lock_fd, 0o600)
+    if hasattr(os, "fchmod"):
+        os.fchmod(lock_fd, 0o600)
     with os.fdopen(lock_fd, "r+", encoding="utf-8") as lock_handle:
-        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        _lock_exclusive(lock_handle)
         python = _venv_python(venv)
         if not python.exists():
             _run([selected, "-m", "venv", str(venv)], output=output)
@@ -186,5 +227,5 @@ def bootstrap_runtime(*, with_browser: bool = False, output: TextIO | None = Non
                 environment["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_path)
                 _run([str(python), "-m", "playwright", "install", "chromium"], environment=environment, output=output)
                 _write_marker(browser_marker, {"fingerprint": browser_fingerprint, "playwright": "1.60.0"})
-        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        _unlock(lock_handle)
     return python

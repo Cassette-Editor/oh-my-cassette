@@ -231,3 +231,31 @@ def test_direct_core_and_mcp_adapter_preserve_semantic_validation_error(tmp_path
     adapted = runtime.make_prompt({"instruction": "", "session_id": "validation-session", "requires_assets": False})
     assert direct["ok"] is adapted.ok is False
     assert direct["error"]["code"] == adapted.error.code == "missing_required_arg"
+
+
+def test_job_status_long_poll_reports_wait_ticks_and_survives_tick_errors(tmp_path, monkeypatch):
+    import mcp_plugin.runtime as runtime_module
+
+    runtime = _runtime(tmp_path, monkeypatch)
+    job = jobs.create_job("tick-hash", "prompt", "instruction", [], {"cassette_session_id": "tick-session"})
+    jobs.update_job(job["job_id"], status="running", current_stage="editing")
+    monkeypatch.setattr(runtime_module, "WAIT_TICK_SEC", 0.05)
+
+    ticks = []
+    envelope = runtime.job_status(
+        {"job_id": job["job_id"], "wait_for_change_sec": 0.4},
+        on_wait_tick=lambda elapsed, total, stage: ticks.append((elapsed, total, stage)),
+    )
+    assert envelope.ok is True
+    assert envelope.phase is SessionPhase.RUNNING
+    assert ticks, "expected at least one progress tick during the long poll"
+    assert all(total == 0.4 and stage == "editing" for _elapsed, total, stage in ticks)
+
+    def broken_tick(elapsed, total, stage):
+        raise RuntimeError("client went away")
+
+    envelope = runtime.job_status(
+        {"job_id": job["job_id"], "wait_for_change_sec": 0.2},
+        on_wait_tick=broken_tick,
+    )
+    assert envelope.ok is True

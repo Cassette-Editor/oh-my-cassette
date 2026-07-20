@@ -105,3 +105,14 @@ def test_release_please_updates_all_host_version_fields():
         "type": "generic",
         "path": "plugin.yaml",
     }
+
+
+def test_opencode_project_config_and_agents_skill_copy_stay_in_sync():
+    config = _json("opencode.json")["mcp"]["cassette"]
+    assert config["type"] == "local"
+    assert config["command"] == ["python3", "scripts/run_local_mcp.py"]
+    assert config["environment"]["CASSETTE_MCP_HOST"] == "opencode"
+
+    neutral = (ROOT / "skills" / "cassette-video-edit" / "SKILL.md").read_text("utf-8")
+    agents_copy = (ROOT / ".agents" / "skills" / "cassette-video-edit" / "SKILL.md").read_text("utf-8")
+    assert agents_copy == neutral

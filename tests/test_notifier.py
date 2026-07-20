@@ -777,3 +777,77 @@ def test_qq_direct_senders_mark_short_lived_adapter_connected(tmp_path: Path, mo
     assert image_result["success"] is True
     assert [call[0] for call in calls] == ["text", "video", "image"]
     assert all(call[1] is True for call in calls)
+
+
+def _mcp_desktop_env(monkeypatch, platform: str):
+    monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "mcp")
+    monkeypatch.delenv("CASSETTE_MCP_NOTIFY", raising=False)
+    monkeypatch.setattr(notifier.sys, "platform", platform)
+
+
+def test_notify_terminal_job_posts_macos_desktop_notification_under_mcp(monkeypatch):
+    _mcp_desktop_env(monkeypatch, "darwin")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(notifier.subprocess, "run", fake_run)
+    result = notifier.notify_terminal_job(
+        {"job_id": "cassette_x", "status": "succeeded", "outputs": [{"local_path": "/exports/final.mp4"}]}
+    )
+    assert result == {"status": "sent", "platform": "desktop", "mode": "osascript"}
+    assert calls[0][0] == "osascript"
+    assert calls[0][-2] == "Edit finished: final.mp4"
+    assert calls[0][-1] == "Oh My Cassette"
+
+
+def test_notify_terminal_job_posts_linux_desktop_notification_for_needs_user(monkeypatch):
+    _mcp_desktop_env(monkeypatch, "linux")
+    monkeypatch.setattr(notifier.shutil, "which", lambda name: "/usr/bin/notify-send")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(notifier.subprocess, "run", fake_run)
+    result = notifier.notify_terminal_job({"job_id": "cassette_y", "status": "needs_user"})
+    assert result == {"status": "sent", "platform": "desktop", "mode": "notify-send"}
+    assert calls[0] == ["notify-send", "Oh My Cassette", "Cassette needs your input (cassette_y)"]
+
+
+def test_desktop_notification_can_be_disabled_and_skips_unsupported_platforms(monkeypatch):
+    _mcp_desktop_env(monkeypatch, "darwin")
+    monkeypatch.setenv("CASSETTE_MCP_NOTIFY", "0")
+    assert notifier.notify_terminal_job({"job_id": "j", "status": "failed"}) == {
+        "status": "skipped",
+        "reason": "disabled",
+    }
+    _mcp_desktop_env(monkeypatch, "win32")
+    result = notifier.notify_terminal_job({"job_id": "j", "status": "failed"})
+    assert result["status"] == "skipped" and result["reason"] == "unsupported_desktop"
+
+
+def test_desktop_notification_failure_is_reported_not_raised(monkeypatch):
+    _mcp_desktop_env(monkeypatch, "darwin")
+
+    def fake_run(cmd, **kwargs):
+        raise OSError("osascript missing")
+
+    monkeypatch.setattr(notifier.subprocess, "run", fake_run)
+    result = notifier.notify_terminal_job({"job_id": "j", "status": "cancelled"})
+    assert result == {
+        "status": "failed",
+        "platform": "desktop",
+        "code": "desktop_notify_failed",
+        "error": "OSError",
+    }
+
+
+def test_gateway_notifications_keep_platform_routing_without_mcp_adapter(monkeypatch):
+    monkeypatch.delenv("CASSETTE_RUNTIME_ADAPTER", raising=False)
+    result = notifier.notify_terminal_job({"job_id": "j", "status": "failed", "delivery": {}})
+    assert result["status"] == "skipped"
+    assert result["reason"] == "unsupported_platform"

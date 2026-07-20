@@ -5,6 +5,7 @@ import base64
 import re
 import string
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1266,9 +1267,62 @@ def notify_progress_snapshot(job: dict, screenshot_path: str, summary: str = "")
     }
 
 
+def _desktop_terminal_message(job: dict) -> str:
+    status = str(job.get("status") or "")
+    job_id = str(job.get("job_id") or "")
+    if status == "needs_user":
+        return f"Cassette needs your input ({job_id})"
+    if status == "succeeded":
+        for output in job.get("outputs") or []:
+            if isinstance(output, dict) and output.get("local_path"):
+                return f"Edit finished: {Path(str(output['local_path'])).name}"
+        return f"Edit finished ({job_id})"
+    return f"Edit {status} ({job_id})"
+
+
+def notify_desktop_terminal_job(job: dict) -> dict:
+    """Best-effort local desktop notification for MCP background jobs."""
+    if str(os.getenv("CASSETTE_MCP_NOTIFY", "") or "").strip().lower() in {"0", "false", "no"}:
+        return {"status": "skipped", "reason": "disabled"}
+    title = "Oh My Cassette"
+    message = _desktop_terminal_message(job)
+    if sys.platform == "darwin":
+        command = [
+            "osascript",
+            "-e",
+            "on run argv",
+            "-e",
+            "display notification (item 1 of argv) with title (item 2 of argv)",
+            "-e",
+            "end run",
+            message,
+            title,
+        ]
+        mode = "osascript"
+    elif sys.platform.startswith("linux") and shutil.which("notify-send"):
+        command = ["notify-send", title, message]
+        mode = "notify-send"
+    else:
+        return {"status": "skipped", "reason": "unsupported_desktop", "platform": sys.platform}
+    try:
+        completed = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"status": "failed", "platform": "desktop", "code": "desktop_notify_failed", "error": type(exc).__name__}
+    if completed.returncode != 0:
+        return {"status": "failed", "platform": "desktop", "code": "desktop_notify_failed", "mode": mode}
+    return {"status": "sent", "platform": "desktop", "mode": mode}
+
+
 def notify_terminal_job(job: dict) -> dict:
     if job.get("status") not in TERMINAL_STATUSES:
         return {"status": "skipped", "reason": "non_terminal"}
+    if str(os.getenv("CASSETTE_RUNTIME_ADAPTER", "") or "").strip().lower() == "mcp":
+        return notify_desktop_terminal_job(job)
     delivery = job.get("delivery") or {}
     platform = _normalize_platform(delivery.get("platform"))
     if platform not in {"weixin", "qqbot", "telegram", "web"}:

@@ -15,12 +15,13 @@ from urllib.parse import unquote, urlparse
 from mcp import types
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 import runtime_config
 
 from .models import (
     AnswerQuestionInput,
+    SessionPhase,
     CancelJobInput,
     IngestMediaInput,
     JamendoMatcherInput,
@@ -109,11 +110,68 @@ mcp = ArtifactFastMCP(
     "cassette",
     instructions=(
         "Local video-editing MCP runtime for Oh My Cassette. It uses stdio, opens no port, "
-        "and connects directly to the separate Cassette backend."
+        "and connects directly to the separate Cassette backend. "
+        "Guided flow: call cassette_ingest_media once per source file (reuse the returned session_id), "
+        "confirm assets with cassette_list_assets, optionally match BGM, build the brief with "
+        "cassette_make_prompt, then start cassette_run_job (background by default). "
+        "Poll cassette_job_status with wait_for_change_sec=30 and route on the typed phase and next_action "
+        "fields, never on prose: needs_user means ask the user then call cassette_answer_question; "
+        "review_required means evaluate the result and call cassette_review_completion (only "
+        "decision=export renders); exported or succeeded means present the validated artifacts; "
+        "failed, cancelled, or timed_out means report the structured error. Do not tight-poll. "
+        "If a tool returns auth_required, show error.details.setup_command as a private terminal "
+        "command; never collect credentials in chat."
     ),
     lifespan=lifespan,
     log_level="WARNING",
 )
+
+
+class ElicitedAnswer(BaseModel):
+    """Schema for answering a pending Cassette question via MCP elicitation."""
+
+    response: str = Field(description="The user's answer to the pending Cassette question.")
+
+
+def _pending_question(envelope: Any) -> str:
+    data = envelope.data if isinstance(envelope.data, dict) else {}
+    job = data.get("job") if isinstance(data.get("job"), dict) else {}
+    questions = job.get("questions") if isinstance(job.get("questions"), list) else []
+    for entry in reversed(questions):
+        if isinstance(entry, dict):
+            text = str(entry.get("question") or "").strip()
+            if text:
+                return text
+    return ""
+
+
+async def _maybe_elicit_needs_user(ctx: Context, envelope: Any) -> Any:
+    """Collect a needs_user answer through MCP elicitation when the client supports it.
+
+    Anything short of an accepted, non-empty response leaves the envelope
+    untouched so hosts without elicitation keep the documented tool round-trip.
+    """
+    try:
+        if getattr(envelope, "phase", None) != SessionPhase.NEEDS_USER or not getattr(envelope, "job_id", None):
+            return envelope
+        capabilities = getattr(getattr(ctx.session, "client_params", None), "capabilities", None)
+        if getattr(capabilities, "elicitation", None) is None:
+            return envelope
+        question = _pending_question(envelope)
+        if not question:
+            return envelope
+        result = await ctx.elicit(message=question, schema=ElicitedAnswer)
+        if getattr(result, "action", "") != "accept" or getattr(result, "data", None) is None:
+            return envelope
+        response = str(result.data.response or "").strip()
+        if not response:
+            return envelope
+        return await _run_sync(
+            _runtime(ctx).answer_question,
+            {"job_id": envelope.job_id, "response": response},
+        )
+    except Exception:
+        return envelope
 
 
 def _runtime(context: Context) -> LocalMcpRuntime:
@@ -440,7 +498,14 @@ async def cassette_job_status(
         limit=limit,
         wait_for_change_sec=wait_for_change_sec,
     )
-    return await _run_sync(_runtime(ctx).job_status, request.model_dump(exclude_none=True))
+    loop = asyncio.get_running_loop()
+
+    def _tick(elapsed: float, total: float, stage: str) -> None:
+        # report_progress is a no-op unless the client sent a progressToken.
+        asyncio.run_coroutine_threadsafe(ctx.report_progress(round(elapsed, 1), total, stage or None), loop)
+
+    envelope = await _run_sync(_runtime(ctx).job_status, request.model_dump(exclude_none=True), _tick)
+    return await _maybe_elicit_needs_user(ctx, envelope)
 
 
 @mcp.tool(
