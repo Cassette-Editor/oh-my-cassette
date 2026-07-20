@@ -42,7 +42,25 @@ claude plugin validate --strict .claude-plugin/plugin.json
 claude plugin validate --strict .claude-plugin/marketplace.json
 ```
 
-The CI `native-packaging` job also smoke-installs and lists the plugin with pinned Codex and Claude CLI versions. `mcp-macos-smoke` exercises the locked launcher and real stdio protocol on macOS; the Python matrix covers 3.11 and 3.13 on Ubuntu.
+The CI `native-packaging` job also smoke-installs the plugin with pinned Codex and Claude CLI versions and launches the MCP through `claude mcp list`, which performs a real stdio initialize against every configured server. `mcp-macos-smoke` exercises the locked launcher and real stdio protocol on macOS; the Python matrix covers 3.11 and 3.13 on Ubuntu.
+
+To exercise the MCP inside real hosts locally:
+
+```bash
+# Claude project scope: the repo-root .mcp.json launches this checkout directly.
+claude mcp list           # run inside the repo; expect "cassette: … ✔ Connected"
+
+# Claude plugin: install from this checkout into an isolated HOME, then health-check.
+tmp_home="$(mktemp -d)"
+HOME="$tmp_home" claude plugin marketplace add "$PWD" --scope user
+HOME="$tmp_home" claude plugin install oh-my-cassette@cassette-editor --scope user
+(cd "$(mktemp -d)" && HOME="$tmp_home" claude mcp list)
+
+```
+
+For the Codex side, follow the `Smoke-install with Codex CLI` step in `.github/workflows/ci.yml` — it rewrites the marketplace source to `local`, installs into an isolated `CODEX_HOME`, and asserts the resolved server config with `codex mcp get cassette --json`.
+
+`tests/test_mcp_host_launch.py` covers the same three launch paths deterministically: it parses each host config file, resolves variables the way that host does, and completes initialize + tools/list over stdio.
 
 ## Architecture rules
 
