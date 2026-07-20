@@ -29,6 +29,11 @@ WEB_ADAPTER = "web"
 CONFIG_DIR_MODE = 0o700
 CONFIG_FILE_MODE = 0o600
 
+
+def _is_windows() -> bool:
+    return sys.platform == "win32"
+
+
 _REQUEST_MEDIA_ROOTS: contextvars.ContextVar[tuple[Path, ...]] = contextvars.ContextVar(
     "cassette_request_media_roots", default=()
 )
@@ -66,6 +71,10 @@ def config_root() -> Path:
         return _absolute_lexical(Path(os.path.expandvars(override)))
     if sys.platform == "darwin":
         return _absolute_lexical(_home() / "Library" / "Application Support" / "Oh My Cassette")
+    if _is_windows():
+        appdata = str(os.getenv("APPDATA", "") or "").strip()
+        base = Path(appdata) if appdata else _home() / "AppData" / "Roaming"
+        return _absolute_lexical(base / "Oh My Cassette")
     xdg = str(os.getenv("XDG_CONFIG_HOME", "") or "").strip()
     base = Path(os.path.expandvars(xdg)).expanduser() if xdg else _home() / ".config"
     return _absolute_lexical(base / "oh-my-cassette")
@@ -77,6 +86,10 @@ def data_root() -> Path:
         return _absolute_lexical(Path(os.path.expandvars(override)))
     if sys.platform == "darwin":
         return _absolute_lexical(_home() / "Library" / "Application Support" / "Oh My Cassette" / "data")
+    if _is_windows():
+        local = str(os.getenv("LOCALAPPDATA", "") or "").strip()
+        base = Path(local) if local else _home() / "AppData" / "Local"
+        return _absolute_lexical(base / "Oh My Cassette" / "data")
     xdg = str(os.getenv("XDG_DATA_HOME", "") or "").strip()
     base = Path(os.path.expandvars(xdg)).expanduser() if xdg else _home() / ".local" / "share"
     return _absolute_lexical(base / "oh-my-cassette")
@@ -118,7 +131,10 @@ def ensure_private_dir(path: Path) -> Path:
         raise RuntimeConfigError(
             "config_wrong_owner", "Configuration directory must be owned by the current user", path=path
         )
-    os.chmod(path, CONFIG_DIR_MODE)
+    if not _is_windows():
+        # ponytail: POSIX mode bits are meaningless on NTFS; Windows relies on the
+        # user-profile ACLs that %APPDATA%/%LOCALAPPDATA% inherit.
+        os.chmod(path, CONFIG_DIR_MODE)
     return path
 
 
@@ -137,7 +153,7 @@ def _check_private_directory(path: Path) -> None:
         raise RuntimeConfigError(
             "config_wrong_owner", "Configuration directory must be owned by the current user", path=path
         )
-    if stat.S_IMODE(info.st_mode) & 0o077:
+    if not _is_windows() and stat.S_IMODE(info.st_mode) & 0o077:
         raise RuntimeConfigError(
             "config_permissions_too_open",
             "Configuration directory permissions must be 0700 or stricter",
@@ -165,7 +181,7 @@ def read_protected_json(path: Path, *, missing_ok: bool = True) -> dict[str, Any
         raise RuntimeConfigError("config_symlink", "Configuration file must not be a symlink", path=path)
     if not stat.S_ISREG(info.st_mode):
         raise RuntimeConfigError("config_not_regular", "Configuration file must be a regular file", path=path)
-    if stat.S_IMODE(info.st_mode) & 0o077:
+    if not _is_windows() and stat.S_IMODE(info.st_mode) & 0o077:
         raise RuntimeConfigError(
             "config_permissions_too_open",
             "Configuration file permissions must be 0600 or stricter",
@@ -193,14 +209,16 @@ def write_protected_json(path: Path, value: dict[str, Any]) -> None:
         raise RuntimeConfigError("config_symlink", "Configuration file must not be a symlink", path=path)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(parent))
     try:
-        os.fchmod(fd, CONFIG_FILE_MODE)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, CONFIG_FILE_MODE)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-        os.chmod(path, CONFIG_FILE_MODE)
+        if not _is_windows():
+            os.chmod(path, CONFIG_FILE_MODE)
     except Exception:
         with contextlib.suppress(OSError):
             os.unlink(temporary)
@@ -283,12 +301,23 @@ def all_mcp_media_roots() -> list[Path]:
     return unique
 
 
+def python_command() -> str:
+    """The interpreter command a user types in their terminal on this platform."""
+    return "python" if _is_windows() else "python3"
+
+
+def _quote_for_shell(value: str) -> str:
+    if _is_windows():
+        return f'"{value}"' if " " in value else value
+    return shlex.quote(value)
+
+
 def setup_command(plugin_root: Path | None = None) -> str:
     override = str(os.getenv("CASSETTE_MCP_SETUP_COMMAND", "") or "").strip()
     if override:
         return override
     root = plugin_root or Path(__file__).resolve().parent
-    return f"python3 {shlex.quote(str(root / 'scripts' / 'setup_local_mcp.py'))}"
+    return f"{python_command()} {_quote_for_shell(str(root / 'scripts' / 'setup_local_mcp.py'))}"
 
 
 def browser_setup_command(plugin_root: Path | None = None) -> str:

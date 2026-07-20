@@ -501,3 +501,64 @@ def test_real_protocol_resumes_api_job_after_mcp_host_restart(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_job_status_elicits_needs_user_answer_when_client_supports_it():
+    from types import SimpleNamespace
+
+    from mcp_plugin import server as server_module
+    from mcp_plugin.models import SessionPhase, ToolEnvelope
+
+    pending = ToolEnvelope(
+        ok=True,
+        data={"job": {"questions": [{"question": "Which aspect ratio should the export use?"}]}},
+        session_id="sess",
+        job_id="cassette_job",
+        phase=SessionPhase.NEEDS_USER,
+        next_action="ask the user",
+    )
+    answered = ToolEnvelope(
+        ok=True,
+        session_id="sess",
+        job_id="cassette_job",
+        phase=SessionPhase.RUNNING,
+        next_action="poll",
+    )
+
+    class Runtime:
+        def answer_question(self, args):
+            assert args == {"job_id": "cassette_job", "response": "16:9"}
+            return answered
+
+    elicited = []
+
+    def _context(capability, action="accept", response="16:9"):
+        class Ctx:
+            session = SimpleNamespace(
+                client_params=SimpleNamespace(capabilities=SimpleNamespace(elicitation=capability))
+            )
+            request_context = SimpleNamespace(lifespan_context=SimpleNamespace(runtime=Runtime()))
+
+            async def elicit(self, message, schema):
+                elicited.append(message)
+                return SimpleNamespace(action=action, data=SimpleNamespace(response=response))
+
+        return Ctx()
+
+    result = asyncio.run(server_module._maybe_elicit_needs_user(_context(object()), pending))
+    assert result is answered
+    assert elicited == ["Which aspect ratio should the export use?"]
+
+    # No client capability: untouched envelope, no elicitation round-trip.
+    elicited.clear()
+    result = asyncio.run(server_module._maybe_elicit_needs_user(_context(None), pending))
+    assert result is pending and elicited == []
+
+    # A declined elicitation keeps the documented tool round-trip.
+    result = asyncio.run(server_module._maybe_elicit_needs_user(_context(object(), action="decline"), pending))
+    assert result is pending
+
+    # Non-needs_user envelopes are never elicited.
+    elicited.clear()
+    result = asyncio.run(server_module._maybe_elicit_needs_user(_context(object()), answered))
+    assert result is answered and elicited == []

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "cassette": {
+      "type": "local",
+      "command": ["python3", "scripts/run_local_mcp.py"],
+      "enabled": true,
+      "environment": {
+        "CASSETTE_MCP_HOST": "opencode"
+      }
+    }
+  }
+}

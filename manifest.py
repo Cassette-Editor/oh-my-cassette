@@ -56,15 +56,29 @@ def manifest_lock(session_hash: str):
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+", encoding="utf-8") as fh:
         try:
-            import fcntl
+            if os.name == "nt":
+                # ponytail: msvcrt retries ~10s then raises; manifest writes are
+                # short, so that bound is acceptable contention behavior.
+                import msvcrt
 
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
             yield
         finally:
             try:
-                import fcntl
+                if os.name == "nt":
+                    import msvcrt
 
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
             except Exception:
                 pass
 

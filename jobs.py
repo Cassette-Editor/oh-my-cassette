@@ -206,6 +206,7 @@ def start_worker(job_id: str, *, action: str = "run", response: str | None = Non
         # empty response. This field is private and stripped from public results.
         job["resume_request"] = {"response": str(response or "")}
     save_job(job)
+    detach_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     try:
         proc = subprocess.Popen(
             cmd,
@@ -213,6 +214,7 @@ def start_worker(job_id: str, *, action: str = "run", response: str | None = Non
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            creationflags=detach_flags if os.name == "nt" else 0,
             env=env,
         )
     except Exception as exc:

@@ -136,3 +136,43 @@ def test_successful_setup_stores_no_access_or_refresh_tokens(local_config, monke
     assert stored["password"] == "secret"
     assert "access_token" not in stored and "refresh_token" not in stored
     assert runtime_config.configured_media_roots() == [media.resolve()]
+
+
+def test_windows_config_roots_and_terminal_commands(tmp_path, monkeypatch):
+    monkeypatch.delenv("CASSETTE_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("CASSETTE_DATA_HOME", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    monkeypatch.setattr(runtime_config.sys, "platform", "win32")
+
+    assert runtime_config.config_root() == (tmp_path / "Roaming" / "Oh My Cassette").resolve()
+    assert runtime_config.data_root() == (tmp_path / "Local" / "Oh My Cassette" / "data").resolve()
+    assert runtime_config.python_command() == "python"
+    assert runtime_config.setup_command().startswith("python ")
+
+
+def test_windows_venv_python_uses_scripts_layout(tmp_path, monkeypatch):
+    monkeypatch.setattr(local_mcp_bootstrap.sys, "platform", "win32")
+    assert local_mcp_bootstrap._venv_python(tmp_path) == tmp_path / "Scripts" / "python.exe"
+    monkeypatch.setattr(local_mcp_bootstrap.sys, "platform", "linux")
+    assert local_mcp_bootstrap._venv_python(tmp_path) == tmp_path / "bin" / "python"
+
+
+def test_windows_skips_posix_permission_enforcement(tmp_path, monkeypatch):
+    config = tmp_path / "config"
+    monkeypatch.setenv("CASSETTE_CONFIG_HOME", str(config))
+    for name in (
+        "CASSETTE_AUTH_EMAIL",
+        "CASSETTE_AUTH_ACCOUNT",
+        "CASSETTE_EMAIL",
+        "CASSETTE_AUTH_PASSWORD",
+        "CASSETTE_PASSWORD",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(runtime_config.sys, "platform", "win32")
+    runtime_config.write_protected_json(runtime_config.credentials_path(), {"email": "a", "password": "b"})
+    # Wide-open POSIX bits must not fail the read on Windows, where they are
+    # an artifact of the emulated stat rather than a real ACL.
+    os.chmod(runtime_config.credentials_path(), 0o666)
+    os.chmod(config, 0o777)
+    assert runtime_config.load_credentials()["email"] == "a"

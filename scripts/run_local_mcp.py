@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shlex
 import sys
 from pathlib import Path
 
@@ -16,6 +15,7 @@ if str(PLUGIN_ROOT) not in sys.path:
 if str(PLUGIN_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
 
+import runtime_config  # noqa: E402
 from local_mcp_bootstrap import BootstrapError, bootstrap_runtime, select_python  # noqa: E402
 
 
@@ -28,10 +28,7 @@ def main() -> None:
     environment = os.environ.copy()
     environment["CASSETTE_RUNTIME_ADAPTER"] = "mcp"
     environment.setdefault("CASSETTE_PROJECT_ROOT", str(project_dir))
-    environment.setdefault(
-        "CASSETTE_MCP_SETUP_COMMAND",
-        f"python3 {shlex.quote(str(PLUGIN_ROOT / 'scripts' / 'setup_local_mcp.py'))}",
-    )
+    environment.setdefault("CASSETTE_MCP_SETUP_COMMAND", runtime_config.setup_command(PLUGIN_ROOT))
 
     try:
         if str(os.getenv("CASSETTE_MCP_SKIP_BOOTSTRAP", "") or "").lower() in {"1", "true", "yes"}:
@@ -48,11 +45,14 @@ def main() -> None:
         return
 
     os.chdir(PLUGIN_ROOT)
-    os.execve(
-        str(python_path),
-        [str(python_path), "-m", "mcp_plugin.server"],
-        environment,
-    )
+    command = [str(python_path), "-m", "mcp_plugin.server"]
+    if sys.platform == "win32":
+        # exec* on Windows detaches from the inherited stdio pipes; run as a
+        # child that shares them instead and mirror its exit code.
+        import subprocess
+
+        raise SystemExit(subprocess.run(command, env=environment).returncode)
+    os.execve(str(python_path), command, environment)
 
 
 if __name__ == "__main__":

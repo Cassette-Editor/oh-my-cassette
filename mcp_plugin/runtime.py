@@ -17,6 +17,9 @@ from .models import Artifact, SessionPhase, ToolEnvelope, ToolErrorInfo
 from .state import InvalidTransition, StateStore, next_action_for, phase_from_job
 
 
+WAIT_TICK_SEC = 5.0
+
+
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
@@ -465,7 +468,11 @@ class LocalMcpRuntime:
             len(job.get("progress_events") or []),
         )
 
-    def job_status(self, args: dict[str, Any]) -> ToolEnvelope:
+    def job_status(
+        self,
+        args: dict[str, Any],
+        on_wait_tick: Callable[[float, float, str], None] | None = None,
+    ) -> ToolEnvelope:
         job_id = str(args.get("job_id") or "").strip() or None
         session_id = str(args.get("session_id") or "").strip() or None
         config_error = self._config_error(session_id=session_id)
@@ -476,12 +483,24 @@ class LocalMcpRuntime:
         if job_id and wait_sec:
             try:
                 baseline = self._job_change_marker(self.jobs.load_job(job_id))
-                deadline = time.monotonic() + wait_sec
+                started = time.monotonic()
+                deadline = started + wait_sec
+                last_tick = started
                 while time.monotonic() < deadline:
                     remaining = deadline - time.monotonic()
                     time.sleep(min(0.25, max(0.01, remaining)))
-                    if self._job_change_marker(self.jobs.load_job(job_id)) != baseline:
+                    current = self.jobs.load_job(job_id)
+                    if self._job_change_marker(current) != baseline:
                         break
+                    now = time.monotonic()
+                    if on_wait_tick and now - last_tick >= WAIT_TICK_SEC:
+                        last_tick = now
+                        quality = current.get("quality") if isinstance(current.get("quality"), dict) else {}
+                        stage = str(current.get("current_stage") or quality.get("progress_summary") or "")
+                        try:
+                            on_wait_tick(now - started, wait_sec, stage)
+                        except Exception:
+                            on_wait_tick = None
             except Exception:
                 pass
         payload = self._invoke_core("cassette_job_status", args, session_id=session_id)

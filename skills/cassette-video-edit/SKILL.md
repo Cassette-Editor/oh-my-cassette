@@ -37,7 +37,7 @@ The `cassette` MCP server is a local stdio child process. It opens no port. It s
 Treat the structured `phase` and `next_action` fields as authoritative. Do not decide routing, progress, or completion from keywords in prose.
 
 - `running` or `exporting`: call `cassette_job_status` with `wait_for_change_sec=30`.
-- `needs_user`: present the pending question, then call `cassette_answer_question` with the same `job_id` and the user's `response`.
+- `needs_user`: present the pending question, then call `cassette_answer_question` with the same `job_id` and the user's `response`. On hosts that support MCP elicitation, `cassette_job_status` may collect the answer itself and return the already-resumed status; treat the returned phase as authoritative and do not re-answer.
 - `review_required`: evaluate the full edit result and call `cassette_review_completion`. Rendering begins only when the explicit decision is `export`; use `continue`, `needs_user`, or `failed` when that is the validated outcome.
 - `exported` or `succeeded`: present validated `artifacts` and their MCP resource links.
 - `failed`, `cancelled`, or `timed_out`: report the structured error and the runtime-derived next action.
