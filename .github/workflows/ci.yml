@@ -173,6 +173,7 @@ jobs:
         run: >-
           python -m pytest -q
           tests/test_mcp_config.py
+          tests/test_mcp_host_launch.py
           tests/test_mcp_packaging.py
           tests/test_mcp_protocol.py
           tests/test_mcp_runtime.py
@@ -223,6 +224,11 @@ jobs:
           CODEX_HOME="$smoke_root/codex-home" codex plugin list | tee "$smoke_root/codex-list.txt"
           grep -F 'oh-my-cassette@cassette-editor' "$smoke_root/codex-list.txt"
           grep -F 'installed, enabled' "$smoke_root/codex-list.txt"
+          # The manifest-referenced .codex-plugin/mcp.json must win over the
+          # repo-root .mcp.json (which is the Claude project-scope config).
+          CODEX_HOME="$smoke_root/codex-home" codex mcp get cassette --json | tee "$smoke_root/codex-mcp.json"
+          grep -F 'run_local_mcp.py' "$smoke_root/codex-mcp.json"
+          ! grep -F 'CLAUDE_PROJECT_DIR' "$smoke_root/codex-mcp.json"
           expected_version="$(jq -r .version .codex-plugin/plugin.json)"
           installed_manifest="$(find "$smoke_root/codex-home/plugins/cache/cassette-editor/oh-my-cassette" \
             -path '*/.codex-plugin/plugin.json' -print -quit)"
@@ -238,6 +244,27 @@ jobs:
           HOME="$smoke_root/home" claude plugin details oh-my-cassette@cassette-editor | tee "$smoke_root/claude-details.txt"
           grep -F 'Skills (1)  cassette-video-edit' "$smoke_root/claude-details.txt"
           grep -F 'MCP servers (1)  cassette' "$smoke_root/claude-details.txt"
+          echo "smoke_root=$smoke_root" >> "$GITHUB_ENV"
+      - name: Launch the MCP through Claude itself (plugin and project scope)
+        # `claude mcp list` performs a real stdio initialize against every
+        # configured server — the check that would have caught the repo-root
+        # .mcp.json launching the Codex cache glob inside Claude.
+        env:
+          MCP_TIMEOUT: "300000"
+        run: |
+          export CASSETTE_CONFIG_HOME="$(mktemp -d)/config"
+          export CASSETTE_DATA_HOME="$(mktemp -d)/data"
+          project="$(mktemp -d)"
+          cd "$project"
+          HOME="$smoke_root/home" claude mcp list | tee "$project/health.txt"
+          grep -F 'plugin:oh-my-cassette:cassette' "$project/health.txt" | grep -F '✔ Connected'
+          # Project scope: the repo-root .mcp.json everyone gets by opening
+          # this checkout in Claude Code.
+          mkdir -p "$smoke_root/home/.claude"
+          echo '{"enableAllProjectMcpServers": true}' > "$smoke_root/home/.claude/settings.json"
+          cd "$smoke_root/repo"
+          HOME="$smoke_root/home" claude mcp list | tee "$smoke_root/project-health.txt"
+          grep -E '^cassette:' "$smoke_root/project-health.txt" | grep -F '✔ Connected'
 
   # Real end-to-end test of the official install channel: installs the
   # hermes-agent CLI from PyPI and drives `hermes plugins install` against

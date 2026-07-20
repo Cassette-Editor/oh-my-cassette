@@ -18,7 +18,7 @@
     "claude"
   ],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
+  "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
     "displayName": "Oh My Cassette",
     "shortDescription": "Edit project videos through local MCP",
