@@ -16,7 +16,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-import install_plugin
+import install_plugin  # noqa: E402
 
 
 def _check(name: str, status: str, message: str, **details) -> dict:
@@ -25,7 +25,9 @@ def _check(name: str, status: str, message: str, **details) -> dict:
 
 def _run(cmd: list[str], timeout: int = 20) -> tuple[int, str]:
     try:
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout, check=False)
+        proc = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout, check=False
+        )
         return proc.returncode, _sanitize_text((proc.stdout or "").strip())
     except Exception as exc:
         return 127, type(exc).__name__
@@ -70,8 +72,17 @@ def _check_plugin(home: Path, repo: Path) -> dict:
         except OSError:
             return _check("plugin", "fail", f"plugin symlink is broken: {plugin_dir}")
         if target == repo.resolve():
-            return _check("plugin", "ok", "plugin symlink points to this checkout", path=str(plugin_dir), target=str(target))
-        return _check("plugin", "warn", "plugin symlink points to a different checkout", path=str(plugin_dir), target=str(target), expected=str(repo.resolve()))
+            return _check(
+                "plugin", "ok", "plugin symlink points to this checkout", path=str(plugin_dir), target=str(target)
+            )
+        return _check(
+            "plugin",
+            "warn",
+            "plugin symlink points to a different checkout",
+            path=str(plugin_dir),
+            target=str(target),
+            expected=str(repo.resolve()),
+        )
     try:
         resolved = plugin_dir.resolve()
     except OSError:
@@ -81,9 +92,21 @@ def _check_plugin(home: Path, repo: Path) -> dict:
     if (plugin_dir / ".git").exists():
         returncode, remote = _run(["git", "-C", str(plugin_dir), "remote", "get-url", "origin"])
         if returncode != 0:
-            return _check("plugin", "warn", "plugin directory is a git clone but its remote could not be read", path=str(plugin_dir), output=remote)
+            return _check(
+                "plugin",
+                "warn",
+                "plugin directory is a git clone but its remote could not be read",
+                path=str(plugin_dir),
+                output=remote,
+            )
         if "oh-my-cassette" not in remote:
-            return _check("plugin", "warn", "plugin directory is a git clone of a different repository", path=str(plugin_dir), remote=remote)
+            return _check(
+                "plugin",
+                "warn",
+                "plugin directory is a git clone of a different repository",
+                path=str(plugin_dir),
+                remote=remote,
+            )
         installed_version = _read_plugin_version(plugin_dir)
         local_version = _read_plugin_version(repo)
         if installed_version and local_version and installed_version != local_version:
@@ -101,7 +124,12 @@ def _check_plugin(home: Path, repo: Path) -> dict:
             path=str(plugin_dir),
             remote=remote,
         )
-    return _check("plugin", "warn", "plugin directory exists but is neither a symlink nor a git clone; reinstall with `hermes plugins install Cassette-Editor/oh-my-cassette --force` or scripts/install_plugin.py", path=str(plugin_dir))
+    return _check(
+        "plugin",
+        "warn",
+        "plugin directory exists but is neither a symlink nor a git clone; reinstall with `hermes plugins install Cassette-Editor/oh-my-cassette --force` or scripts/install_plugin.py",
+        path=str(plugin_dir),
+    )
 
 
 def _check_plugin_enabled(home: Path) -> dict:
@@ -131,10 +159,16 @@ def _check_plugin_enabled(home: Path) -> dict:
         if not re.search(r"\bcassette\b", normalized):
             continue
         if "not enabled" in normalized:
-            return _check("plugin_enabled", "warn", "Cassette plugin is installed but not enabled; run `hermes plugins enable cassette`")
+            return _check(
+                "plugin_enabled",
+                "warn",
+                "Cassette plugin is installed but not enabled; run `hermes plugins enable cassette`",
+            )
         if re.search(r"\benabled\b", normalized):
             return _check("plugin_enabled", "ok", "Cassette plugin is enabled in Hermes")
-    return _check("plugin_enabled", "warn", "Cassette plugin was not found in `hermes plugins list` output", output=output[-1000:])
+    return _check(
+        "plugin_enabled", "warn", "Cassette plugin was not found in `hermes plugins list` output", output=output[-1000:]
+    )
 
 
 def _check_env(home: Path) -> dict:
@@ -142,7 +176,9 @@ def _check_env(home: Path) -> dict:
     values = install_plugin.read_env_values(env_path)
     missing = [key for key in ("CASSETTE_URL", "CASSETTE_AUTH_EMAIL", "CASSETTE_AUTH_PASSWORD") if not values.get(key)]
     status = "ok" if not missing else "warn"
-    message = "required Cassette environment values are present" if not missing else f"missing values: {', '.join(missing)}"
+    message = (
+        "required Cassette environment values are present" if not missing else f"missing values: {', '.join(missing)}"
+    )
     return _check("env", status, message, path=str(env_path), values=_redacted_env_snapshot(values))
 
 
@@ -162,10 +198,20 @@ def _check_playwright(home: Path) -> dict:
         return _check("playwright", "fail", f"Hermes Python was not found: {python}")
     code, output = _run([str(python), "-c", "import playwright.sync_api; print('playwright ok')"], timeout=20)
     if code != 0:
-        return _check("playwright", "fail", "Python Playwright is not installed in the Hermes environment", python=str(python), output=output[-500:])
+        return _check(
+            "playwright",
+            "fail",
+            "Python Playwright is not installed in the Hermes environment",
+            python=str(python),
+            output=output[-500:],
+        )
     code, chromium_output = _run([str(python), "-m", "playwright", "install", "chromium", "--dry-run"], timeout=30)
     status = "ok" if code == 0 else "warn"
-    message = "Playwright package is installed" if status == "ok" else "Playwright package is installed, but Chromium dry-run check failed"
+    message = (
+        "Playwright package is installed"
+        if status == "ok"
+        else "Playwright package is installed, but Chromium dry-run check failed"
+    )
     return _check("playwright", status, message, python=str(python), output=chromium_output[-500:])
 
 
@@ -208,10 +254,18 @@ def _check_cassette_connectivity(url: str) -> dict:
                 status = int(getattr(response, "status", 200) or 200)
             if 200 <= status < 400 or status in {401, 403}:
                 return _check("cassette_url", "ok", "Cassette URL is reachable", url=url, http_status=status)
-            return _check("cassette_url", "fail", "Cassette URL returned an unhealthy status", url=url, http_status=status)
+            return _check(
+                "cassette_url", "fail", "Cassette URL returned an unhealthy status", url=url, http_status=status
+            )
         except HTTPError as exc:
             if int(exc.code) in {401, 403}:
-                return _check("cassette_url", "ok", "Cassette URL is reachable and requires auth", url=url, http_status=int(exc.code))
+                return _check(
+                    "cassette_url",
+                    "ok",
+                    "Cassette URL is reachable and requires auth",
+                    url=url,
+                    http_status=int(exc.code),
+                )
             if method == "HEAD" and int(exc.code) in {405, 501}:
                 last_error = f"HTTP {exc.code}"
                 continue
@@ -483,7 +537,9 @@ except Exception as exc:
 
 def _check_cassette_login(home: Path, url: str, email: str, password: str) -> dict:
     if not email or not password:
-        return _check("cassette_login", "warn", "Cassette login credentials are not configured; login verification skipped")
+        return _check(
+            "cassette_login", "warn", "Cassette login credentials are not configured; login verification skipped"
+        )
     python = install_plugin.hermes_python(home)
     if not python.exists():
         return _check("cassette_login", "fail", f"Hermes Python was not found: {python}")
@@ -523,9 +579,20 @@ def _check_cassette_login(home: Path, url: str, email: str, password: str) -> di
     if data.get("status") == "ok":
         return _check("cassette_login", "ok", "Cassette login credentials were accepted", code=code)
     if code == "cassette_ui_not_ready":
-        return _check("cassette_login", "warn", "Cassette page loaded but login/agent UI was not ready during verification", code=code)
+        return _check(
+            "cassette_login",
+            "warn",
+            "Cassette page loaded but login/agent UI was not ready during verification",
+            code=code,
+        )
     if code in {"cassette_auth_form_missing", "cassette_auth_form_still_visible", "cassette_post_auth_ui_not_ready"}:
-        return _check("cassette_login", "warn", "Cassette credentials were not rejected, but the diagnostic browser did not reach the agent UI", code=code, output=output[-1000:])
+        return _check(
+            "cassette_login",
+            "warn",
+            "Cassette credentials were not rejected, but the diagnostic browser did not reach the agent UI",
+            code=code,
+            output=output[-1000:],
+        )
     message = "Cassette login credentials were rejected or login did not complete"
     return _check("cassette_login", "fail", message, code=code, output=output[-1000:])
 

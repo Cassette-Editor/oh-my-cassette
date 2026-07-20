@@ -1,4 +1,5 @@
 """Persisted typed state machine for local MCP sessions and jobs."""
+
 from __future__ import annotations
 
 import hashlib

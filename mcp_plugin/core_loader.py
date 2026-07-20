@@ -1,4 +1,5 @@
 """Load the repository-root Hermes/core package under its stable ``cassette`` name."""
+
 from __future__ import annotations
 
 import importlib.util

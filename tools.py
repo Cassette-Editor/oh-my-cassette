@@ -226,7 +226,9 @@ def cassette_match_bgm(a: dict, **kw) -> str:
             result["fallback_from"] = fallback_from
             if fallback_reason:
                 result["fallback_reason"] = fallback_reason
-        effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
+        effective_instruction = (
+            _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
+        )
         if continue_after_match:
             if optimization_enabled:
                 _save_pending_edit(
@@ -258,7 +260,9 @@ def cassette_match_bgm(a: dict, **kw) -> str:
             "fallback": {
                 "from": fallback_from,
                 "reason": fallback_reason,
-            } if fallback_from else {},
+            }
+            if fallback_from
+            else {},
             "hermes_next_step": _bgm_next_step_guidance(
                 optimization_enabled,
                 continue_after_match=continue_after_match,
@@ -346,7 +350,9 @@ def cassette_match_exact_bgm(a: dict, **kw) -> str:
             artist=artist,
             download=download,
         )
-        effective_instruction = _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
+        effective_instruction = (
+            _instruction_with_bgm(instruction, result, language=language) if continue_after_match else instruction
+        )
         if continue_after_match and download and result.get("status") == "downloaded":
             if optimization_enabled:
                 _save_pending_edit(
@@ -359,7 +365,11 @@ def cassette_match_exact_bgm(a: dict, **kw) -> str:
             else:
                 _clear_pending_edit(session_id)
         user_message = _smart_bgm_status_message(result, continue_after_match=continue_after_match, language=language)
-        notification = _notify_smart_bgm_result(session_id, user_message) if download else {"status": "skipped", "reason": "download_false"}
+        notification = (
+            _notify_smart_bgm_result(session_id, user_message)
+            if download
+            else {"status": "skipped", "reason": "download_false"}
+        )
         data = {
             "status": result.get("status") or "matched",
             "provider": result.get("provider") or "musicsquare_exact",
@@ -472,7 +482,7 @@ def _strip_exact_bgm_wrappers(value: str) -> str:
         changed = False
         for left, right in pairs:
             if text.startswith(left) and text.endswith(right):
-                text = text[len(left): len(text) - len(right)].strip()
+                text = text[len(left) : len(text) - len(right)].strip()
                 changed = True
                 break
     return text
@@ -480,21 +490,11 @@ def _strip_exact_bgm_wrappers(value: str) -> str:
 
 @safe_tool
 def jamendo_music_matcher(a: dict, **kw) -> str:
-    user_query = str(
-        a.get("userQuery")
-        or a.get("user_query")
-        or a.get("query")
-        or ""
-    ).strip()
+    user_query = str(a.get("userQuery") or a.get("user_query") or a.get("query") or "").strip()
     if not user_query:
         raise CassetteError("missing_required_arg", "userQuery is required")
     planner = jamendo.HermesJamendoPlanner()
-    plan_payload = (
-        a.get("searchPlan")
-        or a.get("search_plan")
-        or a.get("hermesJson")
-        or a.get("hermes_json")
-    )
+    plan_payload = a.get("searchPlan") or a.get("search_plan") or a.get("hermesJson") or a.get("hermes_json")
     repair_payload = a.get("repairJson") or a.get("repair_json")
     if plan_payload is None:
         plan = jamendo.build_search_plan_from_form(
@@ -580,11 +580,7 @@ def _scrub_list_assets(data: dict) -> dict:
     for asset in manifest_data.get("assets") or []:
         if not isinstance(asset, dict):
             continue
-        cleaned = {
-            key: value
-            for key, value in asset.items()
-            if key not in {"saved_path"}
-        }
+        cleaned = {key: value for key, value in asset.items() if key not in {"saved_path"}}
         if asset.get("saved_path"):
             cleaned["stored"] = True
         assets.append(cleaned)
@@ -602,12 +598,16 @@ def _scrub_list_assets(data: dict) -> dict:
     return {"manifest": manifest_data}
 
 
-def _asset_paths_for_session(session_id: str | None, chat_id: str | None, task_id: str | None) -> tuple[str, list[str], dict]:
+def _asset_paths_for_session(
+    session_id: str | None, chat_id: str | None, task_id: str | None
+) -> tuple[str, list[str], dict]:
     listed = manifest.list_assets(session_id, chat_id, task_id)
     session_manifest = listed["manifest"]
-    return session_manifest.get("session_hash", ""), [
-        a["saved_path"] for a in session_manifest.get("assets", []) if a.get("exists") and a.get("saved_path")
-    ], dict(session_manifest.get("delivery") or {})
+    return (
+        session_manifest.get("session_hash", ""),
+        [a["saved_path"] for a in session_manifest.get("assets", []) if a.get("exists") and a.get("saved_path")],
+        dict(session_manifest.get("delivery") or {}),
+    )
 
 
 def _normalize_thinking_level(value: str | None, text: str = "") -> str:
@@ -619,11 +619,43 @@ def _normalize_thinking_level(value: str | None, text: str = "") -> str:
     if explicit in {"medium", "balanced", "中", "中等", "中度"}:
         return "Medium"
     haystack = f"{explicit}\n{text}".lower()
-    if any(token in haystack for token in ("thinking level high", "high thinking", "deep reasoning", "思考程度 高", "思考程度高", "高思考", "深度思考")):
+    if any(
+        token in haystack
+        for token in (
+            "thinking level high",
+            "high thinking",
+            "deep reasoning",
+            "思考程度 高",
+            "思考程度高",
+            "高思考",
+            "深度思考",
+        )
+    ):
         return "High"
-    if any(token in haystack for token in ("thinking level low", "low thinking", "light reasoning", "思考程度 低", "思考程度低", "低思考", "轻度思考")):
+    if any(
+        token in haystack
+        for token in (
+            "thinking level low",
+            "low thinking",
+            "light reasoning",
+            "思考程度 低",
+            "思考程度低",
+            "低思考",
+            "轻度思考",
+        )
+    ):
         return "Low"
-    if any(token in haystack for token in ("thinking level medium", "medium thinking", "balanced reasoning", "思考程度 中", "思考程度中", "中等思考")):
+    if any(
+        token in haystack
+        for token in (
+            "thinking level medium",
+            "medium thinking",
+            "balanced reasoning",
+            "思考程度 中",
+            "思考程度中",
+            "中等思考",
+        )
+    ):
         return "Medium"
     return os.getenv("CASSETTE_DEFAULT_THINKING_LEVEL", "Low")
 
@@ -635,16 +667,15 @@ def _cassette_model_selection(args: dict, delivery: dict | None = None) -> dict:
         preference = _cassette_model_preference_for_session(session_id)
         if preference:
             return {**preference, "source": "session_preference"}
-    text = "\n".join(
-        str(args.get(key) or "")
-        for key in ("chat_message", "cassette_message", "instruction", "prompt")
-    )
+    text = "\n".join(str(args.get(key) or "") for key in ("chat_message", "cassette_message", "instruction", "prompt"))
     model = (args.get("cassette_model") or args.get("model") or "").strip()
     thinking_level = _normalize_thinking_level(args.get("thinking_level"), text)
     return {
         "model": model,
         "thinking_level": thinking_level,
-        "source": "user_or_default" if args.get("cassette_model") or args.get("model") or args.get("thinking_level") else "default",
+        "source": "user_or_default"
+        if args.get("cassette_model") or args.get("model") or args.get("thinking_level")
+        else "default",
     }
 
 
@@ -708,11 +739,7 @@ def _finish_background_cassette_job(job_id: str, action: str = "run", response: 
             worker_kind="thread",
         )
         active_transport = transport.get_transport()
-        result = (
-            active_transport.resume(job, response)
-            if action == "resume"
-            else active_transport.run_job(job)
-        )
+        result = active_transport.resume(job, response) if action == "resume" else active_transport.run_job(job)
         job = jobs.merge_persisted_runtime_fields(job)
         job.update(result)
         job["status"] = result.get("status", "failed")
@@ -762,7 +789,9 @@ def cassette_run_job(a: dict, **kw) -> str:
     if not prompt_text:
         raise CassetteError("missing_required_arg", "prompt is required")
     raw_session_id = str(a.get("session_id") or kw.get("task_id") or "").strip()
-    session_hash, asset_paths, delivery = _asset_paths_for_session(a.get("session_id"), a.get("chat_id"), kw.get("task_id"))
+    session_hash, asset_paths, delivery = _asset_paths_for_session(
+        a.get("session_id"), a.get("chat_id"), kw.get("task_id")
+    )
     if raw_session_id:
         active_job = _latest_active_job_for_session(raw_session_id)
         if active_job:
@@ -963,19 +992,23 @@ def cassette_review_completion(a: dict, **kw) -> str:
     quality["completion_source"] = "hermes_completion_review"
     quality["progress_summary"] = summary or reason
     if decision == "failed":
-        errors.append({
-            "code": "hermes_completion_review_failed",
-            "message": "Hermes judged that Cassette did not complete the edit.",
-            "details": {"reason": reason},
-        })
+        errors.append(
+            {
+                "code": "hermes_completion_review_failed",
+                "message": "Hermes judged that Cassette did not complete the edit.",
+                "details": {"reason": reason},
+            }
+        )
         job.update({"status": "failed", "errors": errors, "quality": quality, "finished_at": jobs.now_iso()})
     else:
-        questions.append({
-            "question": summary or reason,
-            "requires_user": decision == "needs_user",
-            "reason": f"hermes_completion_review_{decision}",
-            "answer": reason,
-        })
+        questions.append(
+            {
+                "question": summary or reason,
+                "requires_user": decision == "needs_user",
+                "reason": f"hermes_completion_review_{decision}",
+                "answer": reason,
+            }
+        )
         job.update({"status": "needs_user", "questions": questions, "quality": quality, "finished_at": jobs.now_iso()})
     jobs.save_job(job)
     job["notification"] = notifier.notify_terminal_job(job)
@@ -1021,7 +1054,9 @@ _AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 
 
 def _platform_value(source: Any) -> str:
-    return str(getattr(getattr(source, "platform", None), "value", None) or getattr(source, "platform", None) or "gateway")
+    return str(
+        getattr(getattr(source, "platform", None), "value", None) or getattr(source, "platform", None) or "gateway"
+    )
 
 
 def _normalize_platform_name(platform: Any) -> str:
@@ -1223,7 +1258,9 @@ def _qq_raw_gateway_media(event: Any, gateway: Any) -> tuple[list[str], list[str
 
 
 def _telegram_attachment_media_type(att: dict[str, Any]) -> str:
-    content_type = str(att.get("content_type") or att.get("mime_type") or att.get("mime") or "").split(";", 1)[0].strip().lower()
+    content_type = (
+        str(att.get("content_type") or att.get("mime_type") or att.get("mime") or "").split(";", 1)[0].strip().lower()
+    )
     filename = str(att.get("filename") or att.get("file_name") or att.get("name") or "").strip().lower()
     suffix = Path(filename).suffix.lower()
     if content_type.startswith("video/"):
@@ -1242,7 +1279,9 @@ def _telegram_attachment_media_type(att: dict[str, Any]) -> str:
 
 
 def _telegram_attachment_mime(att: dict[str, Any], media_type: str, path_hint: str = "") -> str:
-    content_type = str(att.get("content_type") or att.get("mime_type") or att.get("mime") or "").split(";", 1)[0].strip().lower()
+    content_type = (
+        str(att.get("content_type") or att.get("mime_type") or att.get("mime") or "").split(";", 1)[0].strip().lower()
+    )
     if content_type and content_type != "file":
         return content_type
     guessed = mimetypes.guess_type(str(att.get("filename") or att.get("file_name") or path_hint or ""))[0]
@@ -1313,7 +1352,9 @@ def _download_telegram_attachment_to_cache(att: dict[str, Any]) -> tuple[str, st
     _validate_telegram_attachment_url(url)
     media_type = _telegram_attachment_media_type(att)
     if not media_type:
-        raise CassetteError("telegram_attachment_unsupported_type", "Telegram attachment is not supported Cassette media")
+        raise CassetteError(
+            "telegram_attachment_unsupported_type", "Telegram attachment is not supported Cassette media"
+        )
     timeout = float(os.getenv("CASSETTE_TELEGRAM_ATTACHMENT_TIMEOUT_SEC", "120"))
     request = Request(url, headers={"User-Agent": "Hermes-Cassette/1.0"})
     try:
@@ -1328,7 +1369,9 @@ def _download_telegram_attachment_to_cache(att: dict[str, Any]) -> tuple[str, st
     if len(data) > security.get_max_bytes():
         raise CassetteError("file_too_large", "Telegram attachment is larger than CASSETTE_MAX_BYTES")
     content_type = _telegram_attachment_mime(att, media_type, url)
-    return _cache_gateway_document_bytes(data, _telegram_attachment_cache_name(att, media_type, content_type)), content_type
+    return _cache_gateway_document_bytes(
+        data, _telegram_attachment_cache_name(att, media_type, content_type)
+    ), content_type
 
 
 def _iter_telegram_attachment_dicts(value: Any) -> list[dict[str, Any]]:
@@ -1336,7 +1379,18 @@ def _iter_telegram_attachment_dicts(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, dict):
         if _telegram_attachment_media_type(value) and (_telegram_local_path(value) or _telegram_attachment_url(value)):
             found.append(value)
-        for key in ("attachments", "media", "photos", "photo", "videos", "video", "audio", "voice", "documents", "document"):
+        for key in (
+            "attachments",
+            "media",
+            "photos",
+            "photo",
+            "videos",
+            "video",
+            "audio",
+            "voice",
+            "documents",
+            "document",
+        ):
             child = value.get(key)
             if child is not None and child is not value:
                 found.extend(_iter_telegram_attachment_dicts(child))
@@ -1392,8 +1446,20 @@ def _is_gateway_media_placeholder_text(text: str) -> bool:
     value = normalized.casefold().strip()
     bracketed = value.strip("[]【】()（） ")
     media_words = {
-        "视频", "图片", "照片", "语音", "音频", "文件", "附件",
-        "video", "image", "photo", "voice", "audio", "file", "attachment",
+        "视频",
+        "图片",
+        "照片",
+        "语音",
+        "音频",
+        "文件",
+        "附件",
+        "video",
+        "image",
+        "photo",
+        "voice",
+        "audio",
+        "file",
+        "attachment",
     }
     if bracketed in media_words:
         return True
@@ -1405,7 +1471,11 @@ def _is_gateway_media_placeholder_text(text: str) -> bool:
         tail = re.sub(r"^[【\[]?(视频|图片|照片|语音|音频|文件|附件)[】\]]?\s+", "", normalized).strip()
         if Path(tail).suffix.lower() in (_VIDEO_EXTENSIONS | _IMAGE_EXTENSIONS | _AUDIO_EXTENSIONS):
             return True
-    if len(normalized) <= 260 and "\n" not in normalized and Path(normalized).suffix.lower() in (_VIDEO_EXTENSIONS | _IMAGE_EXTENSIONS | _AUDIO_EXTENSIONS):
+    if (
+        len(normalized) <= 260
+        and "\n" not in normalized
+        and Path(normalized).suffix.lower() in (_VIDEO_EXTENSIONS | _IMAGE_EXTENSIONS | _AUDIO_EXTENSIONS)
+    ):
         return True
     return False
 
@@ -1427,7 +1497,9 @@ def _gateway_hermes_session_id(event: Any, session_store: Any = None) -> str:
 
 def _gateway_session_id(event: Any, session_store: Any = None) -> str:
     source = getattr(event, "source", None)
-    platform = getattr(getattr(source, "platform", None), "value", None) or getattr(source, "platform", None) or "gateway"
+    platform = (
+        getattr(getattr(source, "platform", None), "value", None) or getattr(source, "platform", None) or "gateway"
+    )
     if _normalize_platform_name(platform) == "web":
         chat_id = str(getattr(source, "chat_id", "") or "").strip()
         if chat_id.startswith("web_"):
@@ -1485,7 +1557,9 @@ def _gateway_adapter(gateway: Any, source: Any, *, fallback_to_default: bool = T
         platform_value = _platform_value(source)
         for key, candidate in adapters.items():
             key_value = str(getattr(key, "value", key))
-            candidate_value = str(getattr(getattr(candidate, "platform", None), "value", getattr(candidate, "platform", "")))
+            candidate_value = str(
+                getattr(getattr(candidate, "platform", None), "value", getattr(candidate, "platform", ""))
+            )
             if platform_value in {key_value, candidate_value}:
                 return candidate
     return getattr(gateway, "adapter", None) if fallback_to_default else None
@@ -1521,7 +1595,9 @@ def _send_gateway_fixed_reply(gateway: Any, event: Any, text: str) -> bool:
         return False
 
 
-def _fixed_media_saved_message(saved_count: int, total_count: int, failures: list[str] | None = None, language: str = "zh") -> str:
+def _fixed_media_saved_message(
+    saved_count: int, total_count: int, failures: list[str] | None = None, language: str = "zh"
+) -> str:
     language = _normalize_cassette_language(language) or "zh"
     if language == "en":
         saved_word = "asset" if saved_count == 1 else "assets"
@@ -1600,7 +1676,9 @@ def _fixed_flow_busy_message(language: str = "zh") -> str:
     return "请使用/cut命令终止当前流程或剪辑任务后再尝试开始新的剪辑任务"
 
 
-def _reject_busy_flow(session_id: str, gateway: Any, event: Any, language: str = "zh", reason: str = "cassette_flow_busy") -> dict:
+def _reject_busy_flow(
+    session_id: str, gateway: Any, event: Any, language: str = "zh", reason: str = "cassette_flow_busy"
+) -> dict:
     reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_flow_busy_message(language))
     return {
         "action": "skip",
@@ -1799,7 +1877,13 @@ def _fixed_asset_status_message(session_id: str, language: str = "zh") -> str:
         media_type = str(asset.get("media_type") or "file")
         counts[media_type] = counts.get(media_type, 0) + 1
     if _normalize_cassette_language(language) == "en":
-        label_map = (("video", "video"), ("image", "image"), ("audio", "audio"), ("file", "file"), ("unknown", "unknown"))
+        label_map = (
+            ("video", "video"),
+            ("image", "image"),
+            ("audio", "audio"),
+            ("file", "file"),
+            ("unknown", "unknown"),
+        )
         type_parts = [f"{label} {counts[key]}" for key, label in label_map if counts.get(key)]
         summary = ", ".join(type_parts) if type_parts else "no usable assets"
         names = [_asset_display_name(asset) for asset in assets[:12]]
@@ -1809,7 +1893,9 @@ def _fixed_asset_status_message(session_id: str, language: str = "zh") -> str:
         message = f"This Cassette session has saved {len(assets)} asset(s) ({summary})."
         if detail:
             message += f" Saved: {detail}."
-        message += " If you expected more, resend the missing media or wait for the upload to finish before checking again."
+        message += (
+            " If you expected more, resend the missing media or wait for the upload to finish before checking again."
+        )
         return message
     type_parts = []
     for key, label in (("video", "视频"), ("image", "图片"), ("audio", "音频"), ("file", "文件"), ("unknown", "未知")):
@@ -1832,15 +1918,35 @@ def _obviously_not_edit_instruction(text: str) -> bool:
     if not normalized:
         return True
     delivery_complaint_terms = {
-        "didn't receive", "did not receive", "haven't received", "have not received",
-        "not received", "not receive", "没收到", "没有收到", "未收到", "没接收到",
+        "didn't receive",
+        "did not receive",
+        "haven't received",
+        "have not received",
+        "not received",
+        "not receive",
+        "没收到",
+        "没有收到",
+        "未收到",
+        "没接收到",
     }
     if any(term in normalized for term in delivery_complaint_terms):
         return True
     non_edit_exact_terms = {
-        "你好", "hello", "hi", "嗨", "在吗",
-        "谢谢", "thanks", "thank you", "thx",
-        "好的", "好吧", "ok", "okay", "嗯", "收到",
+        "你好",
+        "hello",
+        "hi",
+        "嗨",
+        "在吗",
+        "谢谢",
+        "thanks",
+        "thank you",
+        "thx",
+        "好的",
+        "好吧",
+        "ok",
+        "okay",
+        "嗯",
+        "收到",
     }
     return normalized in non_edit_exact_terms or _looks_like_asset_status_query(normalized)
 
@@ -1849,7 +1955,9 @@ _CASSETTE_GATEWAY_COMMANDS = {"edit", "refine", "music", "cut", "check_assets", 
 
 
 def _gateway_slash_command(text: str) -> tuple[str, str] | None:
-    match = re.match(r"^\s*[／/]([A-Za-z][A-Za-z0-9_-]*)(?:@[A-Za-z0-9_]+)?(?:\s+|[:：]\s*|$)(.*)\s*$", text or "", flags=re.DOTALL)
+    match = re.match(
+        r"^\s*[／/]([A-Za-z][A-Za-z0-9_-]*)(?:@[A-Za-z0-9_]+)?(?:\s+|[:：]\s*|$)(.*)\s*$", text or "", flags=re.DOTALL
+    )
     if not match:
         return None
     return match.group(1).lower(), match.group(2).strip()
@@ -1940,7 +2048,9 @@ def _handle_gateway_language_command(session_id: str, platform: Any, gateway: An
     current_language = _cassette_language_for_session(session_id, platform)
     requested = (arg or "").strip()
     if not requested:
-        reply_sent = _send_gateway_fixed_reply(gateway, event, _gateway_language_status_message(current_language, platform))
+        reply_sent = _send_gateway_fixed_reply(
+            gateway, event, _gateway_language_status_message(current_language, platform)
+        )
         return {
             "action": "skip",
             "reason": "cassette_language_status",
@@ -2088,7 +2198,9 @@ def _request_cassette_model_choice(
         options = _cassette_model_options(language)
     except Exception as exc:
         error_details = _model_options_error_details(exc)
-        reply_sent = _send_gateway_fixed_reply(gateway, event, _cassette_model_options_unavailable_message(language, error_details))
+        reply_sent = _send_gateway_fixed_reply(
+            gateway, event, _cassette_model_options_unavailable_message(language, error_details)
+        )
         return {
             "action": "skip",
             "reason": "cassette_model_options_unavailable",
@@ -2171,7 +2283,9 @@ def _handle_pending_cassette_model_choice(
     selected_model = str(pending_edit.get("selected_model") or "").strip()
     if choice is None:
         return _reject_busy_flow(session_id, gateway, event, language, "cassette_model_thinking_choice_busy_rejected")
-    selected_thinking = str((thinking_options[choice - 1] or {}).get("value") or (thinking_options[choice - 1] or {}).get("label") or "").strip()
+    selected_thinking = str(
+        (thinking_options[choice - 1] or {}).get("value") or (thinking_options[choice - 1] or {}).get("label") or ""
+    ).strip()
     selected_thinking = _normalize_thinking_level(selected_thinking)
     resume_after_model = str(pending_edit.get("resume_after_model") or "edit")
     _save_cassette_model_preference(
@@ -2182,7 +2296,9 @@ def _handle_pending_cassette_model_choice(
     )
     if resume_after_model == "command":
         _clear_pending_edit(session_id)
-        reply_sent = _send_gateway_fixed_reply(gateway, event, _cassette_model_set_message(selected_model, selected_thinking, language))
+        reply_sent = _send_gateway_fixed_reply(
+            gateway, event, _cassette_model_set_message(selected_model, selected_thinking, language)
+        )
         return {
             "action": "skip",
             "reason": "cassette_model_set",
@@ -2213,7 +2329,9 @@ def _handle_pending_cassette_model_choice(
         )
         return _rewrite_accepted_prompt_optimization(session_id, instruction, asset_count, language=language)
     if _initial_edit_choices_completed(session_id):
-        return _rewrite_direct_original_instruction(session_id, instruction, asset_count, direct_reason="session_default", language=language)
+        return _rewrite_direct_original_instruction(
+            session_id, instruction, asset_count, direct_reason="session_default", language=language
+        )
     return _request_prompt_optimization_choice(session_id, instruction, asset_count, gateway, event, language)
 
 
@@ -2221,8 +2339,28 @@ def _looks_like_prompt_confirmation(text: str) -> bool:
     normalized = (text or "").strip().lower()
     normalized = normalized.strip("。.!！ ")
     confirmations = {
-        "确认", "可以", "好的", "好", "行", "没问题", "就这样", "按这个来", "按这个做", "开始", "开始吧",
-        "执行", "执行吧", "继续", "继续吧", "ok", "okay", "yes", "confirm", "approved", "go", "go ahead",
+        "确认",
+        "可以",
+        "好的",
+        "好",
+        "行",
+        "没问题",
+        "就这样",
+        "按这个来",
+        "按这个做",
+        "开始",
+        "开始吧",
+        "执行",
+        "执行吧",
+        "继续",
+        "继续吧",
+        "ok",
+        "okay",
+        "yes",
+        "confirm",
+        "approved",
+        "go",
+        "go ahead",
     }
     if normalized in confirmations:
         return True
@@ -2238,10 +2376,30 @@ def _looks_like_prompt_optimization_decline(text: str) -> bool:
     if not normalized:
         return False
     decline_terms = (
-        "否", "不用", "不要", "不需要", "不优化", "别优化", "跳过优化", "原样", "直接开始", "直接剪",
-        "按原文", "按原始", "原指令", "原始指令", "无需优化",
-        "no", "n", "skip", "skip optimization", "without optimization", "do not optimize", "don't optimize",
-        "raw", "use original",
+        "否",
+        "不用",
+        "不要",
+        "不需要",
+        "不优化",
+        "别优化",
+        "跳过优化",
+        "原样",
+        "直接开始",
+        "直接剪",
+        "按原文",
+        "按原始",
+        "原指令",
+        "原始指令",
+        "无需优化",
+        "no",
+        "n",
+        "skip",
+        "skip optimization",
+        "without optimization",
+        "do not optimize",
+        "don't optimize",
+        "raw",
+        "use original",
     )
     return any(term in normalized for term in decline_terms)
 
@@ -2254,8 +2412,23 @@ def _looks_like_prompt_optimization_accept(text: str) -> bool:
     if _looks_like_prompt_optimization_decline(normalized):
         return False
     accept_terms = (
-        "是", "用", "使用", "需要", "优化", "帮我优化", "先优化", "可以", "确认", "好的", "好",
-        "yes", "y", "ok", "okay", "optimize", "use optimization",
+        "是",
+        "用",
+        "使用",
+        "需要",
+        "优化",
+        "帮我优化",
+        "先优化",
+        "可以",
+        "确认",
+        "好的",
+        "好",
+        "yes",
+        "y",
+        "ok",
+        "okay",
+        "optimize",
+        "use optimization",
     )
     return any(term in normalized for term in accept_terms)
 
@@ -2265,9 +2438,28 @@ def _looks_like_bgm_decline(text: str) -> bool:
     if not normalized:
         return False
     decline_terms = (
-        "否", "不用", "不要", "不需要", "不加", "不用bgm", "不要bgm", "不需要bgm",
-        "不用配乐", "不要配乐", "不需要配乐", "跳过", "跳过bgm", "直接继续", "直接开始",
-        "no", "n", "skip", "without bgm", "no bgm", "no music", "do not add music",
+        "否",
+        "不用",
+        "不要",
+        "不需要",
+        "不加",
+        "不用bgm",
+        "不要bgm",
+        "不需要bgm",
+        "不用配乐",
+        "不要配乐",
+        "不需要配乐",
+        "跳过",
+        "跳过bgm",
+        "直接继续",
+        "直接开始",
+        "no",
+        "n",
+        "skip",
+        "without bgm",
+        "no bgm",
+        "no music",
+        "do not add music",
     )
     return any(term in normalized for term in decline_terms)
 
@@ -2279,14 +2471,37 @@ def _looks_like_bgm_accept(text: str) -> bool:
     if _looks_like_bgm_decline(normalized):
         return False
     exact_accept_terms = {
-        "是", "要", "需要", "使用", "加", "加上", "可以", "好的", "好",
-        "yes", "y", "ok", "okay",
+        "是",
+        "要",
+        "需要",
+        "使用",
+        "加",
+        "加上",
+        "可以",
+        "好的",
+        "好",
+        "yes",
+        "y",
+        "ok",
+        "okay",
     }
     if normalized in exact_accept_terms:
         return True
     accept_phrases = (
-        "bgm", "配乐", "背景音乐", "智能配乐", "智能匹配", "匹配一首", "匹配音乐",
-        "帮我配", "帮我匹配", "use music", "use bgm", "add music", "add bgm", "background music",
+        "bgm",
+        "配乐",
+        "背景音乐",
+        "智能配乐",
+        "智能匹配",
+        "匹配一首",
+        "匹配音乐",
+        "帮我配",
+        "帮我匹配",
+        "use music",
+        "use bgm",
+        "add music",
+        "add bgm",
+        "background music",
     )
     return any(term in normalized for term in accept_phrases)
 
@@ -2347,7 +2562,10 @@ def _load_pending_edit(session_id: str) -> dict | None:
     if not isinstance(data, dict):
         return None
     state = str(data.get("state") or "")
-    if not str(data.get("instruction") or "").strip() and state not in {"awaiting_model_choice", "awaiting_model_thinking_choice"}:
+    if not str(data.get("instruction") or "").strip() and state not in {
+        "awaiting_model_choice",
+        "awaiting_model_thinking_choice",
+    }:
         return None
     return data
 
@@ -2445,7 +2663,7 @@ def _prompt_optimization_choice_message(language: str = "zh") -> str:
     if _normalize_cassette_language(language) == "en":
         return (
             "Would you like me to optimize your edit instruction into a more professional edit instruction first? "
-            "Reply \"optimize/yes\" and I will optimize it and ask for confirmation; reply \"no/no optimization\" and I will send your original instruction directly to Cassette."
+            'Reply "optimize/yes" and I will optimize it and ask for confirmation; reply "no/no optimization" and I will send your original instruction directly to Cassette.'
         )
     return (
         "是否需要我先把你的剪辑指令优化成更专业的剪辑指令？"
@@ -2457,7 +2675,7 @@ def _smart_bgm_choice_message(language: str = "zh") -> str:
     if _normalize_cassette_language(language) == "en":
         return (
             "Would you like smart BGM matching based on the edit instruction? "
-            "Reply \"yes/need BGM\" and I will recommend 3 songs for you to choose from; reply \"no/no BGM\" and I will continue the workflow."
+            'Reply "yes/need BGM" and I will recommend 3 songs for you to choose from; reply "no/no BGM" and I will continue the workflow.'
         )
     return (
         "是否需要我根据剪辑指令智能匹配一首 BGM？"
@@ -2564,7 +2782,9 @@ def _accepted_prompt_optimization_guard(language: str = "zh") -> str:
     )
 
 
-def _request_prompt_optimization_choice(session_id: str, instruction: str, asset_count: int, gateway: Any, event: Any, language: str = "zh") -> dict:
+def _request_prompt_optimization_choice(
+    session_id: str, instruction: str, asset_count: int, gateway: Any, event: Any, language: str = "zh"
+) -> dict:
     _save_pending_edit(session_id, instruction, asset_count, "awaiting_optimization_choice")
     reply_sent = _send_gateway_fixed_reply(gateway, event, _prompt_optimization_choice_message(language))
     if reply_sent:
@@ -2609,7 +2829,9 @@ def _rewrite_semantic_edit_instruction_judgment(
         try:
             options = _cassette_model_options(language)
         except Exception as exc:
-            unavailable_message = _cassette_model_options_unavailable_message(language, _model_options_error_details(exc))
+            unavailable_message = _cassette_model_options_unavailable_message(
+                language, _model_options_error_details(exc)
+            )
             text = (
                 f"{instruction}\n\n"
                 f"[Cassette gateway assets available: {asset_count} asset(s). "
@@ -2640,14 +2862,14 @@ def _rewrite_semantic_edit_instruction_judgment(
             f"{instruction}\n\n"
             f"[Cassette gateway assets available: {asset_count} asset(s). "
             f"Use cassette session_id `{session_id}` only if this is an edit instruction. "
-                "Hermes must semantically decide whether the user's message is a request to edit, transform, assemble, caption, style, add/remove/replace audio or visuals, export, or otherwise operate on the saved media. "
-                "Do not rely on keyword matching. Vague follow-ups may be edit instructions when they naturally refer to the saved media. "
-                "If this is not an edit instruction, answer the user normally and do not call Cassette tools. "
-                f"If this is an edit instruction, ask exactly this model selection message in {_language_name_for_prompt(language)} before asking about prompt optimization:\n{_cassette_model_choice_message(options, language)} "
-                "Do not call cassette_list_assets, cassette_make_prompt, cassette_run_job, BGM tools, or browser automation. "
-                "Do not ask about prompt optimization yet. Wait for the user's model number first. "
-                f"{_cassette_orchestration_guard()} "
-                "Do not ask the user to resend the already saved media.]"
+            "Hermes must semantically decide whether the user's message is a request to edit, transform, assemble, caption, style, add/remove/replace audio or visuals, export, or otherwise operate on the saved media. "
+            "Do not rely on keyword matching. Vague follow-ups may be edit instructions when they naturally refer to the saved media. "
+            "If this is not an edit instruction, answer the user normally and do not call Cassette tools. "
+            f"If this is an edit instruction, ask exactly this model selection message in {_language_name_for_prompt(language)} before asking about prompt optimization:\n{_cassette_model_choice_message(options, language)} "
+            "Do not call cassette_list_assets, cassette_make_prompt, cassette_run_job, BGM tools, or browser automation. "
+            "Do not ask about prompt optimization yet. Wait for the user's model number first. "
+            f"{_cassette_orchestration_guard()} "
+            "Do not ask the user to resend the already saved media.]"
         )
         return {"action": "rewrite", "text": text}
     _save_pending_edit(
@@ -2786,9 +3008,9 @@ def _request_exact_bgm_recommendations(
         menu_shape = (
             "Reply to the user in English with exactly five numbered options and no introduction, heading, or extra prose before the list.\n"
             "Use this mandatory output format exactly:\n"
-            "1. \"Song Title\" - Artist: one brief reason\n"
-            "2. \"Song Title\" - Artist: one brief reason\n"
-            "3. \"Song Title\" - Artist: one brief reason\n"
+            '1. "Song Title" - Artist: one brief reason\n'
+            '2. "Song Title" - Artist: one brief reason\n'
+            '3. "Song Title" - Artist: one brief reason\n'
             "4. Another batch\n"
             "5. Random match\n"
             "After option 5, add exactly one final line: Please reply with 1, 2, 3, 4, or 5, or send text to add BGM requirements and get a new batch.\n"
@@ -2855,14 +3077,14 @@ def _fuzzy_bgm_fallback_text(
             "First call jamendo_music_matcher with userQuery, searchTerms, fuzzyTags, excludeTerms, vocalInstrumental when clear, download=true, and session_id. "
             "Do not generate or pass raw Jamendo SearchPlan JSON. "
             "If Jamendo also returns ok=false after its internal 3-attempt search budget or reports missing/invalid credentials, fall back to Free To Use: choose exactly 3 Free To Use search queries from the category summary below and call cassette_match_bgm with session_id, instruction, search_queries, optimization_enabled="
-            f"{str(bool(optimization_enabled)).lower()}, continue_after_match={str(bool(continue_after_match)).lower()}, fallback_from=\"exact_bgm\", and fallback_reason set to the exact-song tool error code or concise failure reason. "
+            f'{str(bool(optimization_enabled)).lower()}, continue_after_match={str(bool(continue_after_match)).lower()}, fallback_from="exact_bgm", and fallback_reason set to the exact-song tool error code or concise failure reason. '
             f"Use the same success handling as the primary exact tool, including cassette_language='{_normalize_cassette_language(language) or 'zh'}'. Original instruction: {instruction}\n\n"
             "Free To Use fallback category summary:\n"
             f"{summary}\n"
         )
     return (
         "If the exact song search tool returns ok=false, fall back without asking the user again: choose exactly 3 Free To Use search queries from the category summary below and call cassette_match_bgm with session_id, instruction, search_queries, optimization_enabled="
-        f"{str(bool(optimization_enabled)).lower()}, continue_after_match={str(bool(continue_after_match)).lower()}, fallback_from=\"exact_bgm\", and fallback_reason set to the exact-song tool error code or concise failure reason. "
+        f'{str(bool(optimization_enabled)).lower()}, continue_after_match={str(bool(continue_after_match)).lower()}, fallback_from="exact_bgm", and fallback_reason set to the exact-song tool error code or concise failure reason. '
         f"Use the same success handling as the primary exact tool, including cassette_language='{_normalize_cassette_language(language) or 'zh'}'. Original instruction: {instruction}\n\n"
         "Free To Use fallback category summary:\n"
         f"{summary}\n"
@@ -2962,7 +3184,9 @@ def _safe_freetouse_category_summary() -> str:
 
 
 def _jamendo_configured() -> bool:
-    return _JAMENDO_DISABLED_CODE is None and bool(str(os.getenv("JAMENDO_CLIENT_ID", "") or notifier._runtime_env("JAMENDO_CLIENT_ID")).strip())
+    return _JAMENDO_DISABLED_CODE is None and bool(
+        str(os.getenv("JAMENDO_CLIENT_ID", "") or notifier._runtime_env("JAMENDO_CLIENT_ID")).strip()
+    )
 
 
 def _rewrite_smart_bgm_keyword_selection(
@@ -3120,9 +3344,28 @@ def _freetouse_categories() -> list[dict[str, Any]]:
 
 def _category_related_terms(description: str, limit: int = 5) -> list[str]:
     stopwords = {
-        "with", "from", "your", "this", "that", "these", "those", "music", "tracks",
-        "copyright", "free", "royalty", "videos", "video", "perfect", "project",
-        "background", "content", "making", "create", "level", "next",
+        "with",
+        "from",
+        "your",
+        "this",
+        "that",
+        "these",
+        "those",
+        "music",
+        "tracks",
+        "copyright",
+        "free",
+        "royalty",
+        "videos",
+        "video",
+        "perfect",
+        "project",
+        "background",
+        "content",
+        "making",
+        "create",
+        "level",
+        "next",
     }
     terms: list[str] = []
     for token in re.findall(r"[A-Za-z][A-Za-z-]{2,}", description or ""):
@@ -3148,7 +3391,7 @@ def _freetouse_category_summary(max_categories: int | None = None) -> str:
     if max_categories is None:
         max_categories = int(os.getenv("CASSETTE_FREETOUSE_CATEGORY_SUMMARY_LIMIT", "67"))
     lines: list[str] = []
-    for item in categories[:max(1, max_categories)]:
+    for item in categories[: max(1, max_categories)]:
         name = str(item.get("name") or "").strip()
         category_type = str(item.get("type") or "").strip()
         if not name:
@@ -3229,7 +3472,9 @@ def _download_freetouse_track(session_id: str, track: dict[str, Any], query: str
                         break
                     written += len(chunk)
                     if written > max_bytes:
-                        raise CassetteError("bgm_download_too_large", "Free To Use BGM download exceeded the configured size limit")
+                        raise CassetteError(
+                            "bgm_download_too_large", "Free To Use BGM download exceeded the configured size limit"
+                        )
                     fh.write(chunk)
         if written <= 0:
             raise CassetteError("bgm_download_empty", "Free To Use BGM download was empty")
@@ -3348,7 +3593,7 @@ def _instruction_with_bgm(instruction: str, bgm_result: dict[str, Any] | None, l
     if _normalize_cassette_language(language) == "en":
         return (
             f"{instruction}\n\n"
-            f"Please use the uploaded smart-matched BGM asset \"{artist} - {title}\" as background music. "
+            f'Please use the uploaded smart-matched BGM asset "{artist} - {title}" as background music. '
             "Automatically fit its start/end timing, volume, fades, and balance with original audio to the video rhythm. "
             "If the user gave a more explicit music requirement, preserve that explicit requirement first."
         )
@@ -3373,7 +3618,9 @@ def _bgm_fallback_notice(result: dict[str, Any], *, english: bool) -> str:
     return ""
 
 
-def _smart_bgm_status_message(result: dict[str, Any], *, continue_after_match: bool = True, language: str = "zh") -> str:
+def _smart_bgm_status_message(
+    result: dict[str, Any], *, continue_after_match: bool = True, language: str = "zh"
+) -> str:
     english = _normalize_cassette_language(language) == "en"
     fallback_notice = _bgm_fallback_notice(result, english=english)
     if result.get("status") == "downloaded":
@@ -3397,7 +3644,9 @@ def _smart_bgm_status_message(result: dict[str, Any], *, continue_after_match: b
     suffix = f"已尝试关键词：{queries}。" if queries else ""
     if continue_after_match:
         return f"{fallback_notice}智能 BGM 匹配未成功（{code}），不会阻断剪辑流程。{suffix}我会继续后续剪辑流程。"
-    return f"{fallback_notice}智能 BGM 匹配未成功（{code}）。{suffix}不会执行额外剪辑操作；你可以继续发送素材或剪辑指令。"
+    return (
+        f"{fallback_notice}智能 BGM 匹配未成功（{code}）。{suffix}不会执行额外剪辑操作；你可以继续发送素材或剪辑指令。"
+    )
 
 
 def _notify_smart_bgm_result(session_id: str, message: str) -> dict[str, Any]:
@@ -3414,7 +3663,9 @@ def _notify_smart_bgm_result(session_id: str, message: str) -> dict[str, Any]:
         return {"status": "failed", "code": "smart_bgm_notify_failed", "error": type(exc).__name__}
 
 
-def _bgm_next_step_guidance(optimization_enabled: bool, *, continue_after_match: bool = True, language: str = "zh") -> str:
+def _bgm_next_step_guidance(
+    optimization_enabled: bool, *, continue_after_match: bool = True, language: str = "zh"
+) -> str:
     if not continue_after_match:
         return (
             "Standalone smart BGM command is complete. Do not call cassette_list_assets, "
@@ -3578,7 +3829,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
         media_paths, media_types, raw_media_failures = _telegram_raw_gateway_media(event, gateway)
     if not media_paths:
         if raw_media_failures:
-            reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_media_failed_message(raw_media_failures, cassette_language))
+            reply_sent = _send_gateway_fixed_reply(
+                gateway, event, _fixed_media_failed_message(raw_media_failures, cassette_language)
+            )
             return {
                 "action": "skip",
                 "reason": "cassette_media_ingest_failed",
@@ -3589,7 +3842,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             return None
         asset_count = _gateway_asset_count(session_id)
         if forced_check_assets:
-            reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_asset_status_message(session_id, cassette_language))
+            reply_sent = _send_gateway_fixed_reply(
+                gateway, event, _fixed_asset_status_message(session_id, cassette_language)
+            )
             return {
                 "action": "skip",
                 "reason": "cassette_asset_status_reported",
@@ -3600,7 +3855,10 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
         if _latest_active_job_for_session(session_id, source):
             return _reject_busy_flow(session_id, gateway, event, cassette_language, "cassette_active_job_busy_rejected")
         pending_edit = _load_pending_edit(session_id)
-        if pending_edit and str(pending_edit.get("state") or "") in {"awaiting_model_choice", "awaiting_model_thinking_choice"}:
+        if pending_edit and str(pending_edit.get("state") or "") in {
+            "awaiting_model_choice",
+            "awaiting_model_thinking_choice",
+        }:
             return _handle_pending_cassette_model_choice(
                 session_id,
                 pending_edit,
@@ -3611,7 +3869,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             )
         if forced_music is not None:
             if not forced_music:
-                reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_music_command_missing_instruction_message(cassette_language))
+                reply_sent = _send_gateway_fixed_reply(
+                    gateway, event, _fixed_music_command_missing_instruction_message(cassette_language)
+                )
                 return {
                     "action": "skip",
                     "reason": "cassette_music_command_missing_instruction",
@@ -3629,7 +3889,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             )
         if not asset_count:
             if forced_refine is not None:
-                reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_refine_command_missing_assets_message(cassette_language))
+                reply_sent = _send_gateway_fixed_reply(
+                    gateway, event, _fixed_refine_command_missing_assets_message(cassette_language)
+                )
                 return {
                     "action": "skip",
                     "reason": "cassette_refine_command_missing_assets",
@@ -3637,7 +3899,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                     "reply_sent": reply_sent,
                 }
             if forced_edit is not None:
-                reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_edit_command_missing_assets_message(cassette_language))
+                reply_sent = _send_gateway_fixed_reply(
+                    gateway, event, _fixed_edit_command_missing_assets_message(cassette_language)
+                )
                 return {
                     "action": "skip",
                     "reason": "cassette_edit_command_missing_assets",
@@ -3647,7 +3911,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             return None
         if forced_refine is not None:
             if not edit_text:
-                reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_refine_command_missing_instruction_message(cassette_language))
+                reply_sent = _send_gateway_fixed_reply(
+                    gateway, event, _fixed_refine_command_missing_instruction_message(cassette_language)
+                )
                 return {
                     "action": "skip",
                     "reason": "cassette_refine_command_missing_instruction",
@@ -3666,7 +3932,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
             )
         if forced_edit is not None:
             if not edit_text:
-                reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_edit_command_missing_instruction_message(cassette_language))
+                reply_sent = _send_gateway_fixed_reply(
+                    gateway, event, _fixed_edit_command_missing_instruction_message(cassette_language)
+                )
                 return {
                     "action": "skip",
                     "reason": "cassette_edit_command_missing_instruction",
@@ -3674,9 +3942,13 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                     "session_id": session_id,
                     "reply_sent": reply_sent,
                 }
-            return _start_gateway_edit_instruction(session_id, edit_text, asset_count, gateway, event, language=cassette_language)
+            return _start_gateway_edit_instruction(
+                session_id, edit_text, asset_count, gateway, event, language=cassette_language
+            )
         if _is_gateway_media_placeholder_text(user_text):
-            reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_asset_status_message(session_id, cassette_language))
+            reply_sent = _send_gateway_fixed_reply(
+                gateway, event, _fixed_asset_status_message(session_id, cassette_language)
+            )
             return {
                 "action": "skip",
                 "reason": "cassette_media_placeholder_ignored",
@@ -3756,7 +4028,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                     optimization_enabled=True,
                     language=cassette_language,
                 )
-            return _reject_busy_flow(session_id, gateway, event, cassette_language, "cassette_prompt_optimization_choice_busy_rejected")
+            return _reject_busy_flow(
+                session_id, gateway, event, cassette_language, "cassette_prompt_optimization_choice_busy_rejected"
+            )
         if pending_edit and pending_edit.get("state") == "awaiting_bgm_choice":
             pending_instruction = str(pending_edit.get("instruction") or "").strip()
             optimization_enabled = bool(pending_edit.get("optimization_enabled"))
@@ -3784,10 +4058,16 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                 )
                 bgm_result = {"status": "skipped", "code": "bgm_declined_by_user"}
             else:
-                return _reject_busy_flow(session_id, gateway, event, cassette_language, "cassette_smart_bgm_choice_busy_rejected")
+                return _reject_busy_flow(
+                    session_id, gateway, event, cassette_language, "cassette_smart_bgm_choice_busy_rejected"
+                )
             if optimization_enabled:
-                return _rewrite_accepted_prompt_optimization(session_id, pending_instruction, asset_count, bgm_result, language=cassette_language)
-            return _rewrite_direct_original_instruction(session_id, pending_instruction, asset_count, bgm_result, language=cassette_language)
+                return _rewrite_accepted_prompt_optimization(
+                    session_id, pending_instruction, asset_count, bgm_result, language=cassette_language
+                )
+            return _rewrite_direct_original_instruction(
+                session_id, pending_instruction, asset_count, bgm_result, language=cassette_language
+            )
         if pending_edit and pending_edit.get("state") == "awaiting_exact_bgm_selection":
             pending_instruction = str(pending_edit.get("instruction") or "").strip()
             optimization_enabled = bool(pending_edit.get("optimization_enabled"))
@@ -3841,7 +4121,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                     recommendation_round=recommendation_round,
                     language=cassette_language,
                 )
-            reply_sent = _send_gateway_fixed_reply(gateway, event, _exact_bgm_selection_reask_message(cassette_language))
+            reply_sent = _send_gateway_fixed_reply(
+                gateway, event, _exact_bgm_selection_reask_message(cassette_language)
+            )
             if reply_sent:
                 return {
                     "action": "skip",
@@ -3863,7 +4145,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                 connectivity = _cassette_connectivity_skip(gateway, event, cassette_language)
                 if connectivity:
                     return connectivity
-                return _rewrite_direct_original_instruction(session_id, pending_instruction, asset_count, language=cassette_language)
+                return _rewrite_direct_original_instruction(
+                    session_id, pending_instruction, asset_count, language=cassette_language
+                )
             if _looks_like_prompt_confirmation(user_text):
                 connectivity = _cassette_connectivity_skip(gateway, event, cassette_language)
                 if connectivity:
@@ -3879,7 +4163,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                     "Do not emit MEDIA tags or guess local export paths; cassette_run_job notification handles the stored gateway delivery target and reports any delivery failure.]"
                 )
                 return {"action": "rewrite", "text": text}
-            return _reject_busy_flow(session_id, gateway, event, cassette_language, "cassette_optimized_brief_confirmation_busy_rejected")
+            return _reject_busy_flow(
+                session_id, gateway, event, cassette_language, "cassette_optimized_brief_confirmation_busy_rejected"
+            )
         if _looks_like_prompt_confirmation(user_text):
             connectivity = _cassette_connectivity_skip(gateway, event, cassette_language)
             if connectivity:
@@ -3925,7 +4211,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
 
     if not ingested:
         if failures:
-            reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_media_failed_message(failures, cassette_language))
+            reply_sent = _send_gateway_fixed_reply(
+                gateway, event, _fixed_media_failed_message(failures, cassette_language)
+            )
             return {
                 "action": "skip",
                 "reason": "cassette_media_ingest_failed",
@@ -3938,7 +4226,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
     is_placeholder_text = _is_gateway_media_placeholder_text(user_text)
     if forced_check_assets:
         total_count = _gateway_asset_count(session_id)
-        reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_asset_status_message(session_id, cassette_language))
+        reply_sent = _send_gateway_fixed_reply(
+            gateway, event, _fixed_asset_status_message(session_id, cassette_language)
+        )
         return {
             "action": "skip",
             "reason": "cassette_asset_status_reported",
@@ -3953,7 +4243,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
     if forced_music is not None:
         total_count = _gateway_asset_count(session_id)
         if not forced_music:
-            reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_music_command_missing_instruction_message(cassette_language))
+            reply_sent = _send_gateway_fixed_reply(
+                gateway, event, _fixed_music_command_missing_instruction_message(cassette_language)
+            )
             return {
                 "action": "skip",
                 "reason": "cassette_music_command_missing_instruction",
@@ -3976,7 +4268,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
         return result
     if forced_refine is not None and not edit_text:
         total_count = _gateway_asset_count(session_id)
-        reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_refine_command_missing_instruction_message(cassette_language))
+        reply_sent = _send_gateway_fixed_reply(
+            gateway, event, _fixed_refine_command_missing_instruction_message(cassette_language)
+        )
         return {
             "action": "skip",
             "reason": "cassette_refine_command_missing_instruction",
@@ -3988,7 +4282,9 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
         }
     if forced_edit is not None and not edit_text:
         total_count = _gateway_asset_count(session_id)
-        reply_sent = _send_gateway_fixed_reply(gateway, event, _fixed_edit_command_missing_instruction_message(cassette_language))
+        reply_sent = _send_gateway_fixed_reply(
+            gateway, event, _fixed_edit_command_missing_instruction_message(cassette_language)
+        )
         return {
             "action": "skip",
             "reason": "cassette_edit_command_missing_instruction",
@@ -4131,16 +4427,16 @@ def inject_cassette_context(**kwargs) -> str | None:
             "Cassette completion review required. Hermes is the supervisor and must make the semantic completion decision from the latest Cassette reply, not from hard-coded keyword matching.",
         ]
         for job in review_jobs:
-            lines.append(
-                f"- job_id={job['job_id']} status={job['status']} latest_cassette_reply={job['summary']}"
-            )
-        lines.extend([
-            "If the latest Cassette reply means the requested edit is complete enough to export, call cassette_review_completion with decision=\"export\" and a concise reason.",
-            "If Cassette says it is still editing or needs routine continuation, call cassette_review_completion with decision=\"continue\" and a concise reason.",
-            "If Cassette asks for a material user choice or missing asset, call cassette_review_completion with decision=\"needs_user\".",
-            "If Cassette reports an unrecoverable failure, call cassette_review_completion with decision=\"failed\".",
-            "Do not expose local paths, raw IDs, prompts, or worker commands.",
-        ])
+            lines.append(f"- job_id={job['job_id']} status={job['status']} latest_cassette_reply={job['summary']}")
+        lines.extend(
+            [
+                'If the latest Cassette reply means the requested edit is complete enough to export, call cassette_review_completion with decision="export" and a concise reason.',
+                'If Cassette says it is still editing or needs routine continuation, call cassette_review_completion with decision="continue" and a concise reason.',
+                'If Cassette asks for a material user choice or missing asset, call cassette_review_completion with decision="needs_user".',
+                'If Cassette reports an unrecoverable failure, call cassette_review_completion with decision="failed".',
+                "Do not expose local paths, raw IDs, prompts, or worker commands.",
+            ]
+        )
         return "\n".join(lines)
     summaries = [f"{j.get('job_id')}: {j.get('status')}" for j in recent]
     return "Recent Cassette jobs: " + "; ".join(summaries)
@@ -4156,11 +4452,13 @@ def _completion_review_jobs(recent: list[dict]) -> list[dict[str, str]]:
                 continue
             quality = job.get("quality") if isinstance(job.get("quality"), dict) else {}
             summary = _compact_user_text(str(question.get("question") or quality.get("progress_summary") or ""), 700)
-            result.append({
-                "job_id": str(job.get("job_id") or ""),
-                "status": str(job.get("status") or ""),
-                "summary": summary,
-            })
+            result.append(
+                {
+                    "job_id": str(job.get("job_id") or ""),
+                    "status": str(job.get("status") or ""),
+                    "summary": summary,
+                }
+            )
             break
     return result[:3]
 
@@ -4234,10 +4532,7 @@ def _log_cassette_debug_event(event: str, **fields: Any) -> None:
             "ts": jobs.now_iso(),
             "event": event,
         }
-        payload.update({
-            key: _clean_cassette_debug_value(value, key=key)
-            for key, value in fields.items()
-        })
+        payload.update({key: _clean_cassette_debug_value(value, key=key) for key, value in fields.items()})
         with (log_dir / "cassette.log").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
     except Exception:

@@ -26,13 +26,15 @@ def test_web_run_job_uses_gateway_background_path(cassette_env, monkeypatch):
     session_id = "web_run_job_live"
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
-    tools.cassette_ingest_media({
-        "source_path": str(media),
-        "session_id": session_id,
-        "platform": "web",
-        "chat_id": session_id,
-        "user_id": session_id,
-    })
+    tools.cassette_ingest_media(
+        {
+            "source_path": str(media),
+            "session_id": session_id,
+            "platform": "web",
+            "chat_id": session_id,
+            "user_id": session_id,
+        }
+    )
     observed = {}
 
     def fake_start(job):
@@ -44,12 +46,16 @@ def test_web_run_job_uses_gateway_background_path(cassette_env, monkeypatch):
         return job
 
     monkeypatch.setattr(tools, "_start_inprocess_cassette_job", fake_start)
-    payload = json.loads(tools.cassette_run_job({
-        "prompt": "internal",
-        "chat_message": "请剪成 10 秒",
-        "session_id": session_id,
-        "wait": True,
-    }))
+    payload = json.loads(
+        tools.cassette_run_job(
+            {
+                "prompt": "internal",
+                "chat_message": "请剪成 10 秒",
+                "session_id": session_id,
+                "wait": True,
+            }
+        )
+    )
 
     assert payload["ok"] is True
     assert payload["data"]["background"] is True
@@ -64,11 +70,13 @@ def test_deepseek_tool_arguments_are_forced_to_current_web_session(cassette_env)
     media.write_bytes(b"video")
     tools.cassette_ingest_media({"source_path": str(media), "session_id": session_a})
 
-    result = json.loads(deepseek_client._execute_tool(
-        session_a,
-        "cassette_list_assets",
-        json.dumps({"session_id": session_b}),
-    ))
+    result = json.loads(
+        deepseek_client._execute_tool(
+            session_a,
+            "cassette_list_assets",
+            json.dumps({"session_id": session_b}),
+        )
+    )
 
     assert result["ok"] is True
     manifest_data = result["data"]["manifest"]
@@ -85,11 +93,13 @@ def test_deepseek_tool_execution_logs_error_code(cassette_env, monkeypatch):
         lambda event, **fields: captured.append((event, fields)),
     )
 
-    payload = json.loads(deepseek_client._execute_tool(
-        "web_bgm_log",
-        "cassette_match_exact_bgm",
-        json.dumps({"instruction": "剪一个美食视频"}),
-    ))
+    payload = json.loads(
+        deepseek_client._execute_tool(
+            "web_bgm_log",
+            "cassette_match_exact_bgm",
+            json.dumps({"instruction": "剪一个美食视频"}),
+        )
+    )
 
     assert payload["ok"] is False
     assert payload["error"]["code"] == "missing_required_arg"
@@ -125,34 +135,38 @@ def test_deepseek_mock_tool_loop_starts_web_job(cassette_env, monkeypatch):
     session_store.ensure_session(session_id)
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
-    tools.cassette_ingest_media({
-        "source_path": str(media),
-        "session_id": session_id,
-        "platform": "web",
-        "chat_id": session_id,
-        "user_id": session_id,
-    })
+    tools.cassette_ingest_media(
+        {
+            "source_path": str(media),
+            "session_id": session_id,
+            "platform": "web",
+            "chat_id": session_id,
+            "user_id": session_id,
+        }
+    )
 
-    calls = iter([
-        {
-            "id": "call_list",
-            "type": "function",
-            "function": {"name": "cassette_list_assets", "arguments": "{}"},
-        },
-        {
-            "id": "call_prompt",
-            "type": "function",
-            "function": {"name": "cassette_make_prompt", "arguments": json.dumps({"instruction": "剪成 10 秒"})},
-        },
-        {
-            "id": "call_run",
-            "type": "function",
-            "function": {
-                "name": "cassette_run_job",
-                "arguments": json.dumps({"prompt": "internal", "chat_message": "请剪成 10 秒", "wait": True}),
+    calls = iter(
+        [
+            {
+                "id": "call_list",
+                "type": "function",
+                "function": {"name": "cassette_list_assets", "arguments": "{}"},
             },
-        },
-    ])
+            {
+                "id": "call_prompt",
+                "type": "function",
+                "function": {"name": "cassette_make_prompt", "arguments": json.dumps({"instruction": "剪成 10 秒"})},
+            },
+            {
+                "id": "call_run",
+                "type": "function",
+                "function": {
+                    "name": "cassette_run_job",
+                    "arguments": json.dumps({"prompt": "internal", "chat_message": "请剪成 10 秒", "wait": True}),
+                },
+            },
+        ]
+    )
     observed = {}
 
     def fake_post(messages, api_key):
@@ -307,8 +321,14 @@ def test_web_rejects_message_while_llm_flow_active(cassette_env, monkeypatch):
     client = TestClient(web_server.app)
     session_id = client.post("/api/sessions").json()["session_id"]
 
-    monkeypatch.setattr(tools, "ingest_gateway_media", lambda event, gateway: {"action": "rewrite", "reason": "test", "text": "internal"})
-    monkeypatch.setattr(web_server, "_submit_llm_background", lambda session_id, prompt_text, api_key_override, flow_token: None)
+    monkeypatch.setattr(
+        tools,
+        "ingest_gateway_media",
+        lambda event, gateway: {"action": "rewrite", "reason": "test", "text": "internal"},
+    )
+    monkeypatch.setattr(
+        web_server, "_submit_llm_background", lambda session_id, prompt_text, api_key_override, flow_token: None
+    )
 
     first = client.post("/api/messages", json={"session_id": session_id, "text": "/edit first"})
     second = client.post("/api/messages", json={"session_id": session_id, "text": "再剪一个版本"})
@@ -333,8 +353,14 @@ def test_web_cut_clears_pending_llm_flow(cassette_env, monkeypatch):
     client = TestClient(web_server.app)
     session_id = client.post("/api/sessions").json()["session_id"]
 
-    monkeypatch.setattr(tools, "ingest_gateway_media", lambda event, gateway: {"action": "rewrite", "reason": "test", "text": "internal"})
-    monkeypatch.setattr(web_server, "_submit_llm_background", lambda session_id, prompt_text, api_key_override, flow_token: None)
+    monkeypatch.setattr(
+        tools,
+        "ingest_gateway_media",
+        lambda event, gateway: {"action": "rewrite", "reason": "test", "text": "internal"},
+    )
+    monkeypatch.setattr(
+        web_server, "_submit_llm_background", lambda session_id, prompt_text, api_key_override, flow_token: None
+    )
 
     client.post("/api/messages", json={"session_id": session_id, "text": "/edit first"})
     assert session_store.is_flow_active(session_id) is True
@@ -415,10 +441,14 @@ def test_web_skip_choice_reply_is_bridged_to_llm_history(cassette_env, monkeypat
     session_store.reset_all()
     client = TestClient(app)
     session_id = client.post("/api/sessions").json()["session_id"]
-    session_store.set_llm_messages(session_id, [{"role": "assistant", "content": "请选择当前 Cassette 会话使用的模型，回复序号即可："}])
+    session_store.set_llm_messages(
+        session_id, [{"role": "assistant", "content": "请选择当前 Cassette 会话使用的模型，回复序号即可："}]
+    )
 
     def fake_ingest(event, gateway):
-        gateway.adapters["web"].send(event.source.chat_id, "已选择模型：DeepSeek V4 Flash。请选择思考程度，回复序号即可：")
+        gateway.adapters["web"].send(
+            event.source.chat_id, "已选择模型：DeepSeek V4 Flash。请选择思考程度，回复序号即可："
+        )
         return {"action": "skip", "reason": "cassette_model_thinking_choice_requested", "reply_sent": True}
 
     monkeypatch.setattr(tools, "ingest_gateway_media", fake_ingest)
@@ -546,7 +576,11 @@ def test_web_jobs_reconcile_stale_running_web_job(cassette_env):
         "telegram prompt",
         "telegram instruction",
         [],
-        {"cassette_session_id": session_id, "delivery": {"platform": "telegram", "chat_id": "telegram-chat"}, "timeout_sec": 1},
+        {
+            "cassette_session_id": session_id,
+            "delivery": {"platform": "telegram", "chat_id": "telegram-chat"},
+            "timeout_sec": 1,
+        },
     )
     non_web_job["status"] = "running"
     non_web_job["started_at"] = "2020-01-01T00:00:00Z"
@@ -699,10 +733,12 @@ def test_web_cleanup_closes_browser_sessions(cassette_env, monkeypatch):
 
     session_store.reset_all()
     closed_keys = []
+
     def fake_close(key=None, timeout_sec=None):
         del timeout_sec
         closed_keys.append(key)
         return key != "missing"
+
     monkeypatch.setattr(server.browser, "close_browser_sessions_threaded", fake_close)
     client = TestClient(server.app)
     session_id = client.post("/api/sessions").json()["session_id"]

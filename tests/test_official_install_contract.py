@@ -5,6 +5,7 @@ Hermes installs plugins with `git clone --depth 1 <url>` into
 real names, and later updates with `git pull`. These tests pin the repo
 properties that flow depends on, without requiring hermes itself.
 """
+
 from __future__ import annotations
 
 import shutil

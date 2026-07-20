@@ -40,7 +40,9 @@ def _job_timeout_sec(options: dict) -> int:
     return requested
 
 
-def create_job(session_hash: str, prompt: str, instruction: str | None, asset_paths: list[str], options: dict | None = None) -> dict:
+def create_job(
+    session_hash: str, prompt: str, instruction: str | None, asset_paths: list[str], options: dict | None = None
+) -> dict:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     job_id = f"cassette_{ts}_{secrets.token_hex(3)}"
     options = options or {}
@@ -205,10 +207,19 @@ def start_worker(job_id: str, *, action: str = "run", response: str | None = Non
         job["resume_request"] = {"response": str(response or "")}
     save_job(job)
     try:
-        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, env=env)
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            env=env,
+        )
     except Exception as exc:
         save_job(previous)
-        raise CassetteError("internal_error", "Failed to start Cassette background worker", {"reason": type(exc).__name__}) from exc
+        raise CassetteError(
+            "internal_error", "Failed to start Cassette background worker", {"reason": type(exc).__name__}
+        ) from exc
     # Reload so a worker that already advanced the job is never overwritten by
     # the parent's stale pre-spawn copy.
     return update_job(job_id, worker_pid=proc.pid, worker_command=cmd)

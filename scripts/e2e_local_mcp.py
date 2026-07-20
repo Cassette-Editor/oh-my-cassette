@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Maintainer live acceptance through the real local stdio MCP entrypoint."""
+
 from __future__ import annotations
 
 import argparse
@@ -75,9 +76,7 @@ async def run(args: argparse.Namespace) -> dict:
     async with stdio_client(params) as (reader, writer):
         async with ClientSession(reader, writer, read_timeout_seconds=read_timeout) as session:
             await session.initialize()
-            ingest = _structured(
-                await session.call_tool("cassette_ingest_media", {"source_path": str(media)})
-            )
+            ingest = _structured(await session.call_tool("cassette_ingest_media", {"source_path": str(media)}))
             session_id = ingest["session_id"]
             prompt = _structured(
                 await session.call_tool(

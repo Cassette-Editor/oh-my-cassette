@@ -50,7 +50,9 @@ def api_key_from_runtime() -> str:
 
 
 def _base_url() -> str:
-    return (_runtime_env("DEEPSEEK_BASE_URL") or _runtime_env("DEEPSEEK_API_BASE") or "https://api.deepseek.com").rstrip("/")
+    return (
+        _runtime_env("DEEPSEEK_BASE_URL") or _runtime_env("DEEPSEEK_API_BASE") or "https://api.deepseek.com"
+    ).rstrip("/")
 
 
 def _chat_url() -> str:
@@ -84,7 +86,13 @@ def _post_chat_completion(messages: list[dict[str, Any]], api_key: str) -> dict[
         "temperature": 0.2,
         "stream": False,
     }
-    logging_utils.log_event("deepseek_request_start", model=body["model"], url=_chat_url(), message_count=len(messages), tool_count=len(body["tools"]))
+    logging_utils.log_event(
+        "deepseek_request_start",
+        model=body["model"],
+        url=_chat_url(),
+        message_count=len(messages),
+        tool_count=len(body["tools"]),
+    )
     try:
         response = httpx.post(
             _chat_url(),
@@ -94,7 +102,11 @@ def _post_chat_completion(messages: list[dict[str, Any]], api_key: str) -> dict[
             follow_redirects=True,
         )
     except (httpx.HTTPError, httpx.InvalidURL) as exc:
-        logging_utils.log_event("deepseek_request_exception", error_type=type(exc).__name__, duration_ms=int((time.monotonic() - started) * 1000))
+        logging_utils.log_event(
+            "deepseek_request_exception",
+            error_type=type(exc).__name__,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
         raise DeepSeekError(f"DeepSeek request failed: {type(exc).__name__}") from exc
     duration_ms = int((time.monotonic() - started) * 1000)
     logging_utils.log_event("deepseek_response", status_code=response.status_code, duration_ms=duration_ms)
@@ -164,7 +176,9 @@ def _execute_tool(session_id: str, name: str, arguments: str, flow_token: str | 
     if name not in ALLOWED_TOOLS:
         return tools.err(name, "tool_not_allowed", f"Tool {name} is not available in the web demo.", recoverable=False)
     if session_store.is_flow_cancelled(session_id, flow_token):
-        return tools.err(name, "web_flow_cancelled", "The current web Cassette flow was cancelled by /cut.", recoverable=True)
+        return tools.err(
+            name, "web_flow_cancelled", "The current web Cassette flow was cancelled by /cut.", recoverable=True
+        )
     try:
         raw_args = json.loads(arguments or "{}")
         if not isinstance(raw_args, dict):
@@ -228,7 +242,9 @@ def _session_context(session_id: str) -> str:
     return "Recent web Cassette jobs for this session: " + "; ".join(parts)
 
 
-def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "", flow_token: str | None = None) -> dict[str, Any]:
+def run_turn(
+    session_id: str, prompt_text: str, *, api_key_override: str = "", flow_token: str | None = None
+) -> dict[str, Any]:
     session_store.ensure_session(session_id)
     api_key = api_key_override.strip() or api_key_from_runtime()
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -241,15 +257,24 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "", f
 
     tool_call_count = 0
     final_content = ""
-    logging_utils.log_event("deepseek_turn_start", session_id=session_id, prompt_len=len(prompt_text or ""), has_api_key_override=bool(api_key_override))
+    logging_utils.log_event(
+        "deepseek_turn_start",
+        session_id=session_id,
+        prompt_len=len(prompt_text or ""),
+        has_api_key_override=bool(api_key_override),
+    )
     for round_index in range(8):
         if session_store.is_flow_cancelled(session_id, flow_token):
-            logging_utils.log_event("deepseek_turn_cancelled", session_id=session_id, phase="before_request", round=round_index + 1)
+            logging_utils.log_event(
+                "deepseek_turn_cancelled", session_id=session_id, phase="before_request", round=round_index + 1
+            )
             final_content = ""
             break
         payload = _post_chat_completion(messages, api_key)
         if session_store.is_flow_cancelled(session_id, flow_token):
-            logging_utils.log_event("deepseek_turn_cancelled", session_id=session_id, phase="after_request", round=round_index + 1)
+            logging_utils.log_event(
+                "deepseek_turn_cancelled", session_id=session_id, phase="after_request", round=round_index + 1
+            )
             final_content = ""
             break
         choices = payload.get("choices") or []
@@ -258,7 +283,13 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "", f
         message = dict((choices[0] or {}).get("message") or {})
         assistant_message: dict[str, Any] = {"role": "assistant", "content": message.get("content")}
         tool_calls = message.get("tool_calls") or []
-        logging_utils.log_event("deepseek_turn_round", session_id=session_id, round=round_index + 1, tool_call_count=len(tool_calls), has_content=bool(message.get("content")))
+        logging_utils.log_event(
+            "deepseek_turn_round",
+            session_id=session_id,
+            round=round_index + 1,
+            tool_call_count=len(tool_calls),
+            has_content=bool(message.get("content")),
+        )
         if tool_calls:
             assistant_message["tool_calls"] = tool_calls
         messages.append(assistant_message)
@@ -268,7 +299,9 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "", f
             break
         for call in tool_calls:
             if session_store.is_flow_cancelled(session_id, flow_token):
-                logging_utils.log_event("deepseek_turn_cancelled", session_id=session_id, phase="before_tool", round=round_index + 1)
+                logging_utils.log_event(
+                    "deepseek_turn_cancelled", session_id=session_id, phase="before_tool", round=round_index + 1
+                )
                 final_content = ""
                 break
             function = (call or {}).get("function") or {}
@@ -287,12 +320,19 @@ def run_turn(session_id: str, prompt_text: str, *, api_key_override: str = "", f
             break
     else:
         if _session_language(session_id) == "en":
-            final_content = "The Cassette tool flow has started or is still processing. Please check the web notifications shortly."
+            final_content = (
+                "The Cassette tool flow has started or is still processing. Please check the web notifications shortly."
+            )
         else:
             final_content = "Cassette 工具流程已经启动或仍在处理中，请稍后查看网页通知。"
 
     session_store.set_llm_messages(session_id, history)
     if final_content and not session_store.is_flow_cancelled(session_id, flow_token):
         session_store.add_event(session_id, role="assistant", text=final_content, kind="message")
-    logging_utils.log_event("deepseek_turn_done", session_id=session_id, tool_call_count=tool_call_count, content_len=len(final_content or ""))
+    logging_utils.log_event(
+        "deepseek_turn_done",
+        session_id=session_id,
+        tool_call_count=tool_call_count,
+        content_len=len(final_content or ""),
+    )
     return {"content": final_content, "tool_call_count": tool_call_count}

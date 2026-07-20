@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from cassette import jobs, notifier, tools, transport
+from cassette import jobs, notifier, tools
 from cassette.api_transport import ApiTransport
 from cassette.transport import BrowserTransport, Transport, get_transport, selected_transport
 
@@ -23,8 +23,16 @@ def test_default_transport_is_api(monkeypatch):
 
 @pytest.mark.parametrize(
     "value,is_api",
-    [("api", True), ("API", True), (" Api ", True), ("browser", False), ("BROWSER", False),
-     (" browser ", False), ("", True), ("weird", True)],
+    [
+        ("api", True),
+        ("API", True),
+        (" Api ", True),
+        ("browser", False),
+        ("BROWSER", False),
+        (" browser ", False),
+        ("", True),
+        ("weird", True),
+    ],
 )
 def test_transport_selection_is_env_driven(monkeypatch, value, is_api):
     # Only 'browser' (any case, trimmed) selects the browser path; everything else defaults to api.
@@ -40,12 +48,19 @@ def test_both_transports_satisfy_protocol():
 
 def test_browser_transport_is_pure_passthrough(monkeypatch):
     calls: dict = {}
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job_threaded",
-                        lambda job: {"status": "succeeded", "_via": "browser-run", "job_id": job.get("job_id")})
-    monkeypatch.setattr(tools.browser, "export_reviewed_completion_job_threaded",
-                        lambda job, decision: {"status": "succeeded", "_via": "browser-export", "decision": decision})
-    monkeypatch.setattr(tools.browser, "close_browser_sessions_threaded",
-                        lambda key=None: calls.__setitem__("close", key))
+    monkeypatch.setattr(
+        tools.browser,
+        "run_cassette_browser_job_threaded",
+        lambda job: {"status": "succeeded", "_via": "browser-run", "job_id": job.get("job_id")},
+    )
+    monkeypatch.setattr(
+        tools.browser,
+        "export_reviewed_completion_job_threaded",
+        lambda job, decision: {"status": "succeeded", "_via": "browser-export", "decision": decision},
+    )
+    monkeypatch.setattr(
+        tools.browser, "close_browser_sessions_threaded", lambda key=None: calls.__setitem__("close", key)
+    )
     monkeypatch.setattr(tools.browser, "check_playwright", lambda: True)
 
     bt = BrowserTransport()
@@ -73,7 +88,13 @@ def test_check_playwright_tool_delegates_to_active_transport(monkeypatch):
 
 def test_api_transport_availability_gating(monkeypatch):
     # The API origin defaults to the deployed Cassette, so availability is gated on credentials.
-    for var in ("CASSETTE_AUTH_EMAIL", "CASSETTE_AUTH_ACCOUNT", "CASSETTE_EMAIL", "CASSETTE_AUTH_PASSWORD", "CASSETTE_PASSWORD"):
+    for var in (
+        "CASSETTE_AUTH_EMAIL",
+        "CASSETTE_AUTH_ACCOUNT",
+        "CASSETTE_EMAIL",
+        "CASSETTE_AUTH_PASSWORD",
+        "CASSETTE_PASSWORD",
+    ):
         monkeypatch.delenv(var, raising=False)
     assert ApiTransport().check_available() is False
     monkeypatch.setenv("CASSETTE_AUTH_EMAIL", "e@x.io")
@@ -85,7 +106,13 @@ def test_api_transport_availability_gating(monkeypatch):
 
 def test_api_transport_run_fails_clean_without_credentials(cassette_env, monkeypatch):
     monkeypatch.setenv("CASSETTE_TRANSPORT", "api")
-    for var in ("CASSETTE_AUTH_EMAIL", "CASSETTE_AUTH_ACCOUNT", "CASSETTE_EMAIL", "CASSETTE_AUTH_PASSWORD", "CASSETTE_PASSWORD"):
+    for var in (
+        "CASSETTE_AUTH_EMAIL",
+        "CASSETTE_AUTH_ACCOUNT",
+        "CASSETTE_EMAIL",
+        "CASSETTE_AUTH_PASSWORD",
+        "CASSETTE_PASSWORD",
+    ):
         monkeypatch.delenv(var, raising=False)
     result = get_transport().run_job(
         {"job_id": "job-x", "session_hash": "s", "cassette_session_id": "s", "prompt": "edit", "asset_paths": []}
@@ -110,12 +137,25 @@ def _make_job():
 def _browser_shaped_succeeded(local_path: str) -> dict:
     return {
         "status": "succeeded",
-        "outputs": [{"text": "out.mp4", "href": "/api/export/jobs/x/file",
-                     "download": "out.mp4", "local_path": local_path, "kind": "video"}],
+        "outputs": [
+            {
+                "text": "out.mp4",
+                "href": "/api/export/jobs/x/file",
+                "download": "out.mp4",
+                "local_path": local_path,
+                "kind": "video",
+            }
+        ],
         "questions": [],
         "errors": [],
-        "quality": {"completion_observed": True, "export_completed": True, "export_pending": False,
-                    "output_link_count": 1, "local_output_count": 1, "risk": "low"},
+        "quality": {
+            "completion_observed": True,
+            "export_completed": True,
+            "export_pending": False,
+            "output_link_count": 1,
+            "local_output_count": 1,
+            "risk": "low",
+        },
         "final_screenshot": None,
     }
 
@@ -126,12 +166,23 @@ def test_result_dicts_share_the_same_contract_keys(cassette_env, tmp_path):
     browser_result = _browser_shaped_succeeded(str(mp4))
     api_result = ApiTransport()._result(
         "succeeded",
-        outputs=[{"text": "out.mp4", "href": "/api/export/jobs/y/file",
-                  "download": "out.mp4", "local_path": str(mp4), "kind": "video"}],
-        completion_observed=True, export_completed=True, risk="low",
+        outputs=[
+            {
+                "text": "out.mp4",
+                "href": "/api/export/jobs/y/file",
+                "download": "out.mp4",
+                "local_path": str(mp4),
+                "kind": "video",
+            }
+        ],
+        completion_observed=True,
+        export_completed=True,
+        risk="low",
     )
     assert set(browser_result) == set(api_result)
-    assert set(browser_result["quality"]) <= set(api_result["quality"]) or set(api_result["quality"]) <= set(browser_result["quality"])
+    assert set(browser_result["quality"]) <= set(api_result["quality"]) or set(api_result["quality"]) <= set(
+        browser_result["quality"]
+    )
 
 
 def test_downstream_report_parity_browser_vs_api(cassette_env, tmp_path):
@@ -143,12 +194,23 @@ def test_downstream_report_parity_browser_vs_api(cassette_env, tmp_path):
     jb["status"] = "succeeded"
 
     ja = _make_job()
-    ja.update(ApiTransport()._result(
-        "succeeded",
-        outputs=[{"text": "out.mp4", "href": "/api/export/jobs/y/file",
-                  "download": "out.mp4", "local_path": str(mp4), "kind": "video"}],
-        completion_observed=True, export_completed=True, risk="low",
-    ))
+    ja.update(
+        ApiTransport()._result(
+            "succeeded",
+            outputs=[
+                {
+                    "text": "out.mp4",
+                    "href": "/api/export/jobs/y/file",
+                    "download": "out.mp4",
+                    "local_path": str(mp4),
+                    "kind": "video",
+                }
+            ],
+            completion_observed=True,
+            export_completed=True,
+            risk="low",
+        )
+    )
     ja["status"] = "succeeded"
 
     scrubbed_b = tools._scrub_job(jb)
@@ -181,17 +243,27 @@ def test_notifier_delivery_parity_on_local_path(cassette_env, tmp_path):
 
 
 def _fake_result(via: str) -> dict:
-    return {"status": "succeeded", "_via": via, "outputs": [], "questions": [],
-            "errors": [], "quality": {}, "final_screenshot": None}
+    return {
+        "status": "succeeded",
+        "_via": via,
+        "outputs": [],
+        "questions": [],
+        "errors": [],
+        "quality": {},
+        "final_screenshot": None,
+    }
 
 
-@pytest.mark.parametrize("label,expected", [
-    ("DeepSeek V4 Flash", "deepseek/deepseek-v4-flash"),
-    ("DeepSeek V4 Pro", "deepseek/deepseek-v4-pro"),
-    ("GPT-5.4 Mini", "openai/gpt-5.4-mini"),
-    ("deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro"),  # already an id
-    ("", "deepseek/deepseek-v4-flash"),                         # no choice -> default
-])
+@pytest.mark.parametrize(
+    "label,expected",
+    [
+        ("DeepSeek V4 Flash", "deepseek/deepseek-v4-flash"),
+        ("DeepSeek V4 Pro", "deepseek/deepseek-v4-pro"),
+        ("GPT-5.4 Mini", "openai/gpt-5.4-mini"),
+        ("deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro"),  # already an id
+        ("", "deepseek/deepseek-v4-flash"),  # no choice -> default
+    ],
+)
 def test_api_model_label_maps_to_id(label, expected):
     # The user's UI model *label* is honored (mapped to an agent model id), not dropped for the default.
     assert ApiTransport._resolve_model_id({"model_selection": {"model": label}}) == expected
@@ -199,13 +271,17 @@ def test_api_model_label_maps_to_id(label, expected):
 
 def test_api_model_selection_required_fails_on_unmappable_label(monkeypatch):
     from cassette.api_transport import ApiTransportError
+
     monkeypatch.delenv("CASSETTE_REQUIRE_MODEL_SELECTION", raising=False)  # default true
     monkeypatch.delenv("CASSETTE_API_MODEL_ID", raising=False)
     with pytest.raises(ApiTransportError) as exc:
         ApiTransport._resolve_model_id({"model_selection": {"model": "Totally Unknown Model"}})
     assert exc.value.code == "model_selection_failed"
     monkeypatch.setenv("CASSETTE_REQUIRE_MODEL_SELECTION", "off")
-    assert ApiTransport._resolve_model_id({"model_selection": {"model": "Totally Unknown Model"}}) == "deepseek/deepseek-v4-flash"
+    assert (
+        ApiTransport._resolve_model_id({"model_selection": {"model": "Totally Unknown Model"}})
+        == "deepseek/deepseek-v4-flash"
+    )
 
 
 def test_api_resume_value_classifies_and_records_interrupts():
@@ -224,6 +300,7 @@ def test_api_resume_value_classifies_and_records_interrupts():
 
 def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeypatch):
     from cassette import worker
+
     monkeypatch.setenv("CASSETTE_TRANSPORT", "api")
     monkeypatch.setattr(worker.notifier, "notify_terminal_job", lambda job: {"delivered": False})
 
@@ -235,8 +312,11 @@ def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeyp
             return _fake_result("api")
 
     monkeypatch.setattr(worker.transport, "get_transport", lambda: _Recording())
-    monkeypatch.setattr(worker.browser, "run_cassette_browser_job",
-                        lambda job: (_ for _ in ()).throw(AssertionError("browser path ran under api transport")))
+    monkeypatch.setattr(
+        worker.browser,
+        "run_cassette_browser_job",
+        lambda job: (_ for _ in ()).throw(AssertionError("browser path ran under api transport")),
+    )
 
     jb = _make_job()
     out = worker.run(jb["job_id"])
@@ -246,12 +326,16 @@ def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeyp
 
 def test_worker_detached_path_uses_browser_when_selected(cassette_env, monkeypatch):
     from cassette import worker
+
     monkeypatch.setenv("CASSETTE_TRANSPORT", "browser")  # explicit opt-out of the api default
     monkeypatch.setattr(worker.notifier, "notify_terminal_job", lambda job: {})
     monkeypatch.setattr(worker.browser, "run_cassette_browser_job", lambda job: _fake_result("browser"))
     # The browser path must NOT construct the API transport at all.
-    monkeypatch.setattr(worker.transport, "get_transport",
-                        lambda: (_ for _ in ()).throw(AssertionError("api transport built on browser path")))
+    monkeypatch.setattr(
+        worker.transport,
+        "get_transport",
+        lambda: (_ for _ in ()).throw(AssertionError("api transport built on browser path")),
+    )
 
     jb = _make_job()
     out = worker.run(jb["job_id"])

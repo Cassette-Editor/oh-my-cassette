@@ -10,8 +10,12 @@ def test_ingest_asset_deduplicates_and_hashes_ids(cassette_env):
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
 
-    first = manifest.ingest_asset(str(media), chat_id="wxid_chat", user_id="wxid_user", message_id="msg1", platform="weixin")
-    second = manifest.ingest_asset(str(media), chat_id="wxid_chat", user_id="wxid_user", message_id="msg2", platform="weixin")
+    first = manifest.ingest_asset(
+        str(media), chat_id="wxid_chat", user_id="wxid_user", message_id="msg1", platform="weixin"
+    )
+    second = manifest.ingest_asset(
+        str(media), chat_id="wxid_chat", user_id="wxid_user", message_id="msg2", platform="weixin"
+    )
 
     assert first["sha256"] == second["sha256"]
     assert second["deduplicated"] is True
@@ -62,7 +66,9 @@ def test_weixin_video_is_saved_as_internal_h264(cassette_env, monkeypatch):
 
     monkeypatch.setattr(manifest.subprocess, "run", fake_run)
 
-    ingested = manifest.ingest_asset(str(media), original_name="wechat.mp4", media_type="video", platform="weixin", session_id="s1")
+    ingested = manifest.ingest_asset(
+        str(media), original_name="wechat.mp4", media_type="video", platform="weixin", session_id="s1"
+    )
     listed = manifest.list_assets(session_id="s1")
     asset = listed["manifest"]["assets"][0]
 
@@ -87,7 +93,9 @@ def test_qq_video_is_saved_as_internal_h264(cassette_env, monkeypatch):
 
     monkeypatch.setattr(manifest.subprocess, "run", fake_run)
 
-    ingested = manifest.ingest_asset(str(media), original_name="qq.mp4", media_type="video", platform="qqbot", session_id="s1")
+    ingested = manifest.ingest_asset(
+        str(media), original_name="qq.mp4", media_type="video", platform="qqbot", session_id="s1"
+    )
 
     assert Path(ingested["saved_path"]).name.endswith(".h264.mp4")
     assert Path(ingested["saved_path"]).read_bytes() == b"h264-video"

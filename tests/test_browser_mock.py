@@ -294,7 +294,10 @@ def test_upload_status_parses_chinese_ready_and_failure():
 def test_default_chat_selectors_prefer_current_remotion_testids():
     assert browser.DEFAULT_CHAT_SELECTOR.split(",", 1)[0] == "[data-testid^='chat-input-textarea-']"
     assert browser.DEFAULT_SEND_SELECTOR.split(",", 1)[0] == "[data-testid^='chat-input-send-']"
-    assert "[data-testid^='chat-input-textarea-']:visible" in browser._chat_input_candidates(browser.DEFAULT_CHAT_SELECTOR)[:2]
+    assert (
+        "[data-testid^='chat-input-textarea-']:visible"
+        in browser._chat_input_candidates(browser.DEFAULT_CHAT_SELECTOR)[:2]
+    )
 
 
 def test_upload_ready_expected_count_tracks_upload_batch_files():
@@ -338,10 +341,22 @@ def test_chinese_routine_and_completion_phrases_are_classified():
 
 
 def test_completion_denial_phrases_are_classified_in_chinese_and_english():
-    assert browser._completion_denial_phrase("I couldn't complete the edit because the media failed to process.") is True
+    assert (
+        browser._completion_denial_phrase("I couldn't complete the edit because the media failed to process.") is True
+    )
     assert browser._completion_denial_phrase("我无法完成剪辑，因为素材处理失败。") is True
-    assert browser._completion_denial_phrase("剪辑完成，可以导出。当前编辑器无音频EQ工具，中低频增强无法实现；建议导出后处理音频。") is False
-    assert browser._completion_denial_phrase("所有编辑操作已完成，但worker_report被阻塞，无法通过worker_report正式报告完成。") is False
+    assert (
+        browser._completion_denial_phrase(
+            "剪辑完成，可以导出。当前编辑器无音频EQ工具，中低频增强无法实现；建议导出后处理音频。"
+        )
+        is False
+    )
+    assert (
+        browser._completion_denial_phrase(
+            "所有编辑操作已完成，但worker_report被阻塞，无法通过worker_report正式报告完成。"
+        )
+        is False
+    )
     assert browser._completion_denial_phrase("The edit is complete and ready to export.") is False
 
 
@@ -420,8 +435,7 @@ def test_browser_authenticates_from_hermes_env_before_upload(cassette_env):
     hermes_home = Path(os.environ["HERMES_HOME"])
     hermes_home.mkdir(parents=True, exist_ok=True)
     (hermes_home / ".env").write_text(
-        "CASSETTE_AUTH_EMAIL=operator@example.com\n"
-        "CASSETTE_AUTH_PASSWORD=generated-password-1234\n",
+        "CASSETTE_AUTH_EMAIL=operator@example.com\nCASSETTE_AUTH_PASSWORD=generated-password-1234\n",
         encoding="utf-8",
     )
     media = cassette_env["source_root"] / "clip.mp4"
@@ -442,7 +456,10 @@ def test_browser_authenticates_from_hermes_env_before_upload(cassette_env):
     persisted = jobs.load_job(job["job_id"])
     browser_events = persisted.get("browser_events") or []
     assert any(event.get("stage") == "connectivity" for event in browser_events)
-    assert any(event.get("stage") == "authentication" and event.get("operation_status") == "authenticated" for event in browser_events)
+    assert any(
+        event.get("stage") == "authentication" and event.get("operation_status") == "authenticated"
+        for event in browser_events
+    )
     serialized_events = str(browser_events)
     assert "operator@example.com" not in serialized_events
     assert "generated-password-1234" not in serialized_events
@@ -453,8 +470,7 @@ def test_browser_authenticates_when_auth_form_is_delayed(cassette_env):
     hermes_home = Path(os.environ["HERMES_HOME"])
     hermes_home.mkdir(parents=True, exist_ok=True)
     (hermes_home / ".env").write_text(
-        "CASSETTE_AUTH_EMAIL=operator@example.com\n"
-        "CASSETTE_AUTH_PASSWORD=generated-password-1234\n",
+        "CASSETTE_AUTH_EMAIL=operator@example.com\nCASSETTE_AUTH_PASSWORD=generated-password-1234\n",
         encoding="utf-8",
     )
     media = cassette_env["source_root"] / "clip.mp4"
@@ -484,8 +500,7 @@ def test_browser_authenticates_with_enter_without_clicking_submit(cassette_env):
     hermes_home = Path(os.environ["HERMES_HOME"])
     hermes_home.mkdir(parents=True, exist_ok=True)
     (hermes_home / ".env").write_text(
-        "CASSETTE_AUTH_EMAIL=operator@example.com\n"
-        "CASSETTE_AUTH_PASSWORD=generated-password-1234\n",
+        "CASSETTE_AUTH_EMAIL=operator@example.com\nCASSETTE_AUTH_PASSWORD=generated-password-1234\n",
         encoding="utf-8",
     )
     media = cassette_env["source_root"] / "clip.mp4"
@@ -530,8 +545,7 @@ def test_browser_auth_missing_credentials_fails_before_upload(cassette_env):
     assert result["errors"][0]["code"] == "cassette_auth_missing_credentials"
     browser_events = jobs.load_job(job["job_id"]).get("browser_events") or []
     assert any(
-        event.get("stage") == "authentication" and event.get("operation_status") == "failed"
-        for event in browser_events
+        event.get("stage") == "authentication" and event.get("operation_status") == "failed" for event in browser_events
     )
 
 
@@ -956,18 +970,27 @@ def test_upload_wait_fails_on_structured_failed_state(monkeypatch):
 def test_reused_model_selection_must_match_requested_model():
     record = {"model_selection": {"model": "Kimi K2.6", "thinking_level": "Medium", "status": "selected"}}
 
-    assert browser._record_model_selection_matches(
-        record,
-        {"model_selection": {"model": "Kimi K2.6", "thinking_level": "Medium"}},
-    ) is True
-    assert browser._record_model_selection_matches(
-        record,
-        {"model_selection": {"model": "DeepSeek", "thinking_level": "Medium"}},
-    ) is False
-    assert browser._record_model_selection_matches(
-        record,
-        {"model_selection": {"model": "Kimi K2.6", "thinking_level": "High"}},
-    ) is False
+    assert (
+        browser._record_model_selection_matches(
+            record,
+            {"model_selection": {"model": "Kimi K2.6", "thinking_level": "Medium"}},
+        )
+        is True
+    )
+    assert (
+        browser._record_model_selection_matches(
+            record,
+            {"model_selection": {"model": "DeepSeek", "thinking_level": "Medium"}},
+        )
+        is False
+    )
+    assert (
+        browser._record_model_selection_matches(
+            record,
+            {"model_selection": {"model": "Kimi K2.6", "thinking_level": "High"}},
+        )
+        is False
+    )
 
 
 @pytest.mark.skipif(not browser.check_playwright(), reason="playwright is not installed")
@@ -1483,13 +1506,15 @@ def test_browser_upload_does_not_click_visible_file_picker(cassette_env):
 @pytest.mark.skipif(not browser.check_playwright(), reason="playwright is not installed")
 def test_run_job_wait_false_background_worker(cassette_env):
     fixture = Path(__file__).parent / "fixtures" / "cassette_mock.html"
-    payload = tools.cassette_run_job({
-        "prompt": "Make a short edit",
-        "session_id": "background",
-        "url": fixture.resolve().as_uri(),
-        "wait": False,
-        "timeout_sec": 10,
-    })
+    payload = tools.cassette_run_job(
+        {
+            "prompt": "Make a short edit",
+            "session_id": "background",
+            "url": fixture.resolve().as_uri(),
+            "wait": False,
+            "timeout_sec": 10,
+        }
+    )
     import json
 
     data = json.loads(payload)

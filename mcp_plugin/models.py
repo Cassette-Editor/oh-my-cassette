@@ -1,4 +1,5 @@
 """Typed MCP inputs and structured result contracts."""
+
 from __future__ import annotations
 
 from enum import Enum

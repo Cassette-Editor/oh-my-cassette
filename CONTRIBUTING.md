@@ -25,10 +25,14 @@ uv pip install --python .venv/bin/python \
 Run the CI-equivalent checks:
 
 ```bash
+uvx ruff check .
+uvx ruff format --check .
 .venv/bin/python -m compileall -q .
 .venv/bin/python -m pytest -q -rs -n 4 --dist loadfile
 ./web_demo/build_frontend.sh
 ```
+
+`ruff format .` fixes formatting in place; configuration lives in `pyproject.toml`.
 
 Validate native packaging with supported host CLIs:
 

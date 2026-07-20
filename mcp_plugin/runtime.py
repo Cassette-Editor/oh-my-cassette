@@ -1,4 +1,5 @@
 """Host-neutral adapter from typed MCP calls to the existing Cassette core."""
+
 from __future__ import annotations
 
 import json
@@ -306,9 +307,7 @@ class LocalMcpRuntime:
             try:
                 phase = self._transition(session_id, SessionPhase.ASSETS_READY)
             except InvalidTransition as exc:
-                return self._failure(
-                    "invalid_transition", str(exc), session_id=session_id, phase=exc.current
-                )
+                return self._failure("invalid_transition", str(exc), session_id=session_id, phase=exc.current)
         return self._envelope_from_core(payload, session_id=session_id, phase=phase)
 
     def list_assets(self, args: dict[str, Any]) -> ToolEnvelope:
@@ -323,9 +322,7 @@ class LocalMcpRuntime:
             try:
                 phase = self._transition(session_id, SessionPhase.GUIDED_CHOICES)
             except InvalidTransition as exc:
-                return self._failure(
-                    "invalid_transition", str(exc), session_id=session_id, phase=exc.current
-                )
+                return self._failure("invalid_transition", str(exc), session_id=session_id, phase=exc.current)
         return self._envelope_from_core(payload, session_id=session_id, phase=phase)
 
     def make_prompt(self, args: dict[str, Any]) -> ToolEnvelope:
@@ -390,9 +387,7 @@ class LocalMcpRuntime:
         artifacts, artifact_error = self._artifacts_for_job(updated)
         if artifact_error:
             return artifact_error
-        return self._envelope_from_core(
-            payload, session_id=session_id, job_id=job_id, phase=phase, artifacts=artifacts
-        )
+        return self._envelope_from_core(payload, session_id=session_id, job_id=job_id, phase=phase, artifacts=artifacts)
 
     def simple_session_tool(self, name: str, args: dict[str, Any]) -> ToolEnvelope:
         session_id = str(args.get("session_id") or "").strip() or None
@@ -453,9 +448,7 @@ class LocalMcpRuntime:
         artifacts, artifact_error = self._artifacts_for_job(job) if job else ([], None)
         if artifact_error:
             return artifact_error
-        return self._envelope_from_core(
-            payload, session_id=session_id, job_id=job_id, phase=phase, artifacts=artifacts
-        )
+        return self._envelope_from_core(payload, session_id=session_id, job_id=job_id, phase=phase, artifacts=artifacts)
 
     @staticmethod
     def _job_change_marker(job: dict[str, Any]) -> tuple[Any, ...]:
@@ -508,9 +501,7 @@ class LocalMcpRuntime:
         artifacts, artifact_error = self._artifacts_for_job(job) if job else ([], None)
         if artifact_error:
             return artifact_error
-        return self._envelope_from_core(
-            payload, session_id=session_id, job_id=job_id, phase=phase, artifacts=artifacts
-        )
+        return self._envelope_from_core(payload, session_id=session_id, job_id=job_id, phase=phase, artifacts=artifacts)
 
     def review_completion(self, args: dict[str, Any]) -> ToolEnvelope:
         job_id = str(args.get("job_id") or "").strip()
@@ -556,9 +547,7 @@ class LocalMcpRuntime:
         artifacts, artifact_error = self._artifacts_for_job(updated)
         if artifact_error:
             return artifact_error
-        return self._envelope_from_core(
-            payload, session_id=session_id, job_id=job_id, phase=phase, artifacts=artifacts
-        )
+        return self._envelope_from_core(payload, session_id=session_id, job_id=job_id, phase=phase, artifacts=artifacts)
 
     def cancel_job(self, args: dict[str, Any]) -> ToolEnvelope:
         job_id = str(args.get("job_id") or "").strip()
@@ -579,6 +568,4 @@ class LocalMcpRuntime:
                 phase = self._sync_job(session_id, updated) if session_id else phase_from_job(updated)
             except Exception:
                 phase = SessionPhase.RUNNING
-        return self._envelope_from_core(
-            payload, session_id=session_id, job_id=job_id, phase=phase
-        )
+        return self._envelope_from_core(payload, session_id=session_id, job_id=job_id, phase=phase)

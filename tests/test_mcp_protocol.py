@@ -109,10 +109,17 @@ def test_mcp_lists_exactly_the_hermes_tools_with_flat_structured_schemas():
         assert "wait_for_change_sec" in by_name["cassette_job_status"].inputSchema["properties"]
         assert {"job_id", "response"} <= set(by_name["cassette_answer_question"].inputSchema["properties"])
         assert set(by_name["cassette_ingest_media"].inputSchema["properties"]["media_type"]["anyOf"][0]["enum"]) == {
-            "video", "image", "audio", "file", "unknown"
+            "video",
+            "image",
+            "audio",
+            "file",
+            "unknown",
         }
         assert set(by_name["cassette_review_completion"].inputSchema["properties"]["decision"]["enum"]) == {
-            "export", "continue", "needs_user", "failed"
+            "export",
+            "continue",
+            "needs_user",
+            "failed",
         }
         assert all(tool.outputSchema for tool in listed)
 
@@ -399,9 +406,7 @@ class _ResumeProtocolApi(BaseHTTPRequestHandler):
                     200,
                     {
                         "values": {
-                            "messages": [
-                                {"type": "assistant", "content": "The edit is complete and ready for review."}
-                            ]
+                            "messages": [{"type": "assistant", "content": "The edit is complete and ready for review."}]
                         },
                         "tasks": [],
                     },

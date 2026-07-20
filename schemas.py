@@ -6,7 +6,10 @@ CASSETTE_INGEST_MEDIA = {
     "parameters": {
         "type": "object",
         "properties": {
-            "source_path": {"type": "string", "description": "Local gateway cache path. Do not use arbitrary user-supplied paths."},
+            "source_path": {
+                "type": "string",
+                "description": "Local gateway cache path. Do not use arbitrary user-supplied paths.",
+            },
             "original_name": {"type": "string"},
             "media_type": {"type": "string", "enum": ["video", "image", "audio", "file", "unknown"]},
             "chat_id": {"type": "string"},
@@ -46,7 +49,11 @@ CASSETTE_MAKE_PROMPT = {
             "output_format": {"type": "string"},
             "duration": {"type": "string"},
             "style": {"type": "string"},
-            "cassette_language": {"type": "string", "enum": ["zh", "en"], "description": "Cassette UI/chat language. QQ defaults to zh; Telegram defaults to en."},
+            "cassette_language": {
+                "type": "string",
+                "enum": ["zh", "en"],
+                "description": "Cassette UI/chat language. QQ defaults to zh; Telegram defaults to en.",
+            },
             "language": {"type": "string", "enum": ["zh", "en"], "description": "Alias for cassette_language."},
             "constraints": {"type": "object"},
         },
@@ -66,7 +73,10 @@ CASSETTE_ANSWER_QUESTION = {
             "asset_count": {"type": "integer"},
             "context": {"type": "object"},
             "job_id": {"type": "string", "description": "Resume mode: persisted job waiting for user input."},
-            "response": {"type": "string", "description": "Resume mode: validated user response for the pending question."},
+            "response": {
+                "type": "string",
+                "description": "Resume mode: validated user response for the pending question.",
+            },
         },
         "anyOf": [
             {"required": ["question"]},
@@ -83,16 +93,31 @@ CASSETTE_MATCH_BGM = {
         "type": "object",
         "properties": {
             "session_id": {"type": "string"},
-            "instruction": {"type": "string", "description": "The user's original or plugin-augmented editing instruction."},
+            "instruction": {
+                "type": "string",
+                "description": "The user's original or plugin-augmented editing instruction.",
+            },
             "search_queries": {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "One to three English search queries based on Free To Use category names plus related tag/mood words.",
             },
-            "optimization_enabled": {"type": "boolean", "description": "Whether the user chose prompt optimization before smart BGM selection."},
-            "continue_after_match": {"type": "boolean", "description": "Default true. Set false for /music standalone matching so the tool only registers a BGM asset and does not guide Hermes into Cassette execution."},
-            "fallback_from": {"type": "string", "description": "Optional. Set to exact_bgm when this Free To Use match is a fallback after exact song matching failed."},
-            "fallback_reason": {"type": "string", "description": "Optional concise error code or reason from the primary BGM provider that triggered fallback."},
+            "optimization_enabled": {
+                "type": "boolean",
+                "description": "Whether the user chose prompt optimization before smart BGM selection.",
+            },
+            "continue_after_match": {
+                "type": "boolean",
+                "description": "Default true. Set false for /music standalone matching so the tool only registers a BGM asset and does not guide Hermes into Cassette execution.",
+            },
+            "fallback_from": {
+                "type": "string",
+                "description": "Optional. Set to exact_bgm when this Free To Use match is a fallback after exact song matching failed.",
+            },
+            "fallback_reason": {
+                "type": "string",
+                "description": "Optional concise error code or reason from the primary BGM provider that triggered fallback.",
+            },
         },
         "required": ["session_id", "instruction", "search_queries"],
         "additionalProperties": False,
@@ -109,15 +134,34 @@ CASSETTE_MATCH_EXACT_BGM = {
         "type": "object",
         "properties": {
             "session_id": {"type": "string"},
-            "instruction": {"type": "string", "description": "The user's original or plugin-augmented editing instruction."},
-            "title": {"type": "string", "description": "Concrete song title selected by the user or by Hermes for random-provider mode."},
+            "instruction": {
+                "type": "string",
+                "description": "The user's original or plugin-augmented editing instruction.",
+            },
+            "title": {
+                "type": "string",
+                "description": "Concrete song title selected by the user or by Hermes for random-provider mode.",
+            },
             "songTitle": {"type": "string", "description": "Alias for title."},
             "song_title": {"type": "string", "description": "Alias for title."},
-            "artist": {"type": "string", "description": "Concrete artist/singer name. Strongly preferred for exact search."},
+            "artist": {
+                "type": "string",
+                "description": "Concrete artist/singer name. Strongly preferred for exact search.",
+            },
             "singer": {"type": "string", "description": "Alias for artist."},
-            "optimization_enabled": {"type": "boolean", "description": "Whether the user chose prompt optimization before smart BGM selection."},
-            "continue_after_match": {"type": "boolean", "description": "Default true. Set false for /music standalone matching so the tool only registers a BGM asset and does not guide Hermes into Cassette execution."},
-            "download": {"type": "boolean", "default": True, "description": "If false, only searches and returns eligible candidates."},
+            "optimization_enabled": {
+                "type": "boolean",
+                "description": "Whether the user chose prompt optimization before smart BGM selection.",
+            },
+            "continue_after_match": {
+                "type": "boolean",
+                "description": "Default true. Set false for /music standalone matching so the tool only registers a BGM asset and does not guide Hermes into Cassette execution.",
+            },
+            "download": {
+                "type": "boolean",
+                "default": True,
+                "description": "If false, only searches and returns eligible candidates.",
+            },
         },
         "required": ["session_id", "instruction", "title"],
         "additionalProperties": False,
@@ -135,23 +179,62 @@ JAMENDO_MUSIC_MATCHER = {
         "properties": {
             "userQuery": {"type": "string", "description": "Natural-language music requirement from the user."},
             "user_query": {"type": "string", "description": "Alias for userQuery."},
-            "searchTerms": {"type": "array", "items": {"type": "string"}, "description": "Required fixed-form mode. One to five short English Jamendo-friendly search phrases, for example gentle male vocal pop."},
+            "searchTerms": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Required fixed-form mode. One to five short English Jamendo-friendly search phrases, for example gentle male vocal pop.",
+            },
             "search_terms": {"type": "array", "items": {"type": "string"}, "description": "Alias for searchTerms."},
-            "fuzzyTags": {"type": "array", "items": {"type": "string"}, "description": "Optional English mood/genre/instrument words used as Jamendo fuzzytags."},
+            "fuzzyTags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional English mood/genre/instrument words used as Jamendo fuzzytags.",
+            },
             "fuzzy_tags": {"type": "array", "items": {"type": "string"}, "description": "Alias for fuzzyTags."},
-            "excludeTerms": {"type": "array", "items": {"type": "string"}, "description": "Optional English terms to exclude locally from candidate title/artist/album."},
+            "excludeTerms": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional English terms to exclude locally from candidate title/artist/album.",
+            },
             "exclude_terms": {"type": "array", "items": {"type": "string"}, "description": "Alias for excludeTerms."},
-            "vocalInstrumental": {"type": "string", "enum": ["vocal", "instrumental"], "description": "Optional vocal preference when the user clearly requested vocal or instrumental."},
-            "vocalinstrumental": {"type": "string", "enum": ["vocal", "instrumental"], "description": "Alias for vocalInstrumental."},
-            "searchPlan": {"type": ["object", "string"], "description": "Legacy compatibility only. Do not use for new tool calls."},
-            "search_plan": {"type": ["object", "string"], "description": "Legacy compatibility only. Do not use for new tool calls."},
-            "repairJson": {"type": ["object", "string"], "description": "Optional repaired SearchPlan JSON if the first Hermes JSON was invalid."},
-            "download": {"type": "boolean", "default": True, "description": "If false, only returns eligible candidates and does not download."},
+            "vocalInstrumental": {
+                "type": "string",
+                "enum": ["vocal", "instrumental"],
+                "description": "Optional vocal preference when the user clearly requested vocal or instrumental.",
+            },
+            "vocalinstrumental": {
+                "type": "string",
+                "enum": ["vocal", "instrumental"],
+                "description": "Alias for vocalInstrumental.",
+            },
+            "searchPlan": {
+                "type": ["object", "string"],
+                "description": "Legacy compatibility only. Do not use for new tool calls.",
+            },
+            "search_plan": {
+                "type": ["object", "string"],
+                "description": "Legacy compatibility only. Do not use for new tool calls.",
+            },
+            "repairJson": {
+                "type": ["object", "string"],
+                "description": "Optional repaired SearchPlan JSON if the first Hermes JSON was invalid.",
+            },
+            "download": {
+                "type": "boolean",
+                "default": True,
+                "description": "If false, only returns eligible candidates and does not download.",
+            },
             "seed": {"type": "integer", "description": "Optional uniform-random seed for reproducible selection."},
             "limit": {"type": "integer", "description": "Optional per-search-term limit, capped at 50."},
             "limitOverride": {"type": "integer", "description": "Optional per-strategy limit override, capped at 200."},
-            "outputDir": {"type": "string", "description": "Optional download directory. Relative paths are under CASSETTE_ASSET_ROOT; absolute paths must also be under CASSETTE_ASSET_ROOT."},
-            "session_id": {"type": "string", "description": "Optional Cassette session id; when provided, downloaded MP3 is registered as an audio asset."},
+            "outputDir": {
+                "type": "string",
+                "description": "Optional download directory. Relative paths are under CASSETTE_ASSET_ROOT; absolute paths must also be under CASSETTE_ASSET_ROOT.",
+            },
+            "session_id": {
+                "type": "string",
+                "description": "Optional Cassette session id; when provided, downloaded MP3 is registered as an audio asset.",
+            },
         },
         "required": ["userQuery", "searchTerms"],
         "additionalProperties": False,
@@ -165,19 +248,36 @@ CASSETTE_RUN_JOB = {
         "type": "object",
         "properties": {
             "prompt": {"type": "string", "description": "Required normal path. Pass cassette_make_prompt.data.prompt."},
-            "chat_message": {"type": "string", "description": "User-facing edit request to send into Cassette chat panel. Pass cassette_make_prompt.data.chat_message. Do not pass Hermes internal planning prompts here."},
+            "chat_message": {
+                "type": "string",
+                "description": "User-facing edit request to send into Cassette chat panel. Pass cassette_make_prompt.data.chat_message. Do not pass Hermes internal planning prompts here.",
+            },
             "cassette_message": {"type": "string", "description": "Alias for chat_message."},
             "instruction": {"type": "string"},
             "session_id": {"type": "string"},
             "chat_id": {"type": "string"},
             "url": {"type": "string"},
-            "wait": {"type": "boolean", "default": True, "description": "For gateway jobs pass false to keep slash commands responsive. Background gateway jobs notify progress/final status themselves; avoid automatic cassette_job_status polling."},
+            "wait": {
+                "type": "boolean",
+                "default": True,
+                "description": "For gateway jobs pass false to keep slash commands responsive. Background gateway jobs notify progress/final status themselves; avoid automatic cassette_job_status polling.",
+            },
             "timeout_sec": {"type": "integer"},
             "selectors": {"type": "object"},
-            "cassette_model": {"type": "string", "description": "Optional Cassette model label, for example DeepSeek V4 Flash. Defaults to DeepSeek V4 Flash."},
+            "cassette_model": {
+                "type": "string",
+                "description": "Optional Cassette model label, for example DeepSeek V4 Flash. Defaults to DeepSeek V4 Flash.",
+            },
             "model": {"type": "string", "description": "Alias for cassette_model."},
-            "thinking_level": {"type": "string", "description": "Optional Cassette thinking level: low, medium, high, or Chinese equivalents. Defaults to low."},
-            "cassette_language": {"type": "string", "enum": ["zh", "en"], "description": "Cassette UI/chat language. QQ defaults to zh; Telegram defaults to en."},
+            "thinking_level": {
+                "type": "string",
+                "description": "Optional Cassette thinking level: low, medium, high, or Chinese equivalents. Defaults to low.",
+            },
+            "cassette_language": {
+                "type": "string",
+                "enum": ["zh", "en"],
+                "description": "Cassette UI/chat language. QQ defaults to zh; Telegram defaults to en.",
+            },
             "language": {"type": "string", "enum": ["zh", "en"], "description": "Alias for cassette_language."},
         },
         "required": ["prompt"],
@@ -210,7 +310,10 @@ CASSETTE_REVIEW_COMPLETION = {
         "properties": {
             "job_id": {"type": "string"},
             "decision": {"type": "string", "enum": ["export", "continue", "needs_user", "failed"]},
-            "reason": {"type": "string", "description": "Short Hermes supervisor rationale. Do not include local paths or raw IDs."},
+            "reason": {
+                "type": "string",
+                "description": "Short Hermes supervisor rationale. Do not include local paths or raw IDs.",
+            },
             "summary": {"type": "string", "description": "Optional user-safe summary of the Cassette reply."},
         },
         "required": ["job_id", "decision", "reason"],

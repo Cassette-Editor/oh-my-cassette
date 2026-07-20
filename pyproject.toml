@@ -1,0 +1,5 @@
+# Lint/format configuration only — this repo is a plugin checkout, not a
+# distributable package, so there is no [project] table on purpose.
+[tool.ruff]
+line-length = 120
+target-version = "py311"

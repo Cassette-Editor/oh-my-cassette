@@ -9,9 +9,19 @@ from .errors import CassetteError
 
 
 DEFAULT_EXTENSIONS = {
-    ".mp4", ".mov", ".m4v", ".webm",
-    ".jpg", ".jpeg", ".png", ".webp", ".gif",
-    ".mp3", ".wav", ".m4a", ".aac",
+    ".mp4",
+    ".mov",
+    ".m4v",
+    ".webm",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".aac",
 }
 
 
@@ -36,7 +46,9 @@ def get_allowed_source_roots() -> list[Path]:
         dynamic_roots = []
     if not raw and not dynamic_roots:
         home = _hermes_home()
-        raw = os.pathsep.join(str(p) for p in (home / "weixin", home / "qqbot", home / "telegram", home / "cache", home / "tmp"))
+        raw = os.pathsep.join(
+            str(p) for p in (home / "weixin", home / "qqbot", home / "telegram", home / "cache", home / "tmp")
+        )
     roots: list[Path] = []
     for item in (raw or "").split(os.pathsep):
         if item.strip():
@@ -91,7 +103,9 @@ def resolve_and_validate_source_path(source_path: str) -> Path:
 def validate_extension(path: Path) -> str:
     ext = path.suffix.lower()
     if ext not in get_allowed_extensions():
-        raise CassetteError("disallowed_extension", f"Extension {ext or '<none>'} is not allowed for Cassette ingestion")
+        raise CassetteError(
+            "disallowed_extension", f"Extension {ext or '<none>'} is not allowed for Cassette ingestion"
+        )
     return ext
 
 
@@ -99,7 +113,11 @@ def validate_size(path: Path) -> int:
     size = path.stat().st_size
     max_bytes = get_max_bytes()
     if size > max_bytes:
-        raise CassetteError("file_too_large", "Source file is larger than CASSETTE_MAX_BYTES", {"size_bytes": size, "max_bytes": max_bytes})
+        raise CassetteError(
+            "file_too_large",
+            "Source file is larger than CASSETTE_MAX_BYTES",
+            {"size_bytes": size, "max_bytes": max_bytes},
+        )
     return size
 
 

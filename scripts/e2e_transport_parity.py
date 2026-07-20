@@ -22,6 +22,7 @@ Usage:
   python scripts/e2e_transport_parity.py --media tests/fixtures/sample.mp4 \
       --instruction "Make a short captioned video under 10 seconds."
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,12 +42,18 @@ def _run(transport: str, args: argparse.Namespace) -> dict:
     cmd = [
         sys.executable,
         str(DRIVER),
-        "--transport", transport,
-        "--media", args.media,
-        "--instruction", args.instruction,
-        "--wait", args.wait,
-        "--timeout-sec", str(args.timeout_sec),
-        "--session-id", f"{args.session_prefix}-{transport}-{int(time.time())}",
+        "--transport",
+        transport,
+        "--media",
+        args.media,
+        "--instruction",
+        args.instruction,
+        "--wait",
+        args.wait,
+        "--timeout-sec",
+        str(args.timeout_sec),
+        "--session-id",
+        f"{args.session_prefix}-{transport}-{int(time.time())}",
     ]
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
     payload = _last_json_line(proc.stdout)
@@ -95,20 +102,27 @@ def main() -> int:
     errors_match = _error_codes(browser) == _error_codes(api)
     parity = status_match and links_match and errors_match
 
-    print(json.dumps({
-        "parity": parity,
-        "checks": {"status": status_match, "output_link_count": links_match, "error_codes": errors_match},
-        "browser": {
-            "status": browser.get("status"),
-            "output_links": len(browser.get("output_links") or []),
-            "error_codes": _error_codes(browser),
-        },
-        "api": {
-            "status": api.get("status"),
-            "output_links": len(api.get("output_links") or []),
-            "error_codes": _error_codes(api),
-        },
-    }, ensure_ascii=False, sort_keys=True, indent=2))
+    print(
+        json.dumps(
+            {
+                "parity": parity,
+                "checks": {"status": status_match, "output_link_count": links_match, "error_codes": errors_match},
+                "browser": {
+                    "status": browser.get("status"),
+                    "output_links": len(browser.get("output_links") or []),
+                    "error_codes": _error_codes(browser),
+                },
+                "api": {
+                    "status": api.get("status"),
+                    "output_links": len(api.get("output_links") or []),
+                    "error_codes": _error_codes(api),
+                },
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+    )
     return 0 if parity else 1
 
 

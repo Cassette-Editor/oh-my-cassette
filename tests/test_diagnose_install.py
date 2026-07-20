@@ -18,12 +18,14 @@ def _load_diagnose_script():
 def test_diagnose_redacts_secret_env_values():
     diagnose = _load_diagnose_script()
 
-    snapshot = diagnose._redacted_env_snapshot({
-        "CASSETTE_AUTH_EMAIL": "operator@example.com",
-        "CASSETTE_AUTH_PASSWORD": "secret-password",
-        "JAMENDO_CLIENT_ID": "client-id",
-        "JAMENDO_CLIENT_SECRET": "secret-client",
-    })
+    snapshot = diagnose._redacted_env_snapshot(
+        {
+            "CASSETTE_AUTH_EMAIL": "operator@example.com",
+            "CASSETTE_AUTH_PASSWORD": "secret-password",
+            "JAMENDO_CLIENT_ID": "client-id",
+            "JAMENDO_CLIENT_SECRET": "secret-client",
+        }
+    )
 
     assert snapshot["CASSETTE_AUTH_EMAIL"] == "<set>"
     assert snapshot["CASSETTE_AUTH_PASSWORD"] == "<set>"
@@ -73,7 +75,9 @@ def test_diagnose_plugin_recognizes_cli_managed_git_clone(tmp_path, monkeypatch)
     repo = tmp_path / "checkout"
     repo.mkdir()
     (repo / "plugin.yaml").write_text("name: cassette\nversion: 0.1.0\n", encoding="utf-8")
-    monkeypatch.setattr(diagnose, "_run", lambda cmd, timeout=20: (0, "https://github.com/Cassette-Editor/oh-my-cassette.git"))
+    monkeypatch.setattr(
+        diagnose, "_run", lambda cmd, timeout=20: (0, "https://github.com/Cassette-Editor/oh-my-cassette.git")
+    )
 
     result = diagnose._check_plugin(tmp_path / ".hermes", repo)
 

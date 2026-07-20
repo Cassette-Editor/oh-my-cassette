@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Private first-run authentication and optional browser setup."""
+
 from __future__ import annotations
 
 import argparse
@@ -80,11 +81,17 @@ def verify_credentials(api_url: str, email: str, password: str, *, timeout: floa
             status = int(getattr(response, "status", 200) or 200)
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        raise SetupError(f"Cassette credential verification failed (HTTP {exc.code}); no credentials were written.") from exc
+        raise SetupError(
+            f"Cassette credential verification failed (HTTP {exc.code}); no credentials were written."
+        ) from exc
     except (URLError, TimeoutError, OSError) as exc:
-        raise SetupError(f"Cassette credential verification could not reach the API ({type(exc).__name__}); no credentials were written.") from exc
+        raise SetupError(
+            f"Cassette credential verification could not reach the API ({type(exc).__name__}); no credentials were written."
+        ) from exc
     except ValueError as exc:
-        raise SetupError("Cassette credential verification returned invalid JSON; no credentials were written.") from exc
+        raise SetupError(
+            "Cassette credential verification returned invalid JSON; no credentials were written."
+        ) from exc
     session = payload.get("session") if isinstance(payload, dict) else {}
     if status != 200 or not isinstance(session, dict) or not session.get("access_token"):
         raise SetupError("Cassette rejected the credentials; no credentials were written.")
@@ -187,7 +194,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Explicitly import Cassette credentials from a Hermes .env file",
     )
-    parser.add_argument("--with-browser", action="store_true", help="Install pinned Playwright and Chromium, then select browser transport")
+    parser.add_argument(
+        "--with-browser",
+        action="store_true",
+        help="Install pinned Playwright and Chromium, then select browser transport",
+    )
     parser.add_argument(
         "--use-environment",
         action="store_true",

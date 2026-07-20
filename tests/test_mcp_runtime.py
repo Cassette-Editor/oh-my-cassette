@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import runtime_config
 from cassette import jobs, tools
@@ -135,9 +134,7 @@ def test_completion_review_requires_review_phase_before_auth(tmp_path, monkeypat
         options={"cassette_session_id": "session"},
     )
     jobs.update_job(job["job_id"], status="running")
-    result = runtime.review_completion(
-        {"job_id": job["job_id"], "decision": "export", "reason": "looks done"}
-    )
+    result = runtime.review_completion({"job_id": job["job_id"], "decision": "export", "reason": "looks done"})
     assert result.ok is False
     assert result.error.code == "invalid_transition"
     assert result.phase == SessionPhase.RUNNING
@@ -229,12 +226,8 @@ def test_direct_core_and_mcp_adapter_preserve_ingest_success_contract(tmp_path, 
 def test_direct_core_and_mcp_adapter_preserve_semantic_validation_error(tmp_path, monkeypatch):
     runtime = _runtime(tmp_path, monkeypatch)
     direct = json.loads(
-        tools.cassette_make_prompt(
-            {"instruction": "", "session_id": "validation-session", "requires_assets": False}
-        )
+        tools.cassette_make_prompt({"instruction": "", "session_id": "validation-session", "requires_assets": False})
     )
-    adapted = runtime.make_prompt(
-        {"instruction": "", "session_id": "validation-session", "requires_assets": False}
-    )
+    adapted = runtime.make_prompt({"instruction": "", "session_id": "validation-session", "requires_assets": False})
     assert direct["ok"] is adapted.ok is False
     assert direct["error"]["code"] == adapted.error.code == "missing_required_arg"

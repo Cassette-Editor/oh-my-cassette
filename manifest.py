@@ -192,13 +192,17 @@ def _transcode_h264(source: Path, dest: Path) -> None:
         except OSError:
             pass
         detail = (proc.stderr or "").strip()[-500:]
-        raise CassetteError("transcode_failed", "Failed to normalize gateway video for Cassette", {"stderr_tail": detail})
+        raise CassetteError(
+            "transcode_failed", "Failed to normalize gateway video for Cassette", {"stderr_tail": detail}
+        )
     if not tmp_path.exists() or tmp_path.stat().st_size <= 0:
         try:
             tmp_path.unlink()
         except OSError:
             pass
-        raise CassetteError("transcode_failed", "Failed to normalize gateway video for Cassette", {"reason": "empty_output"})
+        raise CassetteError(
+            "transcode_failed", "Failed to normalize gateway video for Cassette", {"reason": "empty_output"}
+        )
     os.replace(tmp_path, dest)
 
 
@@ -282,7 +286,9 @@ def ingest_asset(
     key = session_key(session_id, chat_id, task_id)
     sess_hash = security.safe_hash_id(key)
 
-    resolved_media_type = media_type if media_type in {"video", "image", "audio", "file", "unknown"} else _media_type_from_ext(ext)
+    resolved_media_type = (
+        media_type if media_type in {"video", "image", "audio", "file", "unknown"} else _media_type_from_ext(ext)
+    )
     media_dir = get_session_dir(sess_hash) / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
     force_h264 = _should_force_h264(platform, resolved_media_type, ext)
@@ -299,15 +305,17 @@ def ingest_asset(
         manifest["user_hash"] = security.safe_hash_id(user_id) if user_id else manifest.get("user_hash", "")
         if chat_id or user_id:
             delivery = dict(manifest.get("delivery") or {})
-            delivery.update({
-                "platform": platform or delivery.get("platform") or "",
-                "chat_id": chat_id or delivery.get("chat_id") or "",
-                "user_id": user_id or delivery.get("user_id") or "",
-                "message_id": message_id or delivery.get("message_id") or "",
-                "chat_type": chat_type or delivery.get("chat_type") or "",
-                "thread_id": thread_id or delivery.get("thread_id") or "",
-                "updated_at": now_iso(),
-            })
+            delivery.update(
+                {
+                    "platform": platform or delivery.get("platform") or "",
+                    "chat_id": chat_id or delivery.get("chat_id") or "",
+                    "user_id": user_id or delivery.get("user_id") or "",
+                    "message_id": message_id or delivery.get("message_id") or "",
+                    "chat_type": chat_type or delivery.get("chat_type") or "",
+                    "thread_id": thread_id or delivery.get("thread_id") or "",
+                    "updated_at": now_iso(),
+                }
+            )
             manifest["delivery"] = delivery
 
     return _register_asset(
@@ -338,7 +346,9 @@ def ingest_internal_asset(
     try:
         source.relative_to(root)
     except ValueError as exc:
-        raise CassetteError("internal_asset_outside_root", "Internal Cassette asset must live under the Cassette asset root") from exc
+        raise CassetteError(
+            "internal_asset_outside_root", "Internal Cassette asset must live under the Cassette asset root"
+        ) from exc
     if not source.exists() or not source.is_file():
         raise CassetteError("internal_asset_missing", "Internal Cassette asset was not found")
     ext = source.suffix.lower()
@@ -354,7 +364,9 @@ def ingest_internal_asset(
     if source != dest and not deduplicated:
         shutil.copy2(source, dest)
 
-    resolved_media_type = media_type if media_type in {"video", "image", "audio", "file", "unknown"} else _media_type_from_ext(ext)
+    resolved_media_type = (
+        media_type if media_type in {"video", "image", "audio", "file", "unknown"} else _media_type_from_ext(ext)
+    )
     return _register_asset(
         sess_hash,
         session_id,
@@ -371,7 +383,6 @@ def ingest_internal_asset(
 
 
 def list_assets(session_id: str | None = None, chat_id: str | None = None, task_id: str | None = None) -> dict:
-    key = session_key(session_id, chat_id, task_id)
     sess_hash = resolve_session_hash(session_id, chat_id, task_id)
     manifest = load_manifest(sess_hash)
     changed = False

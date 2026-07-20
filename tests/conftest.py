@@ -14,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def _load_cassette_package() -> None:
     if "cassette" in sys.modules:
         return
-    spec = importlib.util.spec_from_file_location("cassette", ROOT / "__init__.py", submodule_search_locations=[str(ROOT)])
+    spec = importlib.util.spec_from_file_location(
+        "cassette", ROOT / "__init__.py", submodule_search_locations=[str(ROOT)]
+    )
     module = importlib.util.module_from_spec(spec)
     sys.modules["cassette"] = module
     assert spec.loader is not None

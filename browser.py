@@ -153,9 +153,7 @@ def _runtime_env(name: str) -> str:
 
 def _cassette_auth_credentials() -> tuple[str, str]:
     email = (
-        _runtime_env("CASSETTE_AUTH_EMAIL")
-        or _runtime_env("CASSETTE_AUTH_ACCOUNT")
-        or _runtime_env("CASSETTE_EMAIL")
+        _runtime_env("CASSETTE_AUTH_EMAIL") or _runtime_env("CASSETTE_AUTH_ACCOUNT") or _runtime_env("CASSETTE_EMAIL")
     )
     password = _runtime_env("CASSETTE_AUTH_PASSWORD") or _runtime_env("CASSETTE_PASSWORD")
     return email, password
@@ -210,8 +208,7 @@ def _cassette_auth_element_state(page: Any) -> dict[str, Any]:
 def _page_requires_auth(page: Any) -> bool:
     state = _cassette_auth_element_state(page)
     return bool(
-        state.get("signup_email_visible")
-        or (state.get("login_email_visible") and state.get("password_visible"))
+        state.get("signup_email_visible") or (state.get("login_email_visible") and state.get("password_visible"))
     )
 
 
@@ -316,7 +313,9 @@ def _ensure_cassette_authenticated(page: Any, timeout_ms: int = 30000) -> dict[s
         password_input.fill(password)
         password_input.press("Enter")
     except Exception as exc:
-        raise BrowserAuthError("cassette_auth_input_failed", f"Cassette authentication input failed: {type(exc).__name__}") from exc
+        raise BrowserAuthError(
+            "cassette_auth_input_failed", f"Cassette authentication input failed: {type(exc).__name__}"
+        ) from exc
     deadline = time.monotonic() + max(5.0, timeout_ms / 1000)
     while time.monotonic() < deadline:
         if not _page_requires_auth(page):
@@ -806,7 +805,9 @@ def _ensure_cassette_authenticated_with_progress(
     return auth
 
 
-def _prepare_agent_page_for_automation(page: Any, job_id: str, timeout_ms: int) -> tuple[dict[str, Any], dict[str, Any]]:
+def _prepare_agent_page_for_automation(
+    page: Any, job_id: str, timeout_ms: int
+) -> tuple[dict[str, Any], dict[str, Any]]:
     auth = _ensure_cassette_authenticated_with_progress(page, job_id, timeout_ms=min(timeout_ms, 30000))
     try:
         ui_ready = _wait_for_agent_ui_ready(page, job_id=job_id, timeout_ms=min(timeout_ms, 60000))
@@ -904,7 +905,9 @@ def _new_browser_record(
     return record
 
 
-def _browser_record(job: dict, headless: bool, launch_args: list[str], url: str, timeout_ms: int) -> tuple[dict[str, Any], bool]:
+def _browser_record(
+    job: dict, headless: bool, launch_args: list[str], url: str, timeout_ms: int
+) -> tuple[dict[str, Any], bool]:
     if not _browser_reuse_enabled():
         return _new_browser_record(job, headless, launch_args, url, timeout_ms), True
     key = _browser_session_key(job)
@@ -926,6 +929,7 @@ def _browser_record(job: dict, headless: bool, launch_args: list[str], url: str,
 def check_playwright() -> bool:
     try:
         import playwright.sync_api  # noqa: F401
+
         return True
     except Exception:
         return False
@@ -951,7 +955,11 @@ def _screenshot(page: Any, job_id: str) -> str | None:
 
 def _progress_screenshot(page: Any, job_id: str) -> str | None:
     timestamp = jobs.now_iso().replace(":", "").replace("-", "")
-    path = Path(os.getenv("CASSETTE_ASSET_ROOT", str(get_asset_root()))) / "screenshots" / f"{job_id}_progress_{timestamp}.png"
+    path = (
+        Path(os.getenv("CASSETTE_ASSET_ROOT", str(get_asset_root())))
+        / "screenshots"
+        / f"{job_id}_progress_{timestamp}.png"
+    )
     return _capture(page, path)
 
 
@@ -992,17 +1000,19 @@ def _selector_visible_variants(selector: str) -> list[str]:
 
 def _chat_input_candidates(selector: str) -> list[str]:
     candidates = _selector_visible_variants(selector)
-    candidates.extend([
-        "[data-testid^='chat-input-textarea-']:visible",
-        "[data-testid='agent-chat-input']:visible",
-        "[data-testid='chat-input']:visible",
-        "textarea[placeholder*='Describe']:visible",
-        "textarea[placeholder*='描述']:visible",
-        "textarea:visible",
-        "[role='textbox']:visible",
-        "[contenteditable='true']:visible",
-        "input[type='text']:visible",
-    ])
+    candidates.extend(
+        [
+            "[data-testid^='chat-input-textarea-']:visible",
+            "[data-testid='agent-chat-input']:visible",
+            "[data-testid='chat-input']:visible",
+            "textarea[placeholder*='Describe']:visible",
+            "textarea[placeholder*='描述']:visible",
+            "textarea:visible",
+            "[role='textbox']:visible",
+            "[contenteditable='true']:visible",
+            "input[type='text']:visible",
+        ]
+    )
     seen: set[str] = set()
     unique: list[str] = []
     for item in candidates:
@@ -1014,8 +1024,9 @@ def _chat_input_candidates(selector: str) -> list[str]:
 
 def _set_chat_input_with_js(page: Any, prompt: str) -> bool:
     try:
-        return bool(page.evaluate(
-            """(value) => {
+        return bool(
+            page.evaluate(
+                """(value) => {
                 const selectors = [
                     "[data-testid^='chat-input-textarea-']",
                     "[data-testid='agent-chat-input']",
@@ -1051,8 +1062,9 @@ def _set_chat_input_with_js(page: Any, prompt: str) -> bool:
                 editable.dispatchEvent(new Event('change', {bubbles: true}));
                 return true;
             }""",
-            prompt,
-        ))
+                prompt,
+            )
+        )
     except Exception:
         return False
 
@@ -1090,11 +1102,13 @@ def _collect_outputs(page: Any, selector: str) -> list[dict]:
             link = links.nth(i)
             href = link.get_attribute("href")
             if href:
-                outputs.append({
-                    "text": (link.inner_text(timeout=500) or "").strip()[:200],
-                    "href": href,
-                    "download": link.get_attribute("download") or "",
-                })
+                outputs.append(
+                    {
+                        "text": (link.inner_text(timeout=500) or "").strip()[:200],
+                        "href": href,
+                        "download": link.get_attribute("download") or "",
+                    }
+                )
     except Exception:
         pass
     return outputs
@@ -1170,10 +1184,7 @@ def _visible_control_states(page: Any) -> list[dict[str, Any]]:
 
 
 def _control_label(control: dict[str, Any]) -> str:
-    return " ".join(
-        str(control.get(key) or "")
-        for key in ("testid", "text", "aria", "title", "href")
-    ).strip().lower()
+    return " ".join(str(control.get(key) or "") for key in ("testid", "text", "aria", "title", "href")).strip().lower()
 
 
 def _label_has_term(label: str, term: str) -> bool:
@@ -1191,16 +1202,52 @@ def _is_routine_control(control: dict[str, Any]) -> bool:
     if not label:
         return False
     excluded = (
-        "export", "upload", "choose", "new chat", "chat history", "model", "mode",
-        "prompt", "enhance", "tools", "more tools", "cancel", "delete", "stop",
-        "导出", "上传", "选择", "新建", "新对话", "对话历史", "更多工具", "取消", "删除", "停止",
+        "export",
+        "upload",
+        "choose",
+        "new chat",
+        "chat history",
+        "model",
+        "mode",
+        "prompt",
+        "enhance",
+        "tools",
+        "more tools",
+        "cancel",
+        "delete",
+        "stop",
+        "导出",
+        "上传",
+        "选择",
+        "新建",
+        "新对话",
+        "对话历史",
+        "更多工具",
+        "取消",
+        "删除",
+        "停止",
     )
     if any(_label_has_term(label, term) for term in excluded):
         return False
     allowed = (
-        "approve", "approved", "proceed", "continue", "run plan", "run",
-        "execute", "start", "accept", "apply", "ok",
-        "批准", "确认", "继续", "执行", "开始", "同意", "应用",
+        "approve",
+        "approved",
+        "proceed",
+        "continue",
+        "run plan",
+        "run",
+        "execute",
+        "start",
+        "accept",
+        "apply",
+        "ok",
+        "批准",
+        "确认",
+        "继续",
+        "执行",
+        "开始",
+        "同意",
+        "应用",
     )
     return any(_label_has_term(label, term) for term in allowed)
 
@@ -1237,7 +1284,13 @@ def _stop_control_state(controls: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _checklist_progress(text: str) -> dict[str, int] | None:
-    matches = list(re.finditer(r"(?:task checklist|任务清单|任务列表|检查清单|执行清单|工作清单)\s+(\d+)\s*/\s*(\d+)", text or "", flags=re.IGNORECASE))
+    matches = list(
+        re.finditer(
+            r"(?:task checklist|任务清单|任务列表|检查清单|执行清单|工作清单)\s+(\d+)\s*/\s*(\d+)",
+            text or "",
+            flags=re.IGNORECASE,
+        )
+    )
     if not matches:
         return None
     match = matches[-1]
@@ -1249,11 +1302,31 @@ def _checklist_progress(text: str) -> dict[str, int] | None:
 def _routine_phrase(text: str) -> bool:
     value = (text or "").lower()
     terms = (
-        "execution plan", "edit plan", "approve plan", "approval",
-        "ready to proceed", "shall i proceed", "please confirm", "confirm to continue",
-        "shall i continue", "continue stop",
-        "执行方案", "执行计划", "编辑计划", "批准方案", "批准计划", "批准", "请批准",
-        "请确认", "待确认", "需要确认", "确认后", "是否继续", "是否执行", "继续执行", "开始执行",
+        "execution plan",
+        "edit plan",
+        "approve plan",
+        "approval",
+        "ready to proceed",
+        "shall i proceed",
+        "please confirm",
+        "confirm to continue",
+        "shall i continue",
+        "continue stop",
+        "执行方案",
+        "执行计划",
+        "编辑计划",
+        "批准方案",
+        "批准计划",
+        "批准",
+        "请批准",
+        "请确认",
+        "待确认",
+        "需要确认",
+        "确认后",
+        "是否继续",
+        "是否执行",
+        "继续执行",
+        "开始执行",
     )
     return any(term in value for term in terms)
 
@@ -1261,9 +1334,22 @@ def _routine_phrase(text: str) -> bool:
 def _completion_phrase(text: str) -> bool:
     value = (text or "").lower()
     terms = (
-        "已完成", "任务完成", "剪辑完成", "编辑完成", "视频已完成", "可以导出", "可导出",
-        "准备导出", "导出已准备", "已生成", "export ready", "ready to export",
-        "completed", "done!", "the edit is complete", "finished",
+        "已完成",
+        "任务完成",
+        "剪辑完成",
+        "编辑完成",
+        "视频已完成",
+        "可以导出",
+        "可导出",
+        "准备导出",
+        "导出已准备",
+        "已生成",
+        "export ready",
+        "ready to export",
+        "completed",
+        "done!",
+        "the edit is complete",
+        "finished",
     )
     return any(term in value for term in terms)
 
@@ -1298,8 +1384,9 @@ def _visible_diagnostic_text(page: Any) -> str:
         "[data-testid*='status']"
     )
     try:
-        return page.evaluate(
-            """(selector) => {
+        return (
+            page.evaluate(
+                """(selector) => {
                 const visible = (el) => {
                     const rect = el.getBoundingClientRect();
                     const style = window.getComputedStyle(el);
@@ -1316,8 +1403,10 @@ def _visible_diagnostic_text(page: Any) -> str:
                 }
                 return values.join('\\n');
             }""",
-            selector,
-        ) or ""
+                selector,
+            )
+            or ""
+        )
     except Exception:
         return ""
 
@@ -1414,10 +1503,16 @@ def _page_state_indicates_routine_interaction(state: dict[str, Any]) -> bool:
     if state.get("routine_controls"):
         return True
     assistant_checklist = state.get("assistant_checklist") or {}
-    if assistant_checklist.get("total", 0) > 0 and assistant_checklist.get("done", 0) < assistant_checklist.get("total", 0):
+    if assistant_checklist.get("total", 0) > 0 and assistant_checklist.get("done", 0) < assistant_checklist.get(
+        "total", 0
+    ):
         return True
     page_checklist = state.get("page_checklist") or {}
-    if state.get("assistant_routine_phrase") and page_checklist.get("total", 0) > 0 and page_checklist.get("done", 0) == 0:
+    if (
+        state.get("assistant_routine_phrase")
+        and page_checklist.get("total", 0) > 0
+        and page_checklist.get("done", 0) == 0
+    ):
         return True
     return bool(state.get("assistant_routine_phrase"))
 
@@ -1427,8 +1522,7 @@ def _page_state_checklist_complete(state: dict[str, Any]) -> bool:
     assistant_checklist = state.get("assistant_checklist") or {}
     page_checklist = state.get("page_checklist") or {}
     return (
-        assistant_checklist.get("total", 0) > 0
-        and assistant_checklist.get("done") >= assistant_checklist.get("total")
+        assistant_checklist.get("total", 0) > 0 and assistant_checklist.get("done") >= assistant_checklist.get("total")
     ) or (
         page_completion_allowed
         and page_checklist.get("total", 0) > 0
@@ -1493,7 +1587,9 @@ def _click_export(page: Any) -> None:
     try:
         page.locator(export_selector).first.click(timeout=10000)
     except Exception as exc:
-        raise ExportError("export_control_missing", "Cassette completed the edit but no export control was available") from exc
+        raise ExportError(
+            "export_control_missing", "Cassette completed the edit but no export control was available"
+        ) from exc
 
     default_confirm_selectors = (
         "[role='alertdialog'] [data-testid='export-confirm-submit']",
@@ -1747,7 +1843,12 @@ def _download_export(page: Any, job_id: str, output_selector: str, timeout_sec: 
             pass
 
         outputs = _collect_outputs(page, output_selector)
-        downloadable = [item for item in outputs if item.get("href") and any(token in item["href"].lower() for token in ("download", "export", "r2.cloud", ".mp4"))]
+        downloadable = [
+            item
+            for item in outputs
+            if item.get("href")
+            and any(token in item["href"].lower() for token in ("download", "export", "r2.cloud", ".mp4"))
+        ]
         if downloadable:
             href = downloadable[0]["href"]
             try:
@@ -1756,14 +1857,23 @@ def _download_export(page: Any, job_id: str, output_selector: str, timeout_sec: 
                 return [_output_from_download(download_info.value, job_id)]
             except Exception as exc:
                 try:
-                    return [_output_from_response(page, href, job_id, downloadable[0].get("download") or downloadable[0].get("text"))]
+                    return [
+                        _output_from_response(
+                            page, href, job_id, downloadable[0].get("download") or downloadable[0].get("text")
+                        )
+                    ]
                 except Exception as fetch_exc:
-                    raise ExportError("export_download_failed", f"Cassette export link could not be downloaded: {type(fetch_exc).__name__}") from exc
+                    raise ExportError(
+                        "export_download_failed",
+                        f"Cassette export link could not be downloaded: {type(fetch_exc).__name__}",
+                    ) from exc
 
         stage = _export_stage_text(page)
         if stage:
             now = time.monotonic()
-            if stage != last_stage or now - last_progress_record >= int(os.getenv("CASSETTE_PROGRESS_INTERVAL_SEC", "30")):
+            if stage != last_stage or now - last_progress_record >= int(
+                os.getenv("CASSETTE_PROGRESS_INTERVAL_SEC", "30")
+            ):
                 _record_stage_progress(job_id, f"Export status: {stage}", outputs, status="running")
                 last_progress_record = now
             last_stage = stage
@@ -1905,8 +2015,19 @@ def _upload_timeout_sec(job: dict) -> int | None:
 
 
 _UPLOAD_PROCESSING_TERMS = (
-    "uploading", "processing", "analyzing", "transcoding", "active", "queued", "indexing",
-    "上传中", "处理中", "分析中", "传输中", "转码中", "进行中",
+    "uploading",
+    "processing",
+    "analyzing",
+    "transcoding",
+    "active",
+    "queued",
+    "indexing",
+    "上传中",
+    "处理中",
+    "分析中",
+    "传输中",
+    "转码中",
+    "进行中",
 )
 
 
@@ -2045,7 +2166,9 @@ def _wait_for_agent_upload_ready(page: Any, job_id: str, expected_count: int, ti
     if detail:
         message = f"{message}; last upload status: {detail}"
     if expected_count > 1:
-        message = f"{message}. Try retrying after refreshing Cassette, or upload fewer/lower-resolution assets in one batch."
+        message = (
+            f"{message}. Try retrying after refreshing Cassette, or upload fewer/lower-resolution assets in one batch."
+        )
     raise BrowserUploadTimeoutError(message)
 
 
@@ -2119,8 +2242,13 @@ def _summarize_page_state(body: str) -> str:
         return "Cassette page loaded; no readable chat/status text yet."
 
     page_chrome = (
-        "Choose files", "New chat", "Cassette AI", "Your creative assistant",
-        "选择文件", "新对话", "你的创意助手",
+        "Choose files",
+        "New chat",
+        "Cassette AI",
+        "Your creative assistant",
+        "选择文件",
+        "新对话",
+        "你的创意助手",
     )
     if not any(marker in text for marker in page_chrome):
         return _compact_summary_text(text)
@@ -2134,14 +2262,27 @@ def _summarize_page_state(body: str) -> str:
     for marker in ("Processing", "Uploading", "处理中", "上传中", "进行中", "分析中"):
         idx = text.lower().find(marker.lower())
         if idx >= 0:
-            return _compact_summary_text(text[max(0, idx - 120):idx + 700])
+            return _compact_summary_text(text[max(0, idx - 120) : idx + 700])
     for marker in (
-        "Task Checklist", "任务清单", "任务列表", "Thinking", "思考", "Done", "已完成",
-        "剪辑完成", "Export ready", "导出中", "导出完成", "Download", "下载", "Rendering", "渲染",
+        "Task Checklist",
+        "任务清单",
+        "任务列表",
+        "Thinking",
+        "思考",
+        "Done",
+        "已完成",
+        "剪辑完成",
+        "Export ready",
+        "导出中",
+        "导出完成",
+        "Download",
+        "下载",
+        "Rendering",
+        "渲染",
     ):
         idx = text.lower().find(marker.lower())
         if idx >= 0:
-            return _compact_summary_text(text[max(0, idx - 120):idx + 700])
+            return _compact_summary_text(text[max(0, idx - 120) : idx + 700])
     return _compact_summary_text(text[-700:])
 
 
@@ -2161,7 +2302,9 @@ def _record_stage_progress(
         if persisted_status in _TERMINAL_JOB_STATUSES and status == "running":
             event_status = persisted_status
         else:
-            event_status = "cancel_requested" if persisted_status == "cancel_requested" and status == "running" else status
+            event_status = (
+                "cancel_requested" if persisted_status == "cancel_requested" and status == "running" else status
+            )
         events = list(job.get("progress_events") or [])[-9:]
         summary = _summarize_page_state(body)
         output_count = len(outputs)
@@ -2254,11 +2397,13 @@ def _chat_indicates_missing_assets(body: str, assistant_text: str = "") -> bool:
     )
     if any(term in value for term in missing_asset_terms):
         return True
-    return bool(re.search(
-        r"\b(?:please upload|please provide|need you to upload|still need|missing required)\b.{0,120}\b(?:asset|media|file|video|audio|image)\b",
-        value,
-        flags=re.IGNORECASE,
-    ))
+    return bool(
+        re.search(
+            r"\b(?:please upload|please provide|need you to upload|still need|missing required)\b.{0,120}\b(?:asset|media|file|video|audio|image)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _page_suggests_routine_interaction(body: str, assistant_text: str = "") -> bool:
@@ -2277,16 +2422,31 @@ def _page_suggests_routine_interaction(body: str, assistant_text: str = "") -> b
     if not (checklist_waiting or routine_text):
         return False
     blocking_terms = (
-        "missing asset", "upload failed", "render failed", "export failed", "no source media",
-        "缺少素材", "请上传", "请添加素材", "上传失败", "渲染失败", "导出失败",
+        "missing asset",
+        "upload failed",
+        "render failed",
+        "export failed",
+        "no source media",
+        "缺少素材",
+        "请上传",
+        "请添加素材",
+        "上传失败",
+        "渲染失败",
+        "导出失败",
     )
     return not any(term in value for term in blocking_terms)
 
 
 def _routine_interaction_key(body: str, assistant_text: str = "") -> str:
     text = " ".join((assistant_text or body or "").split())
-    text = text.replace(ROUTINE_PLAN_APPROVAL, "").replace("Please continue with the safest, highest-quality default option. Do not wait for confirmation.", "")
-    match = re.search(r"(Task Checklist|任务清单|任务列表|Execution Plan|执行方案|执行计划|编辑计划).{0,500}", text, flags=re.IGNORECASE)
+    text = text.replace(ROUTINE_PLAN_APPROVAL, "").replace(
+        "Please continue with the safest, highest-quality default option. Do not wait for confirmation.", ""
+    )
+    match = re.search(
+        r"(Task Checklist|任务清单|任务列表|Execution Plan|执行方案|执行计划|编辑计划).{0,500}",
+        text,
+        flags=re.IGNORECASE,
+    )
     if match:
         return match.group(0)[:500]
     return text[:500]
@@ -2308,8 +2468,24 @@ def _click_routine_interaction_control(page: Any) -> str | None:
         ),
     )
     excluded_terms = (
-        "export", "upload", "choose", "new chat", "chat history", "more tools", "cancel", "delete", "stop",
-        "导出", "上传", "选择", "新对话", "对话历史", "更多工具", "取消", "删除", "停止",
+        "export",
+        "upload",
+        "choose",
+        "new chat",
+        "chat history",
+        "more tools",
+        "cancel",
+        "delete",
+        "stop",
+        "导出",
+        "上传",
+        "选择",
+        "新对话",
+        "对话历史",
+        "更多工具",
+        "取消",
+        "删除",
+        "停止",
     )
     try:
         controls = page.locator(selector)
@@ -2317,7 +2493,12 @@ def _click_routine_interaction_control(page: Any) -> str | None:
         for index in range(count):
             control = controls.nth(index)
             try:
-                text = (control.inner_text(timeout=500) or control.get_attribute("aria-label") or control.get_attribute("title") or "").strip()
+                text = (
+                    control.inner_text(timeout=500)
+                    or control.get_attribute("aria-label")
+                    or control.get_attribute("title")
+                    or ""
+                ).strip()
                 if any(term in text.lower() for term in excluded_terms):
                     continue
                 if hasattr(control, "is_visible") and not control.is_visible():
@@ -2368,8 +2549,9 @@ def _click_routine_interaction_control(page: Any) -> str | None:
 
 def _click_chat_send_control_with_js(page: Any) -> bool:
     try:
-        return bool(page.evaluate(
-            """() => {
+        return bool(
+            page.evaluate(
+                """() => {
                 const inputSelectors = [
                     "[data-testid^='chat-input-textarea-']",
                     "[data-testid='agent-chat-input']",
@@ -2439,23 +2621,26 @@ def _click_chat_send_control_with_js(page: Any) -> bool:
                 best.click();
                 return true;
             }"""
-        ))
+            )
+        )
     except Exception:
         return False
 
 
 def _click_chat_send_control(page: Any, send_selector: str) -> None:
     selectors = _selector_visible_variants(send_selector)
-    selectors.extend([
-        "[data-testid^='chat-input-send-']:visible",
-        "[data-testid='agent-send-button']:visible",
-        "[data-testid='chat-send-button']:visible",
-        "button[aria-label*='Send']:visible",
-        "button[title*='Send']:visible",
-        "button:has-text('Send'):visible",
-        "button:has-text('发送'):visible",
-        "button[type='submit']:visible",
-    ])
+    selectors.extend(
+        [
+            "[data-testid^='chat-input-send-']:visible",
+            "[data-testid='agent-send-button']:visible",
+            "[data-testid='chat-send-button']:visible",
+            "button[aria-label*='Send']:visible",
+            "button[title*='Send']:visible",
+            "button:has-text('Send'):visible",
+            "button:has-text('发送'):visible",
+            "button[type='submit']:visible",
+        ]
+    )
     try:
         _click_first_visible(page, selectors, timeout=3000)
         return
@@ -2506,7 +2691,9 @@ def _wait_for_chat_submission_activity(
     baseline_text: str,
     timeout_sec: int | None = None,
 ) -> bool:
-    deadline = time.monotonic() + max(1, timeout_sec if timeout_sec is not None else _int_env("CASSETTE_CHAT_SUBMIT_VERIFY_SEC", 30))
+    deadline = time.monotonic() + max(
+        1, timeout_sec if timeout_sec is not None else _int_env("CASSETTE_CHAT_SUBMIT_VERIFY_SEC", 30)
+    )
     while time.monotonic() < deadline:
         if _chat_submission_observed(page, baseline_body, baseline_count, baseline_text):
             return True
@@ -2659,8 +2846,22 @@ def _agent_is_busy(page: Any, body: str) -> bool:
         pass
     value = (body or "").lower()
     busy_terms = (
-        "thinking", "working", "generating", "processing", "rendering", "analyzing", "exporting",
-        "正在", "处理中", "进行中", "生成中", "思考", "工作中", "渲染中", "分析中", "导出中",
+        "thinking",
+        "working",
+        "generating",
+        "processing",
+        "rendering",
+        "analyzing",
+        "exporting",
+        "正在",
+        "处理中",
+        "进行中",
+        "生成中",
+        "思考",
+        "工作中",
+        "渲染中",
+        "分析中",
+        "导出中",
     )
     return any(term in value for term in busy_terms)
 
@@ -2689,14 +2890,18 @@ def _agent_soft_retry_limit() -> int:
     return max(0, _int_env("CASSETTE_AGENT_SOFT_RETRY_LIMIT", 1))
 
 
-def _public_stage_timings(stage_timings: dict[str, dict[str, Any]], include_running_elapsed: bool = False) -> dict[str, dict[str, Any]]:
+def _public_stage_timings(
+    stage_timings: dict[str, dict[str, Any]], include_running_elapsed: bool = False
+) -> dict[str, dict[str, Any]]:
     public: dict[str, dict[str, Any]] = {}
     for stage, data in stage_timings.items():
         item = {key: value for key, value in data.items() if not key.startswith("_")}
         if include_running_elapsed:
             started = data.get("_started_monotonic")
             if isinstance(started, (int, float)):
-                item["duration_sec"] = round(float(item.get("duration_sec") or 0.0) + max(0.0, time.monotonic() - float(started)), 1)
+                item["duration_sec"] = round(
+                    float(item.get("duration_sec") or 0.0) + max(0.0, time.monotonic() - float(started)), 1
+                )
         public[stage] = item
     return public
 
@@ -2705,7 +2910,9 @@ def _model_selection_for_job(job: dict) -> dict:
     selection = dict(job.get("model_selection") or {})
     return {
         "model": str(selection.get("model") or "").strip(),
-        "thinking_level": str(selection.get("thinking_level") or os.getenv("CASSETTE_DEFAULT_THINKING_LEVEL", "Low")).strip(),
+        "thinking_level": str(
+            selection.get("thinking_level") or os.getenv("CASSETTE_DEFAULT_THINKING_LEVEL", "Low")
+        ).strip(),
     }
 
 
@@ -2788,8 +2995,9 @@ def _click_language_trigger(page: Any) -> bool:
         except Exception:
             continue
     try:
-        return bool(page.evaluate(
-            """() => {
+        return bool(
+            page.evaluate(
+                """() => {
                 const visible = (el) => {
                     const rect = el.getBoundingClientRect();
                     const style = window.getComputedStyle(el);
@@ -2806,7 +3014,8 @@ def _click_language_trigger(page: Any) -> bool:
                 candidates[0].click();
                 return true;
             }"""
-        ))
+            )
+        )
     except Exception:
         return False
 
@@ -2815,12 +3024,14 @@ def _click_language_option(page: Any, language: str) -> None:
     labels = ("EN", "English") if language == "en" else ("中文", "Chinese")
     selectors: list[str] = []
     for label in labels:
-        selectors.extend([
-            f"[role='menuitemradio']:has-text('{label}')",
-            f"[role='menuitem']:has-text('{label}')",
-            f"[role='option']:has-text('{label}')",
-            f"button:has-text('{label}')",
-        ])
+        selectors.extend(
+            [
+                f"[role='menuitemradio']:has-text('{label}')",
+                f"[role='menuitem']:has-text('{label}')",
+                f"[role='option']:has-text('{label}')",
+                f"button:has-text('{label}')",
+            ]
+        )
     _click_first_visible(page, selectors, timeout=5000)
 
 
@@ -2890,7 +3101,7 @@ def _dialog_label_matches(label: str, candidate: str) -> bool:
     # or "Model name short description". Allow prefix matches for full model
     # names, but keep short labels like "高" exact to avoid matching unrelated text.
     if len(candidate_norm) > 2 and label_norm.startswith(candidate_norm):
-        next_char = label_norm[len(candidate_norm):len(candidate_norm) + 1]
+        next_char = label_norm[len(candidate_norm) : len(candidate_norm) + 1]
         return next_char in {"", " ", "\n", "\t", "·", "-", "，", ","}
     return False
 
@@ -2974,8 +3185,17 @@ def _clean_model_label(text: str) -> str:
         return lines[0]
     value = lines[0] if lines else str(text or "").strip()
     for marker in (
-        " 高效", " 旗舰", " 快速", " 长上下文", " 小米", " Moonshot", " OpenAI",
-        " efficient", " flagship", " fast", " long context",
+        " 高效",
+        " 旗舰",
+        " 快速",
+        " 长上下文",
+        " 小米",
+        " Moonshot",
+        " OpenAI",
+        " efficient",
+        " flagship",
+        " fast",
+        " long context",
     ):
         if marker in value:
             return value.split(marker, 1)[0].strip()
@@ -3049,7 +3269,9 @@ def _fetch_cassette_model_options_direct(url: str | None = None, language: str =
     launch_args = []
     if os.getenv("CASSETTE_NO_SANDBOX", "false").lower() in {"1", "true", "yes"}:
         launch_args.append("--no-sandbox")
-    record = _new_browser_record({"job_id": ""}, headless, launch_args, target_url, timeout_ms, isolated_playwright=True)
+    record = _new_browser_record(
+        {"job_id": ""}, headless, launch_args, target_url, timeout_ms, isolated_playwright=True
+    )
     try:
         page = record["page"]
         try:
@@ -3152,10 +3374,9 @@ def _record_model_selection_matches(record: dict[str, Any], job: dict) -> bool:
     if current.get("status") == "skipped" and current.get("reason") == "fixture_page":
         return True
     requested = _model_selection_for_job(job)
-    return (
-        _model_value(current.get("model")) == _model_value(requested["model"])
-        and _model_value(current.get("thinking_level")) == _model_value(requested["thinking_level"])
-    )
+    return _model_value(current.get("model")) == _model_value(requested["model"]) and _model_value(
+        current.get("thinking_level")
+    ) == _model_value(requested["thinking_level"])
 
 
 def _reuse_model_selection(record: dict[str, Any], job: dict) -> dict:
@@ -3300,7 +3521,9 @@ def export_reviewed_completion_job(job: dict, decision: dict[str, Any] | None = 
             },
             "final_screenshot": None,
         }
-    output_selector = _selector(job, "output", "CASSETTE_OUTPUT_SELECTOR", "[data-testid='export-link'],[data-testid='download-link'],a[href]")
+    output_selector = _selector(
+        job, "output", "CASSETTE_OUTPUT_SELECTOR", "[data-testid='export-link'],[data-testid='download-link'],a[href]"
+    )
     outputs = _collect_outputs(page, output_selector)
     questions = list(job.get("questions") or [])
     errors = list(job.get("errors") or [])
@@ -3311,7 +3534,9 @@ def export_reviewed_completion_job(job: dict, decision: dict[str, Any] | None = 
             "decision": str((decision or {}).get("decision") or "export"),
             "reason": _compact_summary_text(str((decision or {}).get("reason") or ""), 500),
         },
-        "progress_summary": _compact_summary_text(str((decision or {}).get("summary") or (job.get("quality") or {}).get("progress_summary") or ""), 700),
+        "progress_summary": _compact_summary_text(
+            str((decision or {}).get("summary") or (job.get("quality") or {}).get("progress_summary") or ""), 700
+        ),
     }
     _record_stage_progress(job_id, "Hermes completion review approved export; starting Cassette export.", outputs)
     return _success_result(page, job, outputs, questions, errors, quality, output_selector, stage_control=None)
@@ -3332,17 +3557,20 @@ def run_cassette_browser_job(job: dict) -> dict:
 
     job_id = job["job_id"]
     timeout_ms = int(job.get("timeout_sec") or 1800) * 1000
-    url = _normalize_cassette_url(job.get("url") or _runtime_env("CASSETTE_URL") or "https://sg.trycassette.online/agent")
+    url = _normalize_cassette_url(
+        job.get("url") or _runtime_env("CASSETTE_URL") or "https://sg.trycassette.online/agent"
+    )
     headless = os.getenv("CASSETTE_HEADLESS", "true").lower() not in {"0", "false", "no"}
     upload_selector = _selector(job, "upload", "CASSETTE_UPLOAD_SELECTOR", "[data-testid='agent-file-input']")
     chat_selector = _selector(job, "chat", "CASSETTE_CHAT_SELECTOR", DEFAULT_CHAT_SELECTOR)
     send_selector = _selector(job, "send", "CASSETTE_SEND_SELECTOR", DEFAULT_SEND_SELECTOR)
     done_selector = _selector(job, "done", "CASSETTE_DONE_SELECTOR", "[data-testid='job-done']")
-    output_selector = _selector(job, "output", "CASSETTE_OUTPUT_SELECTOR", "[data-testid='export-link'],[data-testid='download-link'],a[href]")
+    output_selector = _selector(
+        job, "output", "CASSETTE_OUTPUT_SELECTOR", "[data-testid='export-link'],[data-testid='download-link'],a[href]"
+    )
     errors: list[dict] = []
     questions: list[dict] = []
     outputs: list[dict] = []
-    screenshot = None
     stage_timings: dict[str, dict[str, Any]] = {}
     current_stage = "queued"
 
@@ -3378,7 +3606,9 @@ def run_cassette_browser_job(job: dict) -> dict:
         item = stage_timings.setdefault(stage, {"attempts": 0, "duration_sec": 0.0})
         started = item.pop("_started_monotonic", None)
         if isinstance(started, (int, float)):
-            item["duration_sec"] = round(float(item.get("duration_sec") or 0.0) + max(0.0, time.monotonic() - float(started)), 1)
+            item["duration_sec"] = round(
+                float(item.get("duration_sec") or 0.0) + max(0.0, time.monotonic() - float(started)), 1
+            )
         item["status"] = status
         item["finished_at"] = jobs.now_iso()
         try:
@@ -3486,7 +3716,14 @@ def run_cassette_browser_job(job: dict) -> dict:
             else:
                 code = "cassette_page_load_failed" if isinstance(exc, BrowserPageLoadError) else "browser_launch_failed"
             errors.append({"code": code, "message": str(exc), "details": {"type": type(exc).__name__}})
-            result = {"status": "failed", "outputs": outputs, "questions": questions, "errors": errors, "quality": {"completion_observed": False, "output_link_count": 0, "risk": "high"}, "final_screenshot": _screenshot(page, job_id) if page else None}
+            result = {
+                "status": "failed",
+                "outputs": outputs,
+                "questions": questions,
+                "errors": errors,
+                "quality": {"completion_observed": False, "output_link_count": 0, "risk": "high"},
+                "final_screenshot": _screenshot(page, job_id) if page else None,
+            }
             if record and _browser_reuse_enabled():
                 close_browser_sessions(_browser_session_key(job))
             return finalize(result)
@@ -3505,15 +3742,19 @@ def run_cassette_browser_job(job: dict) -> dict:
             finish_stage("language_selection", str(language_selection.get("status") or "selected"))
         except Exception as exc:
             finish_stage("language_selection", "failed")
-            errors.append({"code": "language_selection_failed", "message": str(exc), "details": {"type": type(exc).__name__}})
-            return finalize({
-                "status": "failed",
-                "outputs": outputs,
-                "questions": questions,
-                "errors": errors,
-                "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"},
-                "final_screenshot": _screenshot(page, job_id),
-            })
+            errors.append(
+                {"code": "language_selection_failed", "message": str(exc), "details": {"type": type(exc).__name__}}
+            )
+            return finalize(
+                {
+                    "status": "failed",
+                    "outputs": outputs,
+                    "questions": questions,
+                    "errors": errors,
+                    "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"},
+                    "final_screenshot": _screenshot(page, job_id),
+                }
+            )
 
         asset_paths = [p for p in job.get("asset_paths", []) if Path(p).exists()]
         if asset_paths:
@@ -3538,52 +3779,90 @@ def run_cassette_browser_job(job: dict) -> dict:
                     _upload_assets(page, upload_paths, upload_selector)
                 except Exception as exc:
                     finish_stage("upload", "failed")
-                    errors.append({"code": "asset_upload_failed", "message": str(exc), "details": {"type": type(exc).__name__}})
-                    return finalize({"status": "failed", "outputs": outputs, "questions": questions, "errors": errors, "quality": {"completion_observed": False, "output_link_count": 0, "risk": "high"}, "final_screenshot": _screenshot(page, job_id)})
+                    errors.append(
+                        {"code": "asset_upload_failed", "message": str(exc), "details": {"type": type(exc).__name__}}
+                    )
+                    return finalize(
+                        {
+                            "status": "failed",
+                            "outputs": outputs,
+                            "questions": questions,
+                            "errors": errors,
+                            "quality": {"completion_observed": False, "output_link_count": 0, "risk": "high"},
+                            "final_screenshot": _screenshot(page, job_id),
+                        }
+                    )
                 try:
                     page.wait_for_load_state("networkidle", timeout=30000)
                 except PlaywrightTimeoutError:
                     pass
                 try:
-                    body = _wait_for_agent_upload_ready(page, job_id, upload_ready_expected_count, _upload_timeout_sec(job))
+                    body = _wait_for_agent_upload_ready(
+                        page, job_id, upload_ready_expected_count, _upload_timeout_sec(job)
+                    )
                     _mark_uploaded_assets(record, upload_paths, asset_paths)
-                    _record_stage_progress(job_id, body, outputs, "running", stage="upload", stage_elapsed_sec=stage_elapsed("upload"), attempt=int(stage_timings["upload"].get("attempts") or 1))
+                    _record_stage_progress(
+                        job_id,
+                        body,
+                        outputs,
+                        "running",
+                        stage="upload",
+                        stage_elapsed_sec=stage_elapsed("upload"),
+                        attempt=int(stage_timings["upload"].get("attempts") or 1),
+                    )
                     finish_stage("upload", "succeeded")
                 except BrowserJobCancelled as exc:
                     finish_stage("upload", "cancelled")
-                    return finalize({
-                        "status": "cancelled",
-                        "outputs": outputs,
-                        "questions": questions,
-                        "errors": [],
-                        "quality": {
-                            "completion_observed": False,
-                            "output_link_count": 0,
-                            "progress_summary": str(exc),
-                            "risk": "medium",
-                        },
-                        "final_screenshot": _screenshot(page, job_id),
-                    })
+                    return finalize(
+                        {
+                            "status": "cancelled",
+                            "outputs": outputs,
+                            "questions": questions,
+                            "errors": [],
+                            "quality": {
+                                "completion_observed": False,
+                                "output_link_count": 0,
+                                "progress_summary": str(exc),
+                                "risk": "medium",
+                            },
+                            "final_screenshot": _screenshot(page, job_id),
+                        }
+                    )
                 except BrowserUploadTimeoutError as exc:
                     finish_stage("upload", "timed_out")
-                    errors.append({"code": "asset_upload_timeout", "message": str(exc), "details": {"type": type(exc).__name__}})
-                    return finalize({
-                        "status": "timed_out",
-                        "outputs": outputs,
-                        "questions": questions,
-                        "errors": errors,
-                        "quality": {
-                            "completion_observed": False,
-                            "output_link_count": 0,
-                            "progress_summary": str(exc),
-                            "risk": "medium",
-                        },
-                        "final_screenshot": _screenshot(page, job_id),
-                    })
+                    errors.append(
+                        {"code": "asset_upload_timeout", "message": str(exc), "details": {"type": type(exc).__name__}}
+                    )
+                    return finalize(
+                        {
+                            "status": "timed_out",
+                            "outputs": outputs,
+                            "questions": questions,
+                            "errors": errors,
+                            "quality": {
+                                "completion_observed": False,
+                                "output_link_count": 0,
+                                "progress_summary": str(exc),
+                                "risk": "medium",
+                            },
+                            "final_screenshot": _screenshot(page, job_id),
+                        }
+                    )
                 except Exception as exc:
                     finish_stage("upload", "failed")
-                    errors.append({"code": "asset_upload_failed", "message": str(exc), "details": {"type": type(exc).__name__}})
-                    return finalize({"status": "failed", "outputs": outputs, "questions": questions, "errors": errors, "quality": {}, "final_screenshot": _screenshot(page, job_id)})
+                    errors.append(
+                        {"code": "asset_upload_failed", "message": str(exc), "details": {"type": type(exc).__name__}}
+                    )
+                    return finalize(
+                        {
+                            "status": "failed",
+                            "outputs": outputs,
+                            "questions": questions,
+                            "errors": errors,
+                            "quality": {},
+                            "final_screenshot": _screenshot(page, job_id),
+                        }
+                    )
 
         begin_stage("model_selection")
         try:
@@ -3613,15 +3892,19 @@ def run_cassette_browser_job(job: dict) -> dict:
             finish_stage("model_selection", model_selection_result.get("status") or "selected")
         except Exception as exc:
             finish_stage("model_selection", "failed")
-            errors.append({"code": "model_selection_failed", "message": str(exc), "details": {"type": type(exc).__name__}})
-            return finalize({
-                "status": "failed",
-                "outputs": outputs,
-                "questions": questions,
-                "errors": errors,
-                "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"},
-                "final_screenshot": _screenshot(page, job_id),
-            })
+            errors.append(
+                {"code": "model_selection_failed", "message": str(exc), "details": {"type": type(exc).__name__}}
+            )
+            return finalize(
+                {
+                    "status": "failed",
+                    "outputs": outputs,
+                    "questions": questions,
+                    "errors": errors,
+                    "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"},
+                    "final_screenshot": _screenshot(page, job_id),
+                }
+            )
 
         begin_stage("agent")
         baseline_assistant_count = _assistant_message_count(page)
@@ -3635,10 +3918,19 @@ def run_cassette_browser_job(job: dict) -> dict:
         except Exception as exc:
             finish_stage("agent", "failed")
             errors.append({"code": "chat_input_failed", "message": str(exc), "details": {"type": type(exc).__name__}})
-            result = {"status": "failed", "outputs": outputs, "questions": questions, "errors": errors, "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"}, "final_screenshot": _screenshot(page, job_id)}
+            result = {
+                "status": "failed",
+                "outputs": outputs,
+                "questions": questions,
+                "errors": errors,
+                "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"},
+                "final_screenshot": _screenshot(page, job_id),
+            }
             discard_reusable_browser_session()
             return finalize(result)
-        if not _wait_for_chat_submission_activity(page, baseline_body, baseline_assistant_count, baseline_assistant_text):
+        if not _wait_for_chat_submission_activity(
+            page, baseline_body, baseline_assistant_count, baseline_assistant_text
+        ):
             _record_stage_progress(
                 job_id,
                 "Cassette chat submission showed no visible activity; retrying once.",
@@ -3651,16 +3943,29 @@ def run_cassette_browser_job(job: dict) -> dict:
                 _send_chat_message(page, chat_selector, send_selector, _chat_message_for_job(job))
             except Exception as exc:
                 finish_stage("agent", "failed")
-                errors.append({"code": "chat_input_failed", "message": str(exc), "details": {"type": type(exc).__name__}})
-                result = {"status": "failed", "outputs": outputs, "questions": questions, "errors": errors, "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"}, "final_screenshot": _screenshot(page, job_id)}
+                errors.append(
+                    {"code": "chat_input_failed", "message": str(exc), "details": {"type": type(exc).__name__}}
+                )
+                result = {
+                    "status": "failed",
+                    "outputs": outputs,
+                    "questions": questions,
+                    "errors": errors,
+                    "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"},
+                    "final_screenshot": _screenshot(page, job_id),
+                }
                 discard_reusable_browser_session()
                 return finalize(result)
-            if not _wait_for_chat_submission_activity(page, baseline_body, baseline_assistant_count, baseline_assistant_text):
+            if not _wait_for_chat_submission_activity(
+                page, baseline_body, baseline_assistant_count, baseline_assistant_text
+            ):
                 finish_stage("agent", "failed")
-                errors.append({
-                    "code": "chat_submit_failed",
-                    "message": "Cassette chat message was filled but the page showed no agent activity after submit.",
-                })
+                errors.append(
+                    {
+                        "code": "chat_submit_failed",
+                        "message": "Cassette chat message was filled but the page showed no agent activity after submit.",
+                    }
+                )
                 try:
                     final_body = page.locator("body").inner_text(timeout=1000)
                 except Exception:
@@ -3700,9 +4005,10 @@ def run_cassette_browser_job(job: dict) -> dict:
         while (time.monotonic() - start) * 1000 < timeout_ms:
             if jobs.is_cancel_requested(job_id):
                 stop_result = _click_cassette_stop_control(page)
-                stop_summary = (
-                    "Cassette agent stop requested by /cut."
-                    + (f" Clicked stop control: {stop_result.get('label')}." if stop_result.get("clicked") else " No visible stop control was available.")
+                stop_summary = "Cassette agent stop requested by /cut." + (
+                    f" Clicked stop control: {stop_result.get('label')}."
+                    if stop_result.get("clicked")
+                    else " No visible stop control was available."
                 )
                 _record_stage_progress(
                     job_id,
@@ -3712,23 +4018,40 @@ def run_cassette_browser_job(job: dict) -> dict:
                     stage_elapsed_sec=stage_elapsed("agent"),
                     operation_status="cancel_requested",
                 )
-                return finalize({
-                    "status": "cancelled",
-                    "outputs": outputs,
-                    "questions": questions,
-                    "errors": errors,
-                    "quality": {
-                        "completion_observed": False,
-                        "output_link_count": len(outputs),
-                        "progress_summary": stop_summary,
-                        "risk": "medium",
+                return finalize(
+                    {
+                        "status": "cancelled",
+                        "outputs": outputs,
+                        "questions": questions,
+                        "errors": errors,
+                        "quality": {
+                            "completion_observed": False,
+                            "output_link_count": len(outputs),
+                            "progress_summary": stop_summary,
+                            "risk": "medium",
+                        },
+                        "final_screenshot": _screenshot(page, job_id),
                     },
-                    "final_screenshot": _screenshot(page, job_id),
-                }, "agent", "cancelled")
+                    "agent",
+                    "cancelled",
+                )
             if _page_is_closed(page):
-                errors.append({"code": "cassette_page_closed", "message": "Cassette browser page closed during agent stage"})
+                errors.append(
+                    {"code": "cassette_page_closed", "message": "Cassette browser page closed during agent stage"}
+                )
                 discard_reusable_browser_session()
-                return finalize({"status": "failed", "outputs": outputs, "questions": questions, "errors": errors, "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"}, "final_screenshot": None}, "agent", "failed")
+                return finalize(
+                    {
+                        "status": "failed",
+                        "outputs": outputs,
+                        "questions": questions,
+                        "errors": errors,
+                        "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"},
+                        "final_screenshot": None,
+                    },
+                    "agent",
+                    "failed",
+                )
             assistant_text, assistant_is_current = _current_assistant_message_text(
                 page,
                 baseline_assistant_count,
@@ -3736,23 +4059,27 @@ def run_cassette_browser_job(job: dict) -> dict:
             )
             body = page.locator("body").inner_text(timeout=1000)
             body_changed_after_send = body != baseline_body
-            current_response_observed = assistant_is_current or (baseline_assistant_count == 0 and body_changed_after_send)
+            current_response_observed = assistant_is_current or (
+                baseline_assistant_count == 0 and body_changed_after_send
+            )
             page_completion_allowed = assistant_is_current or baseline_assistant_count == 0
             if current_response_observed and _visible(page, done_selector):
                 outputs = _collect_outputs(page, output_selector)
                 finish_stage("agent", "succeeded")
-                return finalize(_success_result(
-                    page,
-                    job,
-                    outputs,
-                    questions,
-                    errors,
-                    {
-                        "visual_verification": "final screenshot captured; rendered media content is not semantically graded by this plugin",
-                    },
-                    output_selector,
-                    stage_control,
-                ))
+                return finalize(
+                    _success_result(
+                        page,
+                        job,
+                        outputs,
+                        questions,
+                        errors,
+                        {
+                            "visual_verification": "final screenshot captured; rendered media content is not semantically graded by this plugin",
+                        },
+                        output_selector,
+                        stage_control,
+                    )
+                )
             outputs = _collect_outputs(page, output_selector)
             page_state = _cassette_page_state(
                 page,
@@ -3818,46 +4145,60 @@ def run_cassette_browser_job(job: dict) -> dict:
             if activity_summary and activity_summary != last_activity_summary:
                 last_activity_summary = activity_summary
             if now - last_progress_at >= int(os.getenv("CASSETTE_PROGRESS_INTERVAL_SEC", "30")):
-                _record_stage_progress(job_id, body, outputs, stage="agent", stage_elapsed_sec=stage_elapsed("agent"), attempt=agent_retry_count + 1)
+                _record_stage_progress(
+                    job_id,
+                    body,
+                    outputs,
+                    stage="agent",
+                    stage_elapsed_sec=stage_elapsed("agent"),
+                    attempt=agent_retry_count + 1,
+                )
                 last_progress_at = now
             if snapshot_interval and now - last_snapshot_at >= snapshot_interval:
                 send_progress_snapshot(activity_summary)
                 last_snapshot_at = now
             if _chat_indicates_missing_assets(body, assistant_text):
                 missing_asset = assistant_text or _summarize_page_state(body)
-                questions.append({
-                    "question": _compact_summary_text(missing_asset, 500),
-                    "requires_user": True,
-                    "reason": "missing_required_asset",
-                    "answer": "Cassette needs uploaded media before it can continue.",
-                })
-                return finalize({
-                    "status": "needs_user",
-                    "outputs": outputs,
-                    "questions": questions,
-                    "errors": errors,
-                    "quality": {
-                        "completion_observed": False,
-                        "output_link_count": len(outputs),
-                        "progress_summary": _summarize_page_state(assistant_text or body),
-                        "risk": "medium",
+                questions.append(
+                    {
+                        "question": _compact_summary_text(missing_asset, 500),
+                        "requires_user": True,
+                        "reason": "missing_required_asset",
+                        "answer": "Cassette needs uploaded media before it can continue.",
+                    }
+                )
+                return finalize(
+                    {
+                        "status": "needs_user",
+                        "outputs": outputs,
+                        "questions": questions,
+                        "errors": errors,
+                        "quality": {
+                            "completion_observed": False,
+                            "output_link_count": len(outputs),
+                            "progress_summary": _summarize_page_state(assistant_text or body),
+                            "risk": "medium",
+                        },
+                        "final_screenshot": _screenshot(page, job_id),
                     },
-                    "final_screenshot": _screenshot(page, job_id),
-                }, "agent", "needs_user")
+                    "agent",
+                    "needs_user",
+                )
             if _page_state_indicates_routine_interaction(page_state):
                 routine_key = _routine_interaction_key(body, assistant_text)
-                if (
-                    routine_key
-                    and (routine_key != last_routine_interaction_key or now - last_routine_interaction_at >= 60)
+                if routine_key and (
+                    routine_key != last_routine_interaction_key or now - last_routine_interaction_at >= 60
                 ):
                     clicked = _click_routine_interaction_control(page)
                     if clicked:
-                        questions.append({
-                            "question": _compact_summary_text(assistant_text or body, 500),
-                            "requires_user": False,
-                            "reason": "routine_plan_approval",
-                            "answer": f"Clicked Cassette routine action control: {clicked}",
-                        })
+                        questions.append(
+                            {
+                                "question": _compact_summary_text(assistant_text or body, 500),
+                                "requires_user": False,
+                                "reason": "routine_plan_approval",
+                                "answer": f"Clicked Cassette routine action control: {clicked}",
+                            }
+                        )
                         _record_stage_progress(job_id, f"Cassette routine interaction handled: {clicked}", outputs)
                         last_routine_interaction_key = routine_key
                         last_routine_interaction_at = now
@@ -3866,53 +4207,80 @@ def run_cassette_browser_job(job: dict) -> dict:
                         continue
             if _page_state_requires_completion_review(page_state, export_required=_export_on_complete(job)):
                 assistant_summary = _compact_summary_text(assistant_text or body, 700)
-                questions.append({
-                    "question": assistant_summary,
-                    "requires_user": False,
-                    "reason": "completion_requires_hermes_review",
-                    "answer": (
-                        "The latest Cassette reply needs Hermes supervisor semantic review before deciding whether "
-                        "to export, continue, fail, or ask the user."
-                    ),
-                })
-                return finalize({
-                    "status": "needs_user",
-                    "outputs": outputs,
-                    "questions": questions,
-                    "errors": errors,
-                    "quality": {
-                        "completion_observed": False,
-                        "output_link_count": len(outputs),
-                        "progress_summary": assistant_summary,
-                        "risk": "medium",
-                        "completion_review_required": True,
+                questions.append(
+                    {
+                        "question": assistant_summary,
+                        "requires_user": False,
+                        "reason": "completion_requires_hermes_review",
+                        "answer": (
+                            "The latest Cassette reply needs Hermes supervisor semantic review before deciding whether "
+                            "to export, continue, fail, or ask the user."
+                        ),
+                    }
+                )
+                return finalize(
+                    {
+                        "status": "needs_user",
+                        "outputs": outputs,
+                        "questions": questions,
+                        "errors": errors,
+                        "quality": {
+                            "completion_observed": False,
+                            "output_link_count": len(outputs),
+                            "progress_summary": assistant_summary,
+                            "risk": "medium",
+                            "completion_review_required": True,
+                        },
+                        "final_screenshot": _screenshot(page, job_id),
                     },
-                    "final_screenshot": _screenshot(page, job_id),
-                }, "agent", "needs_user")
+                    "agent",
+                    "needs_user",
+                )
             if outputs and _page_state_indicates_complete(page_state, export_required=_export_on_complete(job)):
                 finish_stage("agent", "succeeded")
-                return finalize(_success_result(page, job, outputs, questions, errors, {}, output_selector, stage_control))
-            if _page_state_indicates_complete(page_state, export_required=_export_on_complete(job)) and (assistant_text or not _agent_is_busy(page, body)):
+                return finalize(
+                    _success_result(page, job, outputs, questions, errors, {}, output_selector, stage_control)
+                )
+            if _page_state_indicates_complete(page_state, export_required=_export_on_complete(job)) and (
+                assistant_text or not _agent_is_busy(page, body)
+            ):
                 finish_stage("agent", "succeeded")
-                return finalize(_success_result(
-                    page,
-                    job,
-                    outputs,
-                    questions,
-                    errors,
-                    {
-                        "completion_source": "cassette_chat_panel",
-                        "progress_summary": _summarize_page_state(assistant_text or body),
-                    },
-                    output_selector,
-                    stage_control,
-                ))
+                return finalize(
+                    _success_result(
+                        page,
+                        job,
+                        outputs,
+                        questions,
+                        errors,
+                        {
+                            "completion_source": "cassette_chat_panel",
+                            "progress_summary": _summarize_page_state(assistant_text or body),
+                        },
+                        output_selector,
+                        stage_control,
+                    )
+                )
             question_text = assistant_text or body[-1000:]
             if body != seen_text and ("?" in question_text or "？" in question_text):
                 classification = classify_cassette_question(question_text[-1000:], {"job_id": job_id})
                 questions.append({"question": question_text[-1000:], **classification})
                 if classification["requires_user"]:
-                    return finalize({"status": "needs_user", "outputs": outputs, "questions": questions, "errors": errors, "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "medium"}, "final_screenshot": _screenshot(page, job_id)}, "agent", "needs_user")
+                    return finalize(
+                        {
+                            "status": "needs_user",
+                            "outputs": outputs,
+                            "questions": questions,
+                            "errors": errors,
+                            "quality": {
+                                "completion_observed": False,
+                                "output_link_count": len(outputs),
+                                "risk": "medium",
+                            },
+                            "final_screenshot": _screenshot(page, job_id),
+                        },
+                        "agent",
+                        "needs_user",
+                    )
                 try:
                     _send_chat_message(page, chat_selector, send_selector, classification["answer"])
                 except Exception:
@@ -3920,23 +4288,40 @@ def run_cassette_browser_job(job: dict) -> dict:
             seen_text = body
             time.sleep(2)
         errors.append({"code": "cassette_timeout", "message": "Timed out waiting for Cassette completion"})
-        return finalize({
-            "status": "timed_out",
+        return finalize(
+            {
+                "status": "timed_out",
+                "outputs": outputs,
+                "questions": questions,
+                "errors": errors,
+                "quality": {
+                    "completion_observed": False,
+                    "output_link_count": len(outputs),
+                    "progress_summary": _summarize_page_state(seen_text),
+                    "risk": "medium" if seen_text else "high",
+                },
+                "final_screenshot": _screenshot(page, job_id),
+            },
+            "agent",
+            "timed_out",
+        )
+    except Exception as exc:
+        console_messages = list((record or {}).get("console_messages") or [])
+        errors.append(
+            {
+                "code": "internal_error",
+                "message": str(exc),
+                "details": {"type": type(exc).__name__, "console": console_messages[-5:]},
+            }
+        )
+        result = {
+            "status": "failed",
             "outputs": outputs,
             "questions": questions,
             "errors": errors,
-            "quality": {
-                "completion_observed": False,
-                "output_link_count": len(outputs),
-                "progress_summary": _summarize_page_state(seen_text),
-                "risk": "medium" if seen_text else "high",
-            },
-            "final_screenshot": _screenshot(page, job_id),
-        }, "agent", "timed_out")
-    except Exception as exc:
-        console_messages = list((record or {}).get("console_messages") or [])
-        errors.append({"code": "internal_error", "message": str(exc), "details": {"type": type(exc).__name__, "console": console_messages[-5:]}})
-        result = {"status": "failed", "outputs": outputs, "questions": questions, "errors": errors, "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"}, "final_screenshot": _screenshot(page, job_id) if page else None}
+            "quality": {"completion_observed": False, "output_link_count": len(outputs), "risk": "high"},
+            "final_screenshot": _screenshot(page, job_id) if page else None,
+        }
         discard_reusable_browser_session()
         return finalize(result, current_stage, "failed")
     finally:

@@ -7,6 +7,7 @@ project export -> download to disk -> 6-key result. This validates the request/r
 and the interrupt loop offline (no live Cassette, no Playwright), which is otherwise only verifiable
 during live bring-up.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,11 +26,25 @@ EXPORT_BYTES = b"FAKE_MP4_BYTES"
 def _serve(handler_cls, monkeypatch, extra_rec=None):
     """Start handler_cls on an ephemeral port, point the transport env at it, return (server, rec)."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
-    rec = {"requests": [], "put_count": 0, "init_count": 0, "complete_count": 0,
-           "init_bodies": [], "complete_bodies": [], "upload_session_ids": [], "upload_project_ids": [],
-           "auth_email": None, "resume_value": None, "run_input": None, "run_config": None,
-           "thread_metadata": None, "export_session": None, "status_polls": 0, "cancel_posts": [],
-           "media_ready_polls": 0}
+    rec = {
+        "requests": [],
+        "put_count": 0,
+        "init_count": 0,
+        "complete_count": 0,
+        "init_bodies": [],
+        "complete_bodies": [],
+        "upload_session_ids": [],
+        "upload_project_ids": [],
+        "auth_email": None,
+        "resume_value": None,
+        "run_input": None,
+        "run_config": None,
+        "thread_metadata": None,
+        "export_session": None,
+        "status_polls": 0,
+        "cancel_posts": [],
+        "media_ready_polls": 0,
+    }
     rec.update(extra_rec or {})
     server.rec = rec  # type: ignore[attr-defined]
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -89,21 +104,31 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
 
         if path == "/api/agent-auth/verify":
             self.rec["auth_email"] = body.get("email")
-            return self._json(200, {
-                "user": {"id": "u1", "email": body.get("email")},
-                "session": {"access_token": "tok-123", "refresh_token": "r", "expires_in": 3600, "expires_at": 0},
-                "sessionExpiry": 0, "isFullUser": True,
-            })
+            return self._json(
+                200,
+                {
+                    "user": {"id": "u1", "email": body.get("email")},
+                    "session": {"access_token": "tok-123", "refresh_token": "r", "expires_in": 3600, "expires_at": 0},
+                    "sessionExpiry": 0,
+                    "isFullUser": True,
+                },
+            )
         if path == "/api/media/upload/init":
             self.rec["init_count"] += 1
             self.rec["init_bodies"].append(body)
             self.rec["upload_session_ids"].append(self.headers.get("x-session-id"))
             self.rec["upload_project_ids"].append(self.headers.get("x-project-id"))
             key = f"k-{self.rec['init_count']}"
-            return self._json(200, {"key": key, "uploadUrl": f"http://{self.headers.get('Host')}/_put/{key}",
-                                    "uploadAttemptId": f"att-{self.rec['init_count']}",
-                                    "uploadContentType": body.get("mimeType") or "application/octet-stream",
-                                    "storageBackend": "r2"})
+            return self._json(
+                200,
+                {
+                    "key": key,
+                    "uploadUrl": f"http://{self.headers.get('Host')}/_put/{key}",
+                    "uploadAttemptId": f"att-{self.rec['init_count']}",
+                    "uploadContentType": body.get("mimeType") or "application/octet-stream",
+                    "storageBackend": "r2",
+                },
+            )
         if path == "/api/media/upload/complete":
             self.rec["complete_count"] += 1
             self.rec["complete_bodies"].append(body)
@@ -132,10 +157,19 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
         if path == "/api/media/operations/status":
             # Report every completed upload as fully ready so the readiness gate proceeds.
             self.rec["media_ready_polls"] += 1
-            statuses = [{"mediaFileId": f"m-{i}", "fullyReady": True, "aiReady": True,
-                         "exportReady": True, "analysisReady": True, "renderStatus": "completed",
-                         "terminalState": "succeeded", "readinessPhase": "ready"}
-                        for i in range(1, self.rec["complete_count"] + 1)]
+            statuses = [
+                {
+                    "mediaFileId": f"m-{i}",
+                    "fullyReady": True,
+                    "aiReady": True,
+                    "exportReady": True,
+                    "analysisReady": True,
+                    "renderStatus": "completed",
+                    "terminalState": "succeeded",
+                    "readinessPhase": "ready",
+                }
+                for i in range(1, self.rec["complete_count"] + 1)
+            ]
             return self._json(200, {"statuses": statuses})
         if path == "/api/langgraph/threads/th-1/runs/r-1":
             return self._json(200, {"run_id": "r-1", "status": "interrupted"})
@@ -143,9 +177,25 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
             return self._json(200, {"run_id": "r-2", "status": "success"})
         if path == "/api/langgraph/threads/th-1/state":
             # Only editor_navigate (the sole browser-target tool) interrupts a headless run.
-            return self._json(200, {"values": {}, "tasks": [{"interrupts": [
-                {"id": "int-1", "value": {"type": "tool", "toolCall": {"id": "call-1", "name": "editor_navigate", "args": {}}}},
-            ]}]})
+            return self._json(
+                200,
+                {
+                    "values": {},
+                    "tasks": [
+                        {
+                            "interrupts": [
+                                {
+                                    "id": "int-1",
+                                    "value": {
+                                        "type": "tool",
+                                        "toolCall": {"id": "call-1", "name": "editor_navigate", "args": {}},
+                                    },
+                                },
+                            ]
+                        }
+                    ],
+                },
+            )
         if path == "/api/export/jobs/ej-1":
             return self._json(200, {"jobId": "ej-1", "status": "done", "fileUrl": "/api/export/jobs/ej-1/file"})
         if path == "/api/export/jobs/ej-1/file":
@@ -181,10 +231,20 @@ class _ExpiringTokenAPI(_MockCassetteAPI):
 def mock_api(monkeypatch):
     server = ThreadingHTTPServer(("127.0.0.1", 0), _MockCassetteAPI)
     server.rec = {  # type: ignore[attr-defined]
-        "requests": [], "put_count": 0, "init_count": 0, "complete_count": 0,
-        "init_bodies": [], "complete_bodies": [], "upload_session_ids": [], "upload_project_ids": [],
-        "auth_email": None, "resume_value": None,
-        "run_input": None, "run_config": None, "thread_metadata": None, "export_session": None,
+        "requests": [],
+        "put_count": 0,
+        "init_count": 0,
+        "complete_count": 0,
+        "init_bodies": [],
+        "complete_bodies": [],
+        "upload_session_ids": [],
+        "upload_project_ids": [],
+        "auth_email": None,
+        "resume_value": None,
+        "run_input": None,
+        "run_config": None,
+        "thread_metadata": None,
+        "export_session": None,
         "media_ready_polls": 0,
     }
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -304,8 +364,13 @@ def test_api_transport_dedupes_uploads_in_reused_session(cassette_env, mock_api,
     accumulate duplicate media in the project) — matching the browser path's per-session dedupe."""
     asset = tmp_path / "clip.mp4"
     asset.write_bytes(b"x" * 64)
-    base = {"session_hash": "reuse", "cassette_session_id": "reuse",
-            "prompt": "edit", "asset_paths": [str(asset)], "timeout_sec": 60}
+    base = {
+        "session_hash": "reuse",
+        "cassette_session_id": "reuse",
+        "prompt": "edit",
+        "asset_paths": [str(asset)],
+        "timeout_sec": 60,
+    }
     ApiTransport().run_job({**base, "job_id": "job-a"})
     first_inits = mock_api.rec["init_count"]
     assert first_inits == 1
@@ -319,14 +384,19 @@ def test_api_transport_records_run_progress(cassette_env, mock_api, tmp_path):
     progress_events) so status polls and _job_report are not frozen and empty."""
     asset = Path(cassette_env["source_root"]) / "clip.mp4"
     asset.write_bytes(b"x" * 32)
-    job = jobs.create_job(session_hash="prog", prompt="edit", instruction=None,
-                          asset_paths=[str(asset)], options={"cassette_session_id": "prog"})
+    job = jobs.create_job(
+        session_hash="prog",
+        prompt="edit",
+        instruction=None,
+        asset_paths=[str(asset)],
+        options={"cassette_session_id": "prog"},
+    )
     job["asset_paths"] = [str(asset)]
     job["prompt"] = "edit"
     ApiTransport().run_job(job)
     saved = jobs.load_job(job["job_id"])
-    assert saved.get("current_stage")          # a live stage was recorded
-    assert saved.get("progress_events")        # at least one structured progress event
+    assert saved.get("current_stage")  # a live stage was recorded
+    assert saved.get("progress_events")  # at least one structured progress event
     assert isinstance(saved.get("stage_timings"), dict) and saved["stage_timings"]
 
 
@@ -338,8 +408,12 @@ def test_api_transport_completion_review_gate(cassette_env, mock_api, monkeypatc
     asset = tmp_path / "clip.mp4"
     asset.write_bytes(b"x" * 64)
     job = {
-        "job_id": "job-review-gate", "session_hash": "sess", "cassette_session_id": "sess",
-        "prompt": "make a short captioned video", "asset_paths": [str(asset)], "timeout_sec": 60,
+        "job_id": "job-review-gate",
+        "session_hash": "sess",
+        "cassette_session_id": "sess",
+        "prompt": "make a short captioned video",
+        "asset_paths": [str(asset)],
+        "timeout_sec": 60,
     }
     result = ApiTransport().run_job(job)
     # The run committed the edit but export is gated on Hermes review.
@@ -406,11 +480,7 @@ class _AskThenResumeAPI(BaseHTTPRequestHandler):
                 return self._json(
                     200,
                     {
-                        "values": {
-                            "messages": [
-                                {"type": "assistant", "content": "The requested edit is complete."}
-                            ]
-                        },
+                        "values": {"messages": [{"type": "assistant", "content": "The requested edit is complete."}]},
                         "tasks": [],
                     },
                 )
@@ -483,6 +553,7 @@ def test_api_interrupt_persists_and_resumes_on_same_thread_after_restart(cassett
 
 def test_api_transport_forbidden_surfaces_full_access_hint(cassette_env, monkeypatch):
     """A 403 on an account-scoped call yields a clear 'forbidden' error, not an opaque failure."""
+
     class _Forbidden(_MockCassetteAPI):
         def do_POST(self):
             path = self.path.split("?", 1)[0]
@@ -503,10 +574,16 @@ def test_api_transport_forbidden_surfaces_full_access_hint(cassette_env, monkeyp
     try:
         asset = Path(cassette_env["source_root"]) / "clip.mp4"
         asset.write_bytes(b"x" * 16)
-        result = ApiTransport().run_job({
-            "job_id": "job-403", "session_hash": "s", "cassette_session_id": "s",
-            "prompt": "edit", "asset_paths": [str(asset)], "timeout_sec": 30,
-        })
+        result = ApiTransport().run_job(
+            {
+                "job_id": "job-403",
+                "session_hash": "s",
+                "cassette_session_id": "s",
+                "prompt": "edit",
+                "asset_paths": [str(asset)],
+                "timeout_sec": 30,
+            }
+        )
         assert result["status"] == "failed"
         assert result["errors"][0]["code"] == "forbidden"
         assert "full API access" in result["errors"][0]["message"]
@@ -518,6 +595,7 @@ def test_api_transport_forbidden_surfaces_full_access_hint(cassette_env, monkeyp
 class _ProcessingThenReadyAPI(_MockCassetteAPI):
     """upload/complete returns uploadStatus='processing'; the status endpoint reports 'processing'
     for the first two polls then 'completed' — exercising the media-processing wait loop."""
+
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path == "/api/media/upload/complete":
@@ -542,10 +620,16 @@ def test_api_transport_waits_for_media_processing(cassette_env, monkeypatch, tmp
     try:
         asset = tmp_path / "clip.mp4"
         asset.write_bytes(b"x" * 64)
-        result = ApiTransport().run_job({
-            "job_id": "job-proc", "session_hash": "s", "cassette_session_id": "s",
-            "prompt": "edit", "asset_paths": [str(asset)], "timeout_sec": 60,
-        })
+        result = ApiTransport().run_job(
+            {
+                "job_id": "job-proc",
+                "session_hash": "s",
+                "cassette_session_id": "s",
+                "prompt": "edit",
+                "asset_paths": [str(asset)],
+                "timeout_sec": 60,
+            }
+        )
         assert result["status"] == "succeeded", result["errors"]
         # The processing poll actually ran (it is the reason the loop exists).
         assert server.rec["status_polls"] >= 3
@@ -556,15 +640,23 @@ def test_api_transport_waits_for_media_processing(cassette_env, monkeypatch, tmp
 
 class _MediaReadyAfterPollsAPI(_MockCassetteAPI):
     """Media is not-ready for the first two readiness polls, then fully ready."""
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path == "/api/media/operations/status":
             self.rec["media_ready_polls"] += 1
             ready = self.rec["media_ready_polls"] >= 3
-            statuses = [{"mediaFileId": "m-1", "fullyReady": ready, "aiReady": ready,
-                         "exportReady": ready, "renderStatus": "completed" if ready else "processing",
-                         "terminalState": "succeeded" if ready else "processing",
-                         "readinessPhase": "ready" if ready else "missing_embeddings"}]
+            statuses = [
+                {
+                    "mediaFileId": "m-1",
+                    "fullyReady": ready,
+                    "aiReady": ready,
+                    "exportReady": ready,
+                    "renderStatus": "completed" if ready else "processing",
+                    "terminalState": "succeeded" if ready else "processing",
+                    "readinessPhase": "ready" if ready else "missing_embeddings",
+                }
+            ]
             return self._json(200, {"statuses": statuses})
         return super().do_GET()
 
@@ -574,10 +666,16 @@ def test_api_transport_waits_for_media_full_readiness(cassette_env, monkeypatch,
     try:
         asset = tmp_path / "clip.mp4"
         asset.write_bytes(b"x" * 64)
-        result = ApiTransport().run_job({
-            "job_id": "job-ready", "session_hash": "s", "cassette_session_id": "s",
-            "prompt": "edit", "asset_paths": [str(asset)], "timeout_sec": 120,
-        })
+        result = ApiTransport().run_job(
+            {
+                "job_id": "job-ready",
+                "session_hash": "s",
+                "cassette_session_id": "s",
+                "prompt": "edit",
+                "asset_paths": [str(asset)],
+                "timeout_sec": 120,
+            }
+        )
         assert result["status"] == "succeeded", result["errors"]
         # It kept polling until media became fully ready (agent + render), not just upload-complete.
         assert server.rec["media_ready_polls"] >= 3
@@ -588,12 +686,24 @@ def test_api_transport_waits_for_media_full_readiness(cassette_env, monkeypatch,
 
 class _MediaFailsAPI(_MockCassetteAPI):
     """A required media derivative fails processing."""
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path == "/api/media/operations/status":
-            return self._json(200, {"statuses": [{
-                "mediaFileId": "m-1", "fullyReady": False, "renderStatus": "failed",
-                "terminalState": "failed", "errorMessage": "render-source transcode failed"}]})
+            return self._json(
+                200,
+                {
+                    "statuses": [
+                        {
+                            "mediaFileId": "m-1",
+                            "fullyReady": False,
+                            "renderStatus": "failed",
+                            "terminalState": "failed",
+                            "errorMessage": "render-source transcode failed",
+                        }
+                    ]
+                },
+            )
         return super().do_GET()
 
 
@@ -602,10 +712,16 @@ def test_api_transport_surfaces_media_processing_failure(cassette_env, monkeypat
     try:
         asset = tmp_path / "clip.mp4"
         asset.write_bytes(b"x" * 64)
-        result = ApiTransport().run_job({
-            "job_id": "job-mediafail", "session_hash": "s", "cassette_session_id": "s",
-            "prompt": "edit", "asset_paths": [str(asset)], "timeout_sec": 120,
-        })
+        result = ApiTransport().run_job(
+            {
+                "job_id": "job-mediafail",
+                "session_hash": "s",
+                "cassette_session_id": "s",
+                "prompt": "edit",
+                "asset_paths": [str(asset)],
+                "timeout_sec": 120,
+            }
+        )
         assert result["status"] == "failed"
         assert result["errors"][0]["code"] == "media_processing_failed"
         # The run never started for un-renderable media.
@@ -617,6 +733,7 @@ def test_api_transport_surfaces_media_processing_failure(cassette_env, monkeypat
 
 class _NeverStartsAPI(_MockCassetteAPI):
     """The run is created but the queue never drains it — status stays 'pending' forever."""
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path.startswith("/api/langgraph/threads/th-1/runs/"):
@@ -631,10 +748,16 @@ def test_api_transport_fails_fast_when_run_never_starts(cassette_env, monkeypatc
     try:
         asset = tmp_path / "clip.mp4"
         asset.write_bytes(b"x" * 64)
-        result = ApiTransport().run_job({
-            "job_id": "job-stall", "session_hash": "s", "cassette_session_id": "s",
-            "prompt": "edit", "asset_paths": [str(asset)], "timeout_sec": 600,
-        })
+        result = ApiTransport().run_job(
+            {
+                "job_id": "job-stall",
+                "session_hash": "s",
+                "cassette_session_id": "s",
+                "prompt": "edit",
+                "asset_paths": [str(asset)],
+                "timeout_sec": 600,
+            }
+        )
         # A stalled queue is reported quickly and clearly, not after the full 600s job timeout.
         assert result["status"] == "failed"
         assert result["errors"][0]["code"] == "agent_run_not_started"
@@ -647,6 +770,7 @@ def test_api_transport_fails_fast_when_run_never_starts(cassette_env, monkeypatc
 
 class _CancelAwareAPI(_MockCassetteAPI):
     """Records run-cancel POSTs and keeps the run 'running' so a cancel check can fire."""
+
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path.endswith("/cancel"):
@@ -668,8 +792,13 @@ def test_api_transport_run_job_honors_cancel_request(cassette_env, monkeypatch, 
     try:
         asset = Path(cassette_env["source_root"]) / "clip.mp4"
         asset.write_bytes(b"x" * 16)
-        job = jobs.create_job(session_hash="s", prompt="edit", instruction=None,
-                              asset_paths=[str(asset)], options={"cassette_session_id": "s"})
+        job = jobs.create_job(
+            session_hash="s",
+            prompt="edit",
+            instruction=None,
+            asset_paths=[str(asset)],
+            options={"cassette_session_id": "s"},
+        )
         jobs.request_cancel(job["job_id"])  # user hit /cut before we reached the run loop
         job["asset_paths"] = [str(asset)]
         job["prompt"] = "edit"
@@ -690,13 +819,22 @@ def test_export_overrides_stale_prior_quality(cassette_env, monkeypatch, tmp_pat
     server = _serve(_MockCassetteAPI, monkeypatch)
     try:
         job = {
-            "job_id": "job-review", "session_hash": "sess", "cassette_session_id": "sess",
+            "job_id": "job-review",
+            "session_hash": "sess",
+            "cassette_session_id": "sess",
             "questions": [{"question": "prior?", "requires_user": False, "reason": "x", "answer": "y"}],
             "errors": [],
             # Stale quality from the earlier run: export never finished.
-            "quality": {"transport": "api", "completion_observed": True, "export_completed": False,
-                        "export_pending": True, "output_link_count": 0, "local_output_count": 0,
-                        "risk": "medium", "progress_summary": "edit committed earlier"},
+            "quality": {
+                "transport": "api",
+                "completion_observed": True,
+                "export_completed": False,
+                "export_pending": True,
+                "output_link_count": 0,
+                "local_output_count": 0,
+                "risk": "medium",
+                "progress_summary": "edit committed earlier",
+            },
         }
         result = ApiTransport().export(job, {"decision": "export", "reason": "looks done", "summary": "ship it"})
         assert result["status"] == "succeeded", result["errors"]
@@ -724,6 +862,7 @@ def test_await_run_cancels_the_server_side_run(cassette_env, monkeypatch):
         monkeypatch.setattr(t, "_cancelled", lambda job_id: True)
         import pytest as _pytest
         from cassette.api_transport import _JobCancelled
+
         with _pytest.raises(_JobCancelled):
             t._await_run("th-1", "r-1", deadline=__import__("time").monotonic() + 30, job_id="job-x")
         # It best-effort cancels the run server-side rather than just abandoning it locally.

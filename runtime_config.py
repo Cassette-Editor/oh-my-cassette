@@ -8,6 +8,7 @@ continues to use only its process environment.
 This module is intentionally standard-library-only so the bootstrap and setup
 commands can use it before the MCP virtual environment exists.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -75,9 +76,7 @@ def data_root() -> Path:
     if override:
         return _absolute_lexical(Path(os.path.expandvars(override)))
     if sys.platform == "darwin":
-        return _absolute_lexical(
-            _home() / "Library" / "Application Support" / "Oh My Cassette" / "data"
-        )
+        return _absolute_lexical(_home() / "Library" / "Application Support" / "Oh My Cassette" / "data")
     xdg = str(os.getenv("XDG_DATA_HOME", "") or "").strip()
     base = Path(os.path.expandvars(xdg)).expanduser() if xdg else _home() / ".local" / "share"
     return _absolute_lexical(base / "oh-my-cassette")
@@ -127,7 +126,9 @@ def _check_private_directory(path: Path) -> None:
     try:
         info = path.lstat()
     except FileNotFoundError as exc:
-        raise RuntimeConfigError("config_directory_missing", "Configuration directory does not exist", path=path) from exc
+        raise RuntimeConfigError(
+            "config_directory_missing", "Configuration directory does not exist", path=path
+        ) from exc
     if stat.S_ISLNK(info.st_mode):
         raise RuntimeConfigError("config_symlink", "Configuration directory must not be a symlink", path=path)
     if not stat.S_ISDIR(info.st_mode):
@@ -171,7 +172,9 @@ def read_protected_json(path: Path, *, missing_ok: bool = True) -> dict[str, Any
             path=path,
         )
     if hasattr(os, "getuid") and info.st_uid != os.getuid():
-        raise RuntimeConfigError("config_wrong_owner", "Configuration file must be owned by the current user", path=path)
+        raise RuntimeConfigError(
+            "config_wrong_owner", "Configuration file must be owned by the current user", path=path
+        )
     try:
         with path.open("r", encoding="utf-8") as handle:
             value = json.load(handle)

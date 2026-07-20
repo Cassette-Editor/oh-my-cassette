@@ -16,7 +16,14 @@ from e2e_common import (
 
 
 def _search_roots(job_root: Path, media_dir: Path) -> list[Path]:
-    roots = [media_dir, job_root, media_dir / "jobs", job_root / "jobs", media_dir.parent / "jobs", job_root.parent / "jobs"]
+    roots = [
+        media_dir,
+        job_root,
+        media_dir / "jobs",
+        job_root / "jobs",
+        media_dir.parent / "jobs",
+        job_root.parent / "jobs",
+    ]
     asset_root = os.getenv("CASSETTE_ASSET_ROOT")
     if asset_root:
         asset = Path(asset_root).expanduser().resolve()
@@ -42,15 +49,17 @@ def main() -> int:
     job_root_raw = os.getenv("CASSETTE_E2E_JOB_ROOT")
     media_dir_raw = os.getenv("CASSETTE_MEDIA_DIR") or job_root_raw
     if not job_root_raw:
-        json_stdout({
-            "success": False,
-            "job_id": "",
-            "status": "configuration_error",
-            "manifest_path": "",
-            "result_path": "",
-            "output_links": [],
-            "errors": [{"code": "missing_env", "message": "CASSETTE_E2E_JOB_ROOT is required"}],
-        })
+        json_stdout(
+            {
+                "success": False,
+                "job_id": "",
+                "status": "configuration_error",
+                "manifest_path": "",
+                "result_path": "",
+                "output_links": [],
+                "errors": [{"code": "missing_env", "message": "CASSETTE_E2E_JOB_ROOT is required"}],
+            }
+        )
         return 2
 
     job_root = Path(job_root_raw).expanduser().resolve()
@@ -62,15 +71,17 @@ def main() -> int:
 
     job_path, job, timed_out = wait_for_latest_job(search_roots, timeout_sec)
     if timed_out:
-        json_stdout({
-            "success": False,
-            "job_id": str((job or {}).get("job_id") or ""),
-            "status": "timeout",
-            "manifest_path": find_session_manifest(job or {}, *search_roots) if job else "",
-            "result_path": str(job_path or ""),
-            "output_links": output_links(job or {}),
-            "errors": [{"code": "timeout", "message": f"No terminal Cassette job status within {timeout_sec}s"}],
-        })
+        json_stdout(
+            {
+                "success": False,
+                "job_id": str((job or {}).get("job_id") or ""),
+                "status": "timeout",
+                "manifest_path": find_session_manifest(job or {}, *search_roots) if job else "",
+                "result_path": str(job_path or ""),
+                "output_links": output_links(job or {}),
+                "errors": [{"code": "timeout", "message": f"No terminal Cassette job status within {timeout_sec}s"}],
+            }
+        )
         return 1
 
     job = job or {}
@@ -99,15 +110,17 @@ def main() -> int:
         errors.append({"code": "missing_output_link", "message": "No output link was recorded"})
         exit_code = 1
 
-    json_stdout({
-        "success": success,
-        "job_id": str(job.get("job_id") or ""),
-        "status": status,
-        "manifest_path": find_session_manifest(job, *search_roots),
-        "result_path": str(job_path or ""),
-        "output_links": links,
-        "errors": errors,
-    })
+    json_stdout(
+        {
+            "success": success,
+            "job_id": str(job.get("job_id") or ""),
+            "status": status,
+            "manifest_path": find_session_manifest(job, *search_roots),
+            "result_path": str(job_path or ""),
+            "output_links": links,
+            "errors": errors,
+        }
+    )
     return exit_code
 
 

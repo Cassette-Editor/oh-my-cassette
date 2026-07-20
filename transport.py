@@ -15,6 +15,7 @@ import-time caching. Both transports return the IDENTICAL job-result dict shape
 (status / outputs / questions / errors / quality / final_screenshot) so everything downstream
 (jobs.save_job, notifier, _scrub_job, _job_report) is unaffected.
 """
+
 from __future__ import annotations
 
 import os
@@ -65,6 +66,7 @@ def _read_env(name: str) -> str:
         pass
     try:
         from . import notifier
+
         getter = getattr(notifier, "_runtime_env", None)
         if callable(getter):
             return str(getter(name) or "").strip()
@@ -88,22 +90,27 @@ class BrowserTransport:
 
     def run_job(self, job: dict) -> dict:
         from . import browser
+
         return browser.run_cassette_browser_job_threaded(job)
 
     def export(self, job: dict, decision: dict[str, Any] | None = None) -> dict:
         from . import browser
+
         return browser.export_reviewed_completion_job_threaded(job, decision)
 
     def resume(self, job: dict, response: str) -> dict:
         from . import browser
+
         return browser.resume_cassette_browser_job_threaded(job, response)
 
     def close_sessions(self, session_key: str | None = None) -> None:
         from . import browser
+
         browser.close_browser_sessions_threaded(session_key)
 
     def check_available(self) -> bool:
         from . import browser
+
         return browser.check_playwright()
 
 
@@ -111,5 +118,6 @@ def get_transport() -> Transport:
     """Return the transport selected by ``CASSETTE_TRANSPORT`` (default api)."""
     if selected_transport() == TRANSPORT_API:
         from . import api_transport
+
         return api_transport.ApiTransport()
     return BrowserTransport()

@@ -133,7 +133,10 @@ def test_jamendo_client_builds_strategy_params_without_unset_constraints():
     class FakeClient(jamendo.JamendoClient):
         def _get_json(self, path, params):
             calls.append((path, dict(params)))
-            return {"headers": {"status": "success"}, "results": [{"id": "1", "name": "One", "audiodownload_allowed": True}]}
+            return {
+                "headers": {"status": "success"},
+                "results": [{"id": "1", "name": "One", "audiodownload_allowed": True}],
+            }
 
     plan = jamendo.JamendoSearchPlan.from_dict(_plan_dict())
     results = FakeClient("client-id").search_tracks(plan)
@@ -157,12 +160,14 @@ def test_jamendo_client_adds_duration_vocal_and_speed_only_when_hermes_provides_
             calls.append(dict(params))
             return {"headers": {"status": "success"}, "results": []}
 
-    plan = jamendo.JamendoSearchPlan.from_dict(_plan_dict(
-        durationMin=30,
-        durationMax=180,
-        vocalInstrumental="instrumental",
-        speed=["low", "medium"],
-    ))
+    plan = jamendo.JamendoSearchPlan.from_dict(
+        _plan_dict(
+            durationMin=30,
+            durationMax=180,
+            vocalInstrumental="instrumental",
+            speed=["low", "medium"],
+        )
+    )
     FakeClient("client-id").search_tracks(plan)
 
     params = calls[0]
@@ -186,7 +191,10 @@ def test_jamendo_client_continues_after_one_strategy_api_failure():
                     },
                     "results": [],
                 }
-            return {"headers": {"status": "success"}, "results": [{"id": "2", "name": "Two", "audiodownload_allowed": True}]}
+            return {
+                "headers": {"status": "success"},
+                "results": [{"id": "2", "name": "Two", "audiodownload_allowed": True}],
+            }
 
     plan_data = _plan_dict(search="bad search")
     plan_data["strategies"].append({**_plan_dict(search="good search")["strategies"][0], "name": "fallback"})
@@ -207,12 +215,14 @@ def test_jamendo_search_fallback_relaxes_api_params_when_primary_empty():
                 return []
             return [_track("relaxed")]
 
-    plan = jamendo.JamendoSearchPlan.from_dict(_plan_dict(
-        tags=["ambient"],
-        acousticElectric="acoustic",
-        speed=["low"],
-        type="single albumtrack",
-    ))
+    plan = jamendo.JamendoSearchPlan.from_dict(
+        _plan_dict(
+            tags=["ambient"],
+            acousticElectric="acoustic",
+            speed=["low"],
+            type="single albumtrack",
+        )
+    )
 
     candidates, effective_plan, fallbacks = jamendo._search_candidates_with_fallbacks(FakeClient("client-id"), plan)
 
@@ -309,7 +319,10 @@ def test_filter_eligible_tracks_filters_download_false_and_duration_only_when_se
     long_track = _track("2", duration=999)
     ok = _track("3", duration=100)
 
-    assert [item.id for item in jamendo.filter_eligible_tracks([blocked, long_track, ok], no_duration_plan)] == ["2", "3"]
+    assert [item.id for item in jamendo.filter_eligible_tracks([blocked, long_track, ok], no_duration_plan)] == [
+        "2",
+        "3",
+    ]
     assert [item.id for item in jamendo.filter_eligible_tracks([blocked, long_track, ok], duration_plan)] == ["3"]
 
 
@@ -317,7 +330,9 @@ def test_filter_eligible_tracks_dedupes_and_merges_source_strategies():
     plan = jamendo.JamendoSearchPlan.from_dict(_plan_dict())
     first = _track("1")
     second = _track("1")
-    second.source_strategies = [jamendo.JamendoSearchStrategy.from_dict(_plan_dict(name="fallback")["strategies"][0]).to_dict()]
+    second.source_strategies = [
+        jamendo.JamendoSearchStrategy.from_dict(_plan_dict(name="fallback")["strategies"][0]).to_dict()
+    ]
 
     result = jamendo.filter_eligible_tracks([first, second], plan)
 
@@ -409,15 +424,19 @@ def test_tool_fixed_form_builds_safe_jamendo_plan(cassette_env, monkeypatch):
 
     monkeypatch.setattr(tools.jamendo, "match_jamendo_music", fake_match)
 
-    payload = json.loads(tools.jamendo_music_matcher({
-        "userQuery": "温柔男声流行歌",
-        "searchTerms": ["gentle male vocal pop", "soft pop singer"],
-        "fuzzyTags": ["pop", "gentle"],
-        "excludeTerms": ["instrumental", "female"],
-        "vocalInstrumental": "vocal",
-        "download": False,
-        "session_id": "fixed-form-session",
-    }))
+    payload = json.loads(
+        tools.jamendo_music_matcher(
+            {
+                "userQuery": "温柔男声流行歌",
+                "searchTerms": ["gentle male vocal pop", "soft pop singer"],
+                "fuzzyTags": ["pop", "gentle"],
+                "excludeTerms": ["instrumental", "female"],
+                "vocalInstrumental": "vocal",
+                "download": False,
+                "session_id": "fixed-form-session",
+            }
+        )
+    )
 
     assert payload["ok"] is True
     plan = observed["search_plan"]
@@ -453,11 +472,15 @@ def test_tool_fixed_form_builds_safe_jamendo_plan(cassette_env, monkeypatch):
 
 def test_tool_requires_client_id_when_executing_search(cassette_env, monkeypatch):
     monkeypatch.delenv("JAMENDO_CLIENT_ID", raising=False)
-    payload = json.loads(tools.jamendo_music_matcher({
-        "userQuery": "安静、未来感",
-        "searchPlan": _plan_dict(),
-        "download": False,
-    }))
+    payload = json.loads(
+        tools.jamendo_music_matcher(
+            {
+                "userQuery": "安静、未来感",
+                "searchPlan": _plan_dict(),
+                "download": False,
+            }
+        )
+    )
 
     assert payload["ok"] is False
     assert payload["error"]["code"] == "jamendo_client_id_missing"

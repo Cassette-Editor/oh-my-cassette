@@ -106,9 +106,7 @@ def test_install_script_updates_existing_cassette_auth_without_clobbering(tmp_pa
     env_path = tmp_path / ".hermes" / ".env"
     env_path.parent.mkdir(parents=True)
     env_path.write_text(
-        "OTHER_VALUE=keep\n"
-        "CASSETTE_AUTH_EMAIL=old@example.com\n"
-        "export CASSETTE_AUTH_PASSWORD=old-password\n",
+        "OTHER_VALUE=keep\nCASSETTE_AUTH_EMAIL=old@example.com\nexport CASSETTE_AUTH_PASSWORD=old-password\n",
         encoding="utf-8",
     )
     answers = iter(["y", "new@example.com"])
@@ -151,9 +149,7 @@ def test_install_script_updates_existing_jamendo_auth_without_clobbering(tmp_pat
     env_path = tmp_path / ".hermes" / ".env"
     env_path.parent.mkdir(parents=True)
     env_path.write_text(
-        "OTHER_VALUE=keep\n"
-        "JAMENDO_CLIENT_ID=old-client\n"
-        "export JAMENDO_CLIENT_SECRET=old-secret\n",
+        "OTHER_VALUE=keep\nJAMENDO_CLIENT_ID=old-client\nexport JAMENDO_CLIENT_SECRET=old-secret\n",
         encoding="utf-8",
     )
     answers = iter(["y", "new-client"])
@@ -280,11 +276,14 @@ def test_install_script_enables_cassette_plugin_interactively(tmp_path, monkeypa
 
     monkeypatch.setattr(install_plugin.subprocess, "run", fake_run)
 
-    assert install_plugin.enable_cassette_plugin(
-        tmp_path / ".hermes",
-        input_func=lambda prompt: "",
-        interactive=True,
-    ) is True
+    assert (
+        install_plugin.enable_cassette_plugin(
+            tmp_path / ".hermes",
+            input_func=lambda prompt: "",
+            interactive=True,
+        )
+        is True
+    )
     assert observed["cmd"] == [str(python), "-m", "hermes_cli.main", "plugins", "enable", "cassette"]
     assert observed["check"] is False
     assert observed["env"]["HERMES_ACCEPT_HOOKS"] == "1"
@@ -293,11 +292,14 @@ def test_install_script_enables_cassette_plugin_interactively(tmp_path, monkeypa
 def test_install_script_can_skip_cassette_plugin_enable(tmp_path):
     install_plugin = _load_install_script()
 
-    assert install_plugin.enable_cassette_plugin(
-        tmp_path / ".hermes",
-        input_func=lambda prompt: "n",
-        interactive=True,
-    ) is False
+    assert (
+        install_plugin.enable_cassette_plugin(
+            tmp_path / ".hermes",
+            input_func=lambda prompt: "n",
+            interactive=True,
+        )
+        is False
+    )
 
 
 SETUP_STEP_NAMES = (
