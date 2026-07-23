@@ -36,10 +36,11 @@ import json
 import mimetypes
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from .manifest import get_asset_root
@@ -218,6 +219,28 @@ def _exports_dir(job_id: str) -> Path:
 
 def _session_id(job: dict) -> str:
     return str(job.get("cassette_session_id") or job.get("session_hash") or "default")
+
+
+_TRY_SESSION_PREFIX = "try-session-"
+
+
+def _editor_url(session_id: str, thread_id: str, job: dict) -> str | None:
+    """Deep link into the live editor for this session's project and chat thread.
+
+    Only try-session-* projects are reachable token-free (publicTry tier); older un-prefixed
+    session ids have no browsable link, so this returns None for them."""
+    if not session_id.startswith(_TRY_SESSION_PREFIX):
+        return None
+    base = _env("CASSETTE_WEB_URL")
+    if not base:
+        raw = str(job.get("url") or os.getenv("CASSETTE_URL", "https://sg.trycassette.online/agent"))
+        parts = urlparse(raw)
+        if not parts.scheme or not parts.netloc:
+            return None
+        base = f"{parts.scheme}://{parts.netloc}"
+    session_hash = session_id[len(_TRY_SESSION_PREFIX) :]
+    query = urlencode({"projectSessionId": session_hash, "chatSessionId": thread_id})
+    return f"{base.rstrip('/')}/try?{query}"
 
 
 def _http_timeout() -> float:
@@ -658,6 +681,12 @@ class ApiTransport:
     def _authenticate(self) -> None:
         if self._token:
             return
+        override = _env("CASSETTE_AUTH_TOKEN")
+        if override:
+            # Pre-issued bearer (local dev's local-dev-access-token, CI-minted JWTs); skips
+            # /api/agent-auth/verify entirely.
+            self._token = override
+            return
         email, password = _credentials()
         if not email or not password:
             raise ApiTransportError(
@@ -923,27 +952,47 @@ class ApiTransport:
 
     # ── agent run ─────────────────────────────────────────────────────────────
     def _create_thread(self, session_id: str, job: dict) -> str:
+        # The upstream LangGraph server 422s non-UUID thread ids, so the thread id cannot be the
+        # session id. Mint it client-side and put it in the editor deep link as ?chatSessionId= —
+        # a browser tab then bootstraps the SAME thread (ifExists:'do_nothing') and rejoins the
+        # live run (reconnectOnMount), which is what makes the /try page a live view of this job.
+        thread_id = str(uuid.uuid4())
         metadata = {
             "graph_id": "cassette-chat",
             "projectId": session_id,
             "mediaSessionId": session_id,
-            "chatSessionId": session_id,
+            "chatSessionId": thread_id,
         }
         _, body = self._request(
-            "POST", "/api/langgraph/threads", json_body={"metadata": metadata, "if_exists": "do_nothing"}, expect=200
+            "POST",
+            "/api/langgraph/threads",
+            json_body={"thread_id": thread_id, "metadata": metadata, "if_exists": "do_nothing"},
+            expect=200,
         )
-        thread_id = (body.get("thread_id") or body.get("threadId")) if isinstance(body, dict) else None
-        if not thread_id:
-            raise ApiTransportError("thread_create_failed", "LangGraph thread create returned no thread_id")
-        return str(thread_id)
+        created = (body.get("thread_id") or body.get("threadId")) if isinstance(body, dict) else None
+        if created:
+            thread_id = str(created)
+        editor_url = _editor_url(session_id, thread_id, job)
+        job["chat_thread_id"] = thread_id
+        job["editor_url"] = editor_url
+        job_id = str(job.get("job_id") or "")
+        if job_id:
+            try:
+                from . import jobs
 
-    def _session_context(self, session_id: str, job: dict, prompt: str) -> dict:
-        # Mirrors CassetteAgentSessionContext (buildCurrentSessionContext in the editor). All of
-        # projectId/mediaSessionId/chatSessionId/threadId collapse onto one id in the real editor
-        # (BROWSER_SESSION_ID == getCurrentProjectId()), so the plugin uses the single session id.
+                jobs.update_job(job_id, chat_thread_id=thread_id, editor_url=editor_url)
+            except Exception:  # noqa: BLE001 — persisting the link must not fail the run
+                pass
+        return thread_id
+
+    def _session_context(self, session_id: str, job: dict, prompt: str, thread_id: str | None = None) -> dict:
+        # Mirrors CassetteAgentSessionContext (buildCurrentSessionContext in the editor):
+        # projectId/mediaSessionId collapse onto the project session id, while chatSessionId/
+        # threadId carry the UUID thread the editor's ChatPanel also uses as its stream thread.
+        chat_id = thread_id or str(job.get("chat_thread_id") or session_id)
         return {
-            "chatSessionId": session_id,
-            "threadId": session_id,
+            "chatSessionId": chat_id,
+            "threadId": chat_id,
             "mediaSessionId": session_id,
             "projectId": session_id,
             "mode": "auto",
@@ -1047,7 +1096,7 @@ class ApiTransport:
         catalog keyed by sessionContext.mediaSessionId (== the upload x-session-id)."""
         job_id = str(job.get("job_id") or "")
         turn_id = f"{job_id or session_id}-turn"
-        session_context = self._session_context(session_id, job, prompt)
+        session_context = self._session_context(session_id, job, prompt, thread_id=thread_id)
         config = {
             # recursion_limit is what the upstream LangGraph server reads; the editor also sends the
             # camelCase duplicate, harmless to include for parity.

@@ -135,6 +135,7 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
             return self._json(200, {"mediaFileId": f"m-{self.rec['complete_count']}", "uploadStatus": "completed"})
         if path == "/api/langgraph/threads":
             self.rec["thread_metadata"] = body.get("metadata")
+            self.rec["thread_create_body"] = body
             return self._json(200, {"thread_id": "th-1"})
         if path == "/api/langgraph/threads/th-1/runs":
             if isinstance(body.get("command"), dict):
@@ -870,3 +871,81 @@ def test_await_run_cancels_the_server_side_run(cassette_env, monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_thread_create_sends_uuid_and_persists_editor_url(cassette_env, mock_api, monkeypatch):
+    """The thread id must be a client-minted UUID (LangGraph 422s anything else), the metadata must
+    split project ids from chat ids, and the job must gain the /try deep link with both."""
+    import uuid as _uuid
+
+    monkeypatch.setenv("CASSETTE_WEB_URL", "http://127.0.0.1:8080")
+    job = {
+        "job_id": "job-link",
+        "session_hash": "abc",
+        "cassette_session_id": "try-session-abc",
+        "prompt": "edit",
+        "asset_paths": [],
+        "timeout_sec": 60,
+    }
+    result = ApiTransport().run_job(job)
+    rec = mock_api.rec
+
+    assert result["status"] == "succeeded", result["errors"]
+    body = rec["thread_create_body"]
+    minted = str(body.get("thread_id"))
+    _uuid.UUID(minted)  # raises if the transport did not mint a UUID
+    assert body["if_exists"] == "do_nothing"
+    # projectId/mediaSessionId carry the project; chatSessionId carries the (UUID) thread.
+    assert body["metadata"]["projectId"] == "try-session-abc"
+    assert body["metadata"]["mediaSessionId"] == "try-session-abc"
+    assert body["metadata"]["chatSessionId"] == minted
+    # The server echo is authoritative for the thread id the run actually uses.
+    assert job["chat_thread_id"] == "th-1"
+    assert job["editor_url"] == "http://127.0.0.1:8080/try?projectSessionId=abc&chatSessionId=th-1"
+    # sessionContext mirrors the split: chat/thread ids are the UUID thread, project ids the session.
+    session_context = rec["run_config"]["configurable"]["sessionContext"]
+    assert session_context["chatSessionId"] == "th-1"
+    assert session_context["threadId"] == "th-1"
+    assert session_context["projectId"] == "try-session-abc"
+    assert session_context["mediaSessionId"] == "try-session-abc"
+
+
+def test_editor_url_only_for_try_session_projects(cassette_env, mock_api):
+    """Old un-prefixed sessions have no token-free browser view, so no deep link is composed."""
+    job = {
+        "job_id": "job-old",
+        "session_hash": "sess",
+        "cassette_session_id": "sess",
+        "prompt": "edit",
+        "asset_paths": [],
+        "timeout_sec": 60,
+    }
+    result = ApiTransport().run_job(job)
+    assert result["status"] == "succeeded", result["errors"]
+    assert job["editor_url"] is None
+
+
+def test_editor_url_falls_back_to_cassette_url_origin(monkeypatch):
+    from cassette.api_transport import _editor_url
+
+    monkeypatch.delenv("CASSETTE_WEB_URL", raising=False)
+    url = _editor_url("try-session-h4sh", "aaaa-bbbb", {"url": "https://sg.trycassette.online/agent"})
+    assert url == "https://sg.trycassette.online/try?projectSessionId=h4sh&chatSessionId=aaaa-bbbb"
+    assert _editor_url("legacy-id", "aaaa-bbbb", {}) is None
+
+
+def test_auth_token_override_skips_verify(cassette_env, mock_api, monkeypatch):
+    monkeypatch.setenv("CASSETTE_AUTH_TOKEN", "pre-issued-token")
+    monkeypatch.delenv("CASSETTE_AUTH_EMAIL", raising=False)
+    monkeypatch.delenv("CASSETTE_AUTH_PASSWORD", raising=False)
+    job = {
+        "job_id": "job-token",
+        "session_hash": "tok",
+        "cassette_session_id": "try-session-tok",
+        "prompt": "edit",
+        "asset_paths": [],
+        "timeout_sec": 60,
+    }
+    result = ApiTransport().run_job(job)
+    assert result["status"] == "succeeded", result["errors"]
+    assert ("POST", "/api/agent-auth/verify") not in mock_api.rec["requests"]

@@ -287,14 +287,16 @@ class LocalMcpRuntime:
                 job_id=resolved_job_id,
                 phase=selected_phase,
             )
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        editor_url = data.get("editor_url") if isinstance(data.get("editor_url"), str) else None
         return ToolEnvelope(
             ok=True,
-            data=payload.get("data") if isinstance(payload.get("data"), dict) else {},
+            data=data,
             warnings=payload.get("warnings") if isinstance(payload.get("warnings"), list) else [],
             session_id=session_id,
             job_id=resolved_job_id,
             phase=selected_phase,
-            next_action=next_action_for(selected_phase, job_id=resolved_job_id),
+            next_action=next_action_for(selected_phase, job_id=resolved_job_id, editor_url=editor_url),
             artifacts=artifacts or [],
         )
 
@@ -302,7 +304,9 @@ class LocalMcpRuntime:
         config_error = self._config_error(session_id=args.get("session_id"))
         if config_error:
             return config_error
-        session_id = str(args.get("session_id") or "").strip() or f"mcp_{secrets.token_urlsafe(18)}"
+        # try-session-* ids get token-free publicTry access on the Cassette server, which is what
+        # makes the /try?projectSessionId= editor deep link work without a login handoff.
+        session_id = str(args.get("session_id") or "").strip() or f"try-session-{secrets.token_urlsafe(18)}"
         args = {**args, "session_id": session_id}
         payload = self._invoke_core("cassette_ingest_media", args, session_id=session_id, roots=roots)
         phase = self._load_state_phase(session_id)
