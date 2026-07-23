@@ -43,7 +43,7 @@ _ALLOWED: dict[SessionPhase, set[SessionPhase]] = {
         SessionPhase.CANCELLED,
         SessionPhase.TIMED_OUT,
     },
-    SessionPhase.GUIDED_CHOICES: {SessionPhase.ASSETS_READY, SessionPhase.READY},
+    SessionPhase.GUIDED_CHOICES: {SessionPhase.ASSETS_READY, SessionPhase.READY, SessionPhase.RUNNING},
     SessionPhase.ASSETS_READY: {SessionPhase.GUIDED_CHOICES, SessionPhase.READY, SessionPhase.RUNNING},
     SessionPhase.READY: {SessionPhase.GUIDED_CHOICES, SessionPhase.ASSETS_READY, SessionPhase.RUNNING},
     SessionPhase.RUNNING: {
@@ -131,11 +131,17 @@ def _next_action_base(phase: SessionPhase, *, job_id: str | None = None) -> str:
     if phase == SessionPhase.NEW:
         return "Call cassette_ingest_media with a trusted project media path."
     if phase == SessionPhase.GUIDED_CHOICES:
-        return "Confirm model, thinking level, prompt optimization, and optional BGM choices."
+        return (
+            "Call cassette_run_job with message set to the user's verbatim words. "
+            "Optionally set model/thinking first via cassette_config when the user asks."
+        )
     if phase == SessionPhase.ASSETS_READY:
-        return "Call cassette_make_prompt with the editing instruction."
+        return "Call cassette_run_job with message set to the user's verbatim words."
     if phase == SessionPhase.READY:
-        return "Call cassette_run_job; MCP jobs run in the background unless wait=true is explicit."
+        return (
+            "Call cassette_run_job with message set to the user's verbatim words; "
+            "MCP jobs run in the background unless wait=true is explicit."
+        )
     if phase in {SessionPhase.RUNNING, SessionPhase.EXPORTING}:
         suffix = f" for {job_id}" if job_id else ""
         return f"Call cassette_job_status{suffix} with wait_for_change_sec up to 30."
@@ -143,8 +149,14 @@ def _next_action_base(phase: SessionPhase, *, job_id: str | None = None) -> str:
         return "Ask the user, then call cassette_answer_question with job_id and response."
     if phase == SessionPhase.REVIEW_REQUIRED:
         return "Review completion, then call cassette_review_completion; only decision=export renders."
-    if phase in {SessionPhase.EXPORTED, SessionPhase.SUCCEEDED}:
-        return "Present the validated artifact or start another edit in this session."
+    if phase == SessionPhase.SUCCEEDED:
+        return (
+            "Turn finished; the edit is committed but nothing was rendered. Review the attached "
+            "CTL/contact-sheet preview, continue the conversation with cassette_run_job(message=...), "
+            "or re-run with export=true when the user wants the video."
+        )
+    if phase == SessionPhase.EXPORTED:
+        return "Present the validated artifact or continue the conversation with another turn."
     if phase == SessionPhase.CANCELLED:
         return "The job is cancelled; start another edit when ready."
     return "Inspect the structured error and retry or start another edit."

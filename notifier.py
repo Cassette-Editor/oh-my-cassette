@@ -637,9 +637,11 @@ def _append_delivery_block(lines: list[str], message: str, *, language: str) -> 
 
 
 def _append_live_context(lines: list[str], job: dict, language: str) -> None:
-    """Timeline delta (needs_user only) + the /try live link, both bounded by construction."""
+    """Timeline delta (questions + turn-end without render) + the /try live link, all bounded."""
     delta = str(job.get("timeline_delta") or "").strip()
-    if delta and job.get("status") == "needs_user":
+    status = job.get("status")
+    turn_done_no_render = status == "succeeded" and not (job.get("outputs") or job.get("output_links"))
+    if delta and (status == "needs_user" or turn_done_no_render):
         lines.append(f"```\n{delta}\n```")
     url = str(job.get("editor_url") or "").strip()
     if url:
@@ -658,7 +660,9 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
     export_pending = bool(quality.get("export_pending")) or (status == "succeeded" and output_count == 0)
 
     if language == "en":
-        if status == "succeeded":
+        if status == "succeeded" and export_pending:
+            headline = 'Cassette finished this turn; the edit is saved in the project (no export yet). Say "export" when you want the video rendered.'
+        elif status == "succeeded":
             headline = "Cassette edit completed and the exported video is ready."
         elif status == "needs_user":
             headline = "Cassette needs manual confirmation before it can continue."
@@ -691,13 +695,16 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
                 delivery_line = (
                     f"Detected {output_count} output link(s), but no local exported video file was confirmed."
                 )
-            elif export_pending:
+            elif export_pending and bool(quality.get("export_pending")):
+                # A real export that failed to materialize — not a conversational no-render turn.
                 delivery_line = "No exported video file was detected yet."
             _append_delivery_block(lines, delivery_line, language=language)
         _append_live_context(lines, job, language)
         return "\n".join(lines).strip()
 
-    if status == "succeeded":
+    if status == "succeeded" and export_pending:
+        headline = "Cassette 本轮剪辑已完成，修改已保存到项目（尚未导出）。需要成片时回复“导出”。"
+    elif status == "succeeded":
         headline = "Cassette 剪辑任务已完成，导出视频已生成。"
     elif status == "needs_user":
         headline = "Cassette 剪辑任务需要人工确认后才能继续。"
@@ -738,7 +745,7 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
                 delivery_line = "导出视频已生成，准备发送。"
         elif output_count:
             delivery_line = f"已检测到 {output_count} 个输出链接，但未能确认本地导出文件。"
-        elif export_pending:
+        elif export_pending and bool(quality.get("export_pending")):
             delivery_line = "当前未检测到导出视频文件。"
         _append_delivery_block(lines, delivery_line, language=language)
     _append_live_context(lines, job, language)
@@ -1346,11 +1353,13 @@ def notify_terminal_job(job: dict) -> dict:
         return {"status": "skipped", "reason": "missing_chat_id"}
     chat_type = delivery.get("chat_type")
     thread_id = delivery.get("thread_id")
-    # Completion review is judged from the phone: push the contact sheet (stored clip posters,
-    # zero render) alongside the review question so the export gate is never decided blind.
+    # Preview moments judged from the phone: the review question AND each turn that ends without
+    # a render both push the contact sheet (source frames, zero render) so the user sees what the
+    # edit looks like before deciding to continue or export.
     quality = job.get("quality") if isinstance(job.get("quality"), dict) else {}
     sheet = str(quality.get("contact_sheet") or "").strip()
-    if job.get("status") == "needs_user" and sheet and Path(sheet).exists():
+    turn_done_no_render = job.get("status") == "succeeded" and not (job.get("outputs") or job.get("output_links"))
+    if (job.get("status") == "needs_user" or turn_done_no_render) and sheet and Path(sheet).exists():
         try:
             notify_progress_snapshot(job, sheet, summary="Timeline contact sheet (source frames, not composed output)")
         except Exception:  # noqa: BLE001 — the sheet is an enhancement, never a delivery blocker

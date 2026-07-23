@@ -56,7 +56,6 @@ def cassette_env(tmp_path, monkeypatch):
     monkeypatch.setenv("CASSETTE_MIN_BROWSER_TIMEOUT_SEC", "0")
     monkeypatch.setenv("CASSETTE_WEIXIN_FORCE_H264", "0")
     monkeypatch.setenv("CASSETTE_PING_ON_GATEWAY_INSTRUCTION", "0")
-    monkeypatch.setenv("CASSETTE_GATEWAY_MODEL_CHOICE_ENABLED", "0")
     monkeypatch.delenv("JAMENDO_CLIENT_ID", raising=False)
     monkeypatch.delenv("JAMENDO_CLIENT_SECRET", raising=False)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))

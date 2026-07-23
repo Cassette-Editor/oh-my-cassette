@@ -73,21 +73,21 @@ _NAVIGATE_NOOP_RESULT = {
 # plugin's model_selection holds UI labels (or is empty), so it is only forwarded when it already
 # names a product model id; otherwise the configured/default model is used.
 DEFAULT_AGENT_MODEL_ID = "deepseek/deepseek-v4-flash"
-_SUPPORTED_AGENT_MODEL_IDS = frozenset(
-    {
-        "deepseek/deepseek-v4-flash",
-        "deepseek/deepseek-v4-pro",
-        "openai/gpt-5.4-mini",
-    }
+# Single source for the product model list (id + display label): cassette_config, the gateway
+# /cassette_model picker, and the run-time resolver all derive from this tuple.
+AGENT_MODEL_OPTIONS = (
+    {"id": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
+    {"id": "deepseek/deepseek-v4-pro", "label": "DeepSeek V4 Pro"},
+    {"id": "openai/gpt-5.4-mini", "label": "GPT 5.4 Mini"},
 )
+_SUPPORTED_AGENT_MODEL_IDS = frozenset(option["id"] for option in AGENT_MODEL_OPTIONS)
 # The plugin's model_selection stores a UI *label* (browser.py scrapes only the label, not the id),
-# so map the label -> agent model id to honor the user's model choice on the api path. Labels are
-# locale-independent brand names (cassette-config MODEL_OPTIONS i18n; identical in zh and en).
+# so map the normalized label -> agent model id to honor the user's model choice on the api path.
+# Labels are locale-independent brand names (cassette-config MODEL_OPTIONS i18n; same in zh/en).
 _MODEL_LABEL_TO_ID = {
-    "deepseekv4flash": "deepseek/deepseek-v4-flash",
-    "deepseekv4pro": "deepseek/deepseek-v4-pro",
-    "gpt54mini": "openai/gpt-5.4-mini",
+    "".join(ch for ch in option["label"].lower() if ch.isalnum()): option["id"] for option in AGENT_MODEL_OPTIONS
 }
+AGENT_THINKING_LEVELS = ("low", "medium", "high")
 _DEFAULT_THINKING = "low"  # matches cassette-config DEFAULT_THINKING / per-model defaultThinking
 
 
@@ -98,8 +98,10 @@ def _require_model_selection() -> bool:
 
 
 def _export_on_complete(job: dict) -> bool:
-    # Mirrors browser._export_on_complete: whether a finished edit should be exported. Default true.
-    raw = _env("CASSETTE_EXPORT_ON_COMPLETE") or str(job.get("export_on_complete", "true"))
+    # Whether a finished turn should route to the export/review ceremony. API default is FALSE
+    # (a conversational turn ends committed-but-unrendered; run_job export=true opts in per turn).
+    # browser._export_on_complete keeps its own default-true — single-shot browser parity.
+    raw = _env("CASSETTE_EXPORT_ON_COMPLETE") or str(job.get("export_on_complete", "false"))
     return str(raw).strip().lower() not in {"0", "false", "no", "off"}
 
 
@@ -302,7 +304,10 @@ def _stream_read_timeout() -> float:
 
 # Stream modes requested for every run so a later join (plugin listener OR the user's /try tab)
 # replays commit/plan events; 'custom' carries ProjectCommitEvents, 'updates' the node progress.
-_RUN_STREAM_MODES = ["updates", "custom"]
+# Mirror the editor's AGENT_STREAM_MODES exactly: a /try tab that live-joins a plugin run gets
+# the same event surface as its own submits (chat tokens, tool events, values, custom commits).
+# The plugin's own SSE consumer reads only 'custom' frames, so the extra modes cost bandwidth only.
+_RUN_STREAM_MODES = ["values", "messages-tuple", "custom", "tools"]
 
 
 class ApiTransport:
@@ -387,7 +392,9 @@ class ApiTransport:
     def run_job(self, job: dict) -> dict:
         job_id = str(job.get("job_id") or "")
         session_id = _session_id(job)
-        prompt = str(job.get("prompt") or job.get("chat_message") or "").strip()
+        # Direct line: the agent hears the user's verbatim words (message), matching the web chat
+        # box. chat_message (the user-facing text of legacy briefs) beats the make_prompt wrapper.
+        prompt = str(job.get("message") or job.get("chat_message") or job.get("prompt") or "").strip()
         asset_paths = [p for p in (job.get("asset_paths") or []) if p]
         questions: list[dict] = []
         errors: list[dict] = []
@@ -415,7 +422,7 @@ class ApiTransport:
 
             self._notify_model_selection(job, self._resolve_model_id(job), self._resolve_thinking_config(job))
             self._enter_stage(job_id, "agent", "Cassette agent is editing")
-            thread_id = self._create_thread(session_id, job)
+            thread_id = self._ensure_thread(session_id, job)
             run_status, run_questions = self._run_agent(thread_id, session_id, prompt, job, deadline)
             questions.extend(run_questions)
 
@@ -506,8 +513,10 @@ class ApiTransport:
                         **self._timeline_review_context(session_id),
                     },
                 )
-            if not _export_on_complete(job):
-                # Export not requested for this job — finish without rendering (browser parity).
+            if not _export_on_complete(job) and not _auto_export():
+                # Conversational turn: the edit is committed, nothing rendered. Attach the CTL
+                # digest + contact sheet as the per-turn preview so the user judges the result
+                # visually (0.4.0 preview stack) and decides when to export.
                 return self._result(
                     _SUCCEEDED,
                     questions=questions,
@@ -516,7 +525,11 @@ class ApiTransport:
                     export_completed=False,
                     export_pending=False,
                     risk="medium",
-                    extra_quality={"progress_summary": edit_summary, "current_stage": "agent"},
+                    extra_quality={
+                        "progress_summary": edit_summary,
+                        "current_stage": "agent",
+                        **self._timeline_review_context(session_id),
+                    },
                 )
 
             # Auto-export (opt-in). If it fails, the edit still happened, so report 'succeeded' with
@@ -712,7 +725,7 @@ class ApiTransport:
                         **self._timeline_review_context(session_id),
                     },
                 )
-            if not _export_on_complete(job):
+            if not _export_on_complete(job) and not _auto_export():
                 return self._result(
                     _SUCCEEDED,
                     questions=questions,
@@ -721,7 +734,11 @@ class ApiTransport:
                     export_completed=False,
                     export_pending=False,
                     risk="medium",
-                    extra_quality={"progress_summary": edit_summary, "current_stage": "agent"},
+                    extra_quality={
+                        "progress_summary": edit_summary,
+                        "current_stage": "agent",
+                        **self._timeline_review_context(session_id),
+                    },
                 )
             self._enter_stage(job_id, "export", "Rendering the export")
             outputs = self._export_project(session_id, job_id, deadline=deadline)
@@ -1089,18 +1106,37 @@ class ApiTransport:
         return body
 
     # ── agent run ─────────────────────────────────────────────────────────────
-    def _create_thread(self, session_id: str, job: dict) -> str:
-        # The upstream LangGraph server 422s non-UUID thread ids, so the thread id cannot be the
-        # session id. Mint it client-side and put it in the editor deep link as ?chatSessionId= —
-        # a browser tab then bootstraps the SAME thread (ifExists:'do_nothing') and rejoins the
-        # live run (reconnectOnMount), which is what makes the /try page a live view of this job.
-        thread_id = str(uuid.uuid4())
-        metadata = {
-            "graph_id": "cassette-chat",
+    def _thread_metadata(self, session_id: str, thread_id: str, job: dict) -> dict:
+        # Full cassette shape, mirroring the editor's buildThreadMetadata: the /try tab's resume
+        # path (plan review answered in the browser) hard-requires isCassetteThreadMetadata to
+        # pass, so every field below is load-bearing — a partial dict breaks tab-side resume.
+        return {
+            "schemaVersion": 1,
+            "threadKind": "cassette-chat",
+            "chatSessionId": thread_id,
             "projectId": session_id,
             "mediaSessionId": session_id,
-            "chatSessionId": thread_id,
+            "mode": "auto",
+            "turnStrategy": "default",
+            "turnKind": "conversation",
+            "reinitMode": None,
+            "modelId": self._resolve_model_id(job),
+            "thinkingConfig": self._resolve_thinking_config(job),
+            "locale": job.get("cassette_language") or None,
         }
+
+    def _ensure_thread(self, session_id: str, job: dict) -> str:
+        # One thread per SESSION, reused across jobs: each job is one conversational turn on the
+        # same LangGraph thread, so the agent keeps memory and the deep link stays stable. The
+        # upstream LangGraph server 422s non-UUID thread ids, so the id is minted client-side;
+        # if_exists:'do_nothing' makes the ensure idempotent (and heals a server-side deletion —
+        # the checkpointed conversation is lost then, but the session keeps working).
+        from . import manifest as manifest_mod
+
+        session_hash = manifest_mod.resolve_session_hash(session_id=session_id)
+        saved_thread = str(manifest_mod.load_session_thread(session_hash).get("thread_id") or "")
+        thread_id = saved_thread or str(uuid.uuid4())
+        metadata = self._thread_metadata(session_id, thread_id, job)
         _, body = self._request(
             "POST",
             "/api/langgraph/threads",
@@ -1110,7 +1146,19 @@ class ApiTransport:
         created = (body.get("thread_id") or body.get("threadId")) if isinstance(body, dict) else None
         if created:
             thread_id = str(created)
+        # if_exists:'do_nothing' never updates an existing thread, but the tab rebuilds its resume
+        # session context from this metadata — keep modelId/thinkingConfig fresh per turn.
+        if saved_thread:
+            try:
+                self._request(
+                    "PATCH",
+                    f"/api/langgraph/threads/{thread_id}",
+                    json_body={"metadata": self._thread_metadata(session_id, thread_id, job)},
+                )
+            except Exception:  # noqa: BLE001 — the run's own sessionContext stays authoritative
+                pass
         editor_url = _editor_url(session_id, thread_id, job)
+        manifest_mod.save_session_thread(session_hash, thread_id, editor_url)
         job["chat_thread_id"] = thread_id
         job["editor_url"] = editor_url
         job_id = str(job.get("job_id") or "")
@@ -1250,7 +1298,9 @@ class ApiTransport:
             "assistant_id": "cassette-chat",
             "input": {"messages": [{"type": "human", "content": prompt}]},
             "config": config,
-            "multitask_strategy": "rollback",
+            # 'reject' (not the editor's 'rollback'): a plugin turn must never cancel a run the
+            # user started from the open editor tab — the busy turn fails typed instead.
+            "multitask_strategy": "reject",
             "stream_mode": _RUN_STREAM_MODES,
         }
         run_id = self._post_run(thread_id, run_body)
@@ -1523,7 +1573,15 @@ class ApiTransport:
             return
 
     def _post_run(self, thread_id: str, body: dict) -> str:
-        _, resp = self._request("POST", f"/api/langgraph/threads/{thread_id}/runs", json_body=body, expect=200)
+        status, resp = self._request("POST", f"/api/langgraph/threads/{thread_id}/runs", json_body=body)
+        if status == 422 and body.get("multitask_strategy") == "reject":
+            raise ApiTransportError(
+                "thread_busy",
+                "The session's editor thread is already running a turn (likely started from the "
+                "open editor tab); wait for it to finish and retry.",
+            )
+        if status != 200:
+            raise ApiTransportError("run_create_failed", f"LangGraph run create failed with HTTP {status}")
         run_id = (resp.get("run_id") or resp.get("runId")) if isinstance(resp, dict) else None
         if not run_id:
             raise ApiTransportError("run_create_failed", "LangGraph run create returned no run_id")

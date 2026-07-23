@@ -23,6 +23,7 @@ from .models import (
     AnswerQuestionInput,
     SessionPhase,
     CancelJobInput,
+    ConfigInput,
     IngestMediaInput,
     JamendoMatcherInput,
     JobStatusInput,
@@ -113,14 +114,24 @@ mcp = ArtifactFastMCP(
     instructions=(
         "Local video-editing MCP runtime for Oh My Cassette. It uses stdio, opens no port, "
         "and connects directly to the separate Cassette backend. "
-        "Guided flow: call cassette_ingest_media once per source file (reuse the returned session_id), "
-        "confirm assets with cassette_list_assets, optionally match BGM, build the brief with "
-        "cassette_make_prompt, then start cassette_run_job (background by default). "
+        "Courier doctrine: you relay a direct multi-turn conversation between the user and the "
+        "Cassette agent. Call cassette_ingest_media once per source file (reuse the returned "
+        "session_id), then for every editing request call cassette_run_job with message set to "
+        "the user's VERBATIM words — never rewrite, optimize, or expand them; the agent reads "
+        "the session's media itself (cassette_make_prompt is legacy browser-transport only). "
+        "One session = one persistent agent thread with memory and ONE stable editor_url. "
+        "A turn ends succeeded with the edit committed and nothing rendered, carrying "
+        "timeline_delta + quality.timeline_ctl + a contact-sheet artifact as the per-turn "
+        "preview; pass export=true only when the user expresses finish/export intent. "
+        "Model/thinking: never ask upfront (defaults match the web editor); when the user asks, "
+        "set them via cassette_config — applied from the next turn. "
         "Poll cassette_job_status with wait_for_change_sec=30 and route on the typed phase and next_action "
         "fields, never on prose: needs_user means ask the user then call cassette_answer_question; "
-        "review_required means evaluate the result and call cassette_review_completion (only "
-        "decision=export renders); exported or succeeded means present the validated artifacts; "
-        "failed, cancelled, or timed_out means report the structured error. Do not tight-poll. "
+        "review_required (export turns) means evaluate the result and call cassette_review_completion (only "
+        "decision=export renders); succeeded means relay the delta/preview and continue the "
+        "conversation; exported means present the validated artifacts; "
+        "failed, cancelled, or timed_out means report the structured error (thread_busy = a run "
+        "is already live on this session's thread; wait and retry). Do not tight-poll. "
         "Ground every statement about project state in cassette_timeline, never in memory, and "
         "name the version in replies. Small named edits (trim, text, delete, undo) go through "
         "cassette_edit when CASSETTE_DIRECT_EDIT=1: read the timeline first, pass "
@@ -496,8 +507,10 @@ async def cassette_answer_question(
     structured_output=True,
 )
 async def cassette_run_job(
-    prompt: str,
     ctx: Context,
+    message: str | None = None,
+    export: bool | None = None,
+    prompt: str | None = None,
     chat_message: str | None = None,
     cassette_message: str | None = None,
     instruction: str | None = None,
@@ -515,6 +528,8 @@ async def cassette_run_job(
 ) -> ToolEnvelope:
     request = RunJobInput.model_validate(
         {
+            "message": message,
+            "export": export,
             "prompt": prompt,
             "chat_message": chat_message,
             "cassette_message": cassette_message,
@@ -590,6 +605,29 @@ async def cassette_review_completion(
 async def cassette_cancel_job(job_id: str, ctx: Context) -> ToolEnvelope:
     request = CancelJobInput(job_id=job_id)
     return await _run_sync(_runtime(ctx).cancel_job, request.model_dump(exclude_none=True))
+
+
+@mcp.tool(
+    description=(
+        "Get or set the session's Cassette model and thinking level. Call with only session_id to "
+        "see the current choice and available options; pass model (id or label) and/or "
+        "thinking_level to change them — persisted for the session, applied from the next "
+        "cassette_run_job turn. Defaults match the web editor; change only when the user asks."
+    ),
+    structured_output=True,
+)
+async def cassette_config(
+    session_id: str,
+    ctx: Context,
+    model: str | None = None,
+    thinking_level: Literal["low", "medium", "high"] | None = None,
+) -> ToolEnvelope:
+    request = ConfigInput(session_id=session_id, model=model, thinking_level=thinking_level)
+    return await _run_sync(
+        _runtime(ctx).simple_session_tool,
+        "cassette_config",
+        request.model_dump(exclude_none=True),
+    )
 
 
 def main() -> None:

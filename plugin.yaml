@@ -25,6 +25,7 @@ provides_tools:
   - cassette_cancel_job
   - cassette_timeline
   - cassette_edit
+  - cassette_config
 provides_hooks:
   - pre_gateway_dispatch
   - pre_llm_call

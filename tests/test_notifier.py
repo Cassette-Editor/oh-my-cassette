@@ -868,12 +868,73 @@ def test_final_message_carries_live_link_and_delta():
     assert "Watch live: http://127.0.0.1:8080/try?projectSessionId=abc" in message
     assert "CHANGES v41 -> v42" in message
 
-    # Succeeded jobs keep the link but drop the mid-run delta block.
+    # A turn that ends without a render keeps the delta — it IS the per-turn preview.
     done = {**job, "status": "succeeded", "outputs": []}
     message = notifier.format_platform_final_message(done, platform="telegram")
     assert "Watch live:" in message
+    assert "CHANGES v41 -> v42" in message
+
+    # An exported job drops the mid-run delta block.
+    exported = {**job, "status": "succeeded", "outputs": [{"kind": "video", "local_path": "/tmp/x.mp4"}]}
+    message = notifier.format_platform_final_message(exported, platform="telegram")
     assert "CHANGES" not in message
 
     # zh platforms get the zh label.
     zh = notifier.format_platform_final_message({**job, "delivery": {"platform": "qqbot"}}, platform="qqbot")
     assert "实时查看：" in zh
+
+
+def test_final_message_turn_done_without_render_headlines(tmp_path: Path):
+    from cassette import notifier
+
+    job = {
+        "job_id": "cassette_turn",
+        "status": "succeeded",
+        "outputs": [],
+        "quality": {"progress_summary": "Trimmed the intro."},
+        "delivery": {"platform": "telegram"},
+        "timeline_delta": "CHANGES v1 -> v3  (2 changes)",
+    }
+    en = notifier.format_platform_final_message(job, platform="telegram")
+    assert "Cassette finished this turn" in en
+    assert "no export yet" in en
+    assert 'Say "export"' in en
+    # The defect-sounding delivery line must NOT appear on a conversational turn.
+    assert "No exported video file was detected yet." not in en
+
+    zh = notifier.format_platform_final_message({**job, "delivery": {"platform": "qqbot"}}, platform="qqbot")
+    assert "本轮剪辑已完成" in zh
+    assert "尚未导出" in zh
+    assert "当前未检测到导出视频文件" not in zh
+
+    # A REAL export that failed to materialize keeps the defect line (export_pending quality flag).
+    failed_export = {**job, "quality": {"export_pending": True}}
+    en_failed = notifier.format_platform_final_message(failed_export, platform="telegram")
+    assert "No exported video file was detected yet." in en_failed
+
+
+def test_terminal_notify_pushes_contact_sheet_at_turn_end(tmp_path: Path, monkeypatch):
+    from cassette import notifier
+
+    sheet = tmp_path / "sheet-v3.jpg"
+    sheet.write_bytes(b"jpg")
+    pushed = {}
+
+    def fake_snapshot(job, screenshot_path, summary=""):
+        pushed["path"] = screenshot_path
+        pushed["summary"] = summary
+        return {"status": "sent"}
+
+    monkeypatch.setattr(notifier, "notify_progress_snapshot", fake_snapshot)
+    monkeypatch.setattr(notifier, "format_platform_final_message", lambda *a, **k: "done")
+    monkeypatch.setattr(notifier, "_send_telegram_text", lambda *a, **k: {"success": True, "message_id": "m1"})
+
+    job = {
+        "job_id": "cassette_turn2",
+        "status": "succeeded",
+        "outputs": [],
+        "quality": {"contact_sheet": str(sheet)},
+        "delivery": {"platform": "telegram", "chat_id": "tg-chat"},
+    }
+    notifier.notify_terminal_job(job)
+    assert pushed.get("path") == str(sheet)

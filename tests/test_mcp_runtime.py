@@ -277,3 +277,26 @@ def test_mcp_ingest_mints_try_session_ids(tmp_path, monkeypatch):
     envelope = runtime.ingest_media({"source_path": "unused", "session_id": "legacy"}, roots=[])
     assert envelope.ok
     assert captured["session_id"] == "legacy"
+
+
+def test_run_job_multi_turn_phase_gating(tmp_path, monkeypatch):
+    """A settled turn (succeeded/guided) may start the next run; in-flight phases refuse."""
+    runtime = _runtime(tmp_path, monkeypatch)
+
+    runtime.state.transition("session", SessionPhase.GUIDED_CHOICES)
+    from_guided = runtime.run_job({"message": "turn", "session_id": "session", "wait": False})
+    assert from_guided.error is None or from_guided.error.code != "invalid_transition"
+
+    runtime.state.transition("session2", SessionPhase.RUNNING)
+    mid_run = runtime.run_job({"message": "turn", "session_id": "session2", "wait": False})
+    assert mid_run.ok is False
+    assert mid_run.error.code == "invalid_transition"
+
+    runtime.state.transition("session3", SessionPhase.SUCCEEDED)
+    next_turn = runtime.run_job({"message": "turn two", "session_id": "session3", "wait": False})
+    assert next_turn.error is None or next_turn.error.code != "invalid_transition"
+
+    runtime.state.transition("session4", SessionPhase.NEEDS_USER)
+    blocked = runtime.run_job({"message": "turn", "session_id": "session4", "wait": False})
+    assert blocked.ok is False
+    assert blocked.error.code == "invalid_transition"

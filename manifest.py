@@ -127,6 +127,39 @@ def save_manifest_atomic(session_hash: str, manifest: dict) -> None:
         raise CassetteError("manifest_write_failed", "Failed to write session manifest") from exc
 
 
+def session_thread_path(session_hash: str) -> Path:
+    return get_session_dir(session_hash) / "session_thread.json"
+
+
+def load_session_thread(session_hash: str) -> dict:
+    path = session_thread_path(session_hash)
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001 — a corrupt map just means minting a fresh thread
+        return {}
+
+
+def save_session_thread(session_hash: str, thread_id: str, editor_url: str | None = None) -> None:
+    path = session_thread_path(session_hash)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"thread_id": thread_id, "editor_url": editor_url, "updated_at": now_iso()}
+    fd, tmp_name = tempfile.mkstemp(prefix=".session_thread.", suffix=".json", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2, sort_keys=True)
+            fh.write("\n")
+        os.replace(tmp_name, path)
+    except Exception:  # noqa: BLE001 — losing the map is recoverable (new thread next run)
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+
+
 def _media_type_from_ext(ext: str) -> str:
     if ext in {".mp4", ".mov", ".m4v", ".webm"}:
         return "video"

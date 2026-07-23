@@ -47,3 +47,24 @@ def test_next_action_appends_editor_url_on_live_phases():
     # Mechanical phases never carry the link.
     assert url not in next_action_for(SessionPhase.NEW, editor_url=url)
     assert url not in next_action_for(SessionPhase.SUCCEEDED, editor_url=url)
+
+
+def test_multi_turn_transitions_and_next_actions(tmp_path):
+    from mcp_plugin.state import _ALLOWED, next_action_for
+    from mcp_plugin.models import SessionPhase
+
+    # A settled turn can flow straight into the next run.
+    assert SessionPhase.RUNNING in _ALLOWED[SessionPhase.GUIDED_CHOICES]
+    assert SessionPhase.RUNNING in _ALLOWED[SessionPhase.SUCCEEDED]
+    assert SessionPhase.RUNNING in _ALLOWED[SessionPhase.EXPORTED]
+
+    succeeded = next_action_for(SessionPhase.SUCCEEDED)
+    assert "nothing was rendered" in succeeded
+    assert "export=true" in succeeded
+    assert "cassette_run_job(message=...)" in succeeded
+
+    exported = next_action_for(SessionPhase.EXPORTED)
+    assert "artifact" in exported
+
+    ready = next_action_for(SessionPhase.READY)
+    assert "verbatim" in ready

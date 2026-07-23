@@ -31,7 +31,6 @@ def _assert_semantic_edit_gate(
     *,
     asset_count: int = 1,
     language: str = "zh",
-    expect_prompt_optimization: bool = True,
 ) -> None:
     assert result is not None
     assert result["action"] == "rewrite"
@@ -39,11 +38,11 @@ def _assert_semantic_edit_gate(
     assert f"Cassette gateway assets available: {asset_count} asset(s)" in result["text"]
     assert "Hermes must semantically decide" in result["text"]
     assert "Do not rely on keyword matching" in result["text"]
-    if expect_prompt_optimization:
-        if language == "en":
-            assert "Would you like me to optimize your edit instruction" in result["text"]
-        else:
-            assert "是否需要我先把你的剪辑指令优化" in result["text"]
+    # Direct line: the gate routes straight to a verbatim cassette_run_job message — no funnel.
+    assert "call cassette_run_job with message set to the edit instruction" in result["text"]
+    assert "Do not call cassette_make_prompt" in result["text"]
+    assert "是否需要我先把你的剪辑指令优化" not in result["text"]
+    assert "Would you like me to optimize your edit instruction" not in result["text"]
 
 
 def _cassette_debug_events(asset_root: Path) -> list[dict]:
@@ -179,53 +178,7 @@ def test_ingest_gateway_media_binds_followup_instruction_to_saved_assets(cassett
     result = tools.ingest_gateway_media(event=instruction_event, gateway=gateway)
 
     _assert_semantic_edit_gate(result, "剪成 10 秒短视频，加中文字幕")
-    assert "Do not call cassette_list_assets" in result["text"]
-    assert "cassette_run_job with cassette_make_prompt" not in result["text"]
     assert "wxid_chat_raw" not in result["text"]
-
-
-def test_ingest_gateway_media_requests_prompt_optimization_choice_with_fixed_reply(cassette_env):
-    media = cassette_env["source_root"] / "clip.mp4"
-    media.write_bytes(b"video")
-    sent = []
-    source = SimpleNamespace(
-        platform=SimpleNamespace(value="qqbot"),
-        chat_id="qq_openid_raw",
-        user_id="qq_user_raw",
-        chat_type="dm",
-    )
-    gateway = SimpleNamespace(
-        _is_user_authorized=lambda _: True,
-        adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
-    )
-    tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[str(media)],
-            media_types=["video/mp4"],
-            text="",
-            message_id="raw_message_id",
-        ),
-        gateway=gateway,
-    )
-
-    result = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text="/edit 剪成 10 秒短视频，加中文字幕",
-            message_id="raw_text_message_id",
-        ),
-        gateway=gateway,
-    )
-
-    assert result is not None
-    assert result["action"] == "skip"
-    assert result["reason"] == "cassette_prompt_optimization_choice_requested"
-    assert result["reply_sent"] is True
-    assert "是否需要我先把你的剪辑指令优化" in sent[-1][1]
-    assert "qq_openid_raw" not in json.dumps(result, ensure_ascii=False)
 
 
 def test_ingest_gateway_media_pings_cassette_before_prompt_choice(cassette_env, monkeypatch):
@@ -364,6 +317,7 @@ def test_ingest_gateway_media_does_not_treat_receive_complaint_as_asset_check(ca
 
 
 def test_ingest_gateway_media_loads_prompt_optimizer_document(cassette_env, monkeypatch, tmp_path):
+    """/refine (the explicit opt-in) loads the editable optimizer doc; plain edits never do."""
     doc = tmp_path / "optimizer.md"
     doc.write_text(
         "CUSTOM OPTIMIZER DOC\n\nPreserve explicit user intent. Ask for 确认 before Cassette.",
@@ -389,7 +343,7 @@ def test_ingest_gateway_media_loads_prompt_optimizer_document(cassette_env, monk
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    plain = tools.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -399,190 +353,25 @@ def test_ingest_gateway_media_loads_prompt_optimizer_document(cassette_env, monk
         ),
         gateway=gateway,
     )
+    _assert_semantic_edit_gate(plain, "剪成 10 秒短视频，加中文字幕")
+    assert "CUSTOM OPTIMIZER DOC" not in plain["text"]
 
-    _assert_semantic_edit_gate(result, "剪成 10 秒短视频，加中文字幕")
-    assert "CUSTOM OPTIMIZER DOC" not in result["text"]
-
-    accepted = tools.ingest_gateway_media(
+    refined = tools.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
             media_types=[],
-            text="优化",
-            message_id="optimize_choice_message_id",
+            text="/refine 剪成 10 秒短视频，加中文字幕",
+            message_id="refine_message_id",
         ),
         gateway=gateway,
     )
-
-    assert accepted is not None
-    assert accepted["action"] == "rewrite"
-    assert "smart BGM choice is required" in accepted["text"]
-    assert "CUSTOM OPTIMIZER DOC" not in accepted["text"]
-
-    bgm_declined = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text="不需要 BGM",
-            message_id="bgm_choice_message_id",
-        ),
-        gateway=gateway,
-    )
-
-    assert bgm_declined is not None
-    assert bgm_declined["action"] == "rewrite"
-    assert "Cassette prompt optimization accepted" in bgm_declined["text"]
-    assert "CUSTOM OPTIMIZER DOC" in bgm_declined["text"]
-    assert "Preserve explicit user intent" in bgm_declined["text"]
-    assert "professional editing brief optimizer" not in bgm_declined["text"]
-
-
-def test_ingest_gateway_media_declines_prompt_optimization_and_uses_original_instruction(cassette_env):
-    media = cassette_env["source_root"] / "clip.mp4"
-    media.write_bytes(b"video")
-    source = SimpleNamespace(
-        platform=SimpleNamespace(value="weixin"),
-        chat_id="wxid_chat_raw",
-        user_id="wxid_user_raw",
-    )
-    gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[str(media)],
-            media_types=["video/mp4"],
-            text="",
-            message_id="raw_message_id",
-        ),
-        gateway=gateway,
-    )
-    original = "剪成 10 秒短视频，加中文字幕"
-    tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text=original,
-            message_id="raw_text_message_id",
-        ),
-        gateway=gateway,
-    )
-
-    declined = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text="不优化，直接开始",
-            message_id="decline_message_id",
-        ),
-        gateway=gateway,
-    )
-
-    assert declined is not None
-    assert declined["action"] == "rewrite"
-    assert "smart BGM choice is required" in declined["text"]
-
-    bgm_declined = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text="不需要 BGM",
-            message_id="bgm_choice_message_id",
-        ),
-        gateway=gateway,
-    )
-
-    assert bgm_declined is not None
-    assert bgm_declined["action"] == "rewrite"
-    assert bgm_declined["text"].startswith(original)
-    assert "prompt optimization declined" in bgm_declined["text"]
-    assert "Use the original edit instruction above exactly" in bgm_declined["text"]
-    assert "cassette_list_assets" in bgm_declined["text"]
-    assert "cassette_make_prompt" in bgm_declined["text"]
-    assert "cassette_run_job" in bgm_declined["text"]
-    assert "prompt=cassette_make_prompt.data.prompt" in bgm_declined["text"]
-    assert "chat_message=cassette_make_prompt.data.chat_message" in bgm_declined["text"]
-    assert "progress screenshot notifications" in bgm_declined["text"]
-    assert "gateway delivery behavior" in bgm_declined["text"]
-    assert "not a lightweight/direct browser path" in bgm_declined["text"]
-    assert "professional editing brief optimizer" not in bgm_declined["text"]
-    assert "wxid_chat_raw" not in bgm_declined["text"]
-
-
-def test_smart_bgm_accept_requests_exact_song_recommendation_menu(cassette_env, monkeypatch):
-    monkeypatch.setattr(
-        tools,
-        "_freetouse_category_summary",
-        lambda: "- Action (Video); related tags: adrenaline, sports\n- Chill (Genre); related tags: mellow, relaxed",
-    )
-    media = cassette_env["source_root"] / "clip.mp4"
-    media.write_bytes(b"video")
-    source = SimpleNamespace(
-        platform=SimpleNamespace(value="weixin"),
-        chat_id="wxid_chat_raw",
-        user_id="wxid_user_raw",
-    )
-    sent = []
-    gateway = SimpleNamespace(
-        _is_user_authorized=lambda _: True,
-        adapters={"weixin": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
-    )
-    tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[str(media)],
-            media_types=["video/mp4"],
-            text="",
-            message_id="raw_message_id",
-        ),
-        gateway=gateway,
-    )
-    tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text="剪成燃一点的运动短视频",
-            message_id="raw_text_message_id",
-        ),
-        gateway=gateway,
-    )
-    tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text="不优化",
-            message_id="decline_message_id",
-        ),
-        gateway=gateway,
-    )
-
-    result = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text="需要 BGM",
-            message_id="bgm_choice_message_id",
-        ),
-        gateway=gateway,
-    )
-
-    assert result is not None
-    assert result["action"] == "rewrite"
-    assert "exactly five numbered options" in result["text"]
-    assert "recommend exactly 3 real songs" in result["text"]
-    assert "1.《歌名》- 歌手" in result["text"]
-    assert "4. 换一批" in result["text"]
-    assert "5. 随机匹配" in result["text"]
-    assert "第 4 和第 5 项是必须保留的控制选项" in result["text"]
-    assert "Do not call any tool yet" in result["text"]
-    assert "cassette_match_exact_bgm" in result["text"]
-    assert "wxid_chat_raw" not in result["text"]
+    assert refined is not None
+    assert refined["action"] == "rewrite"
+    assert "Cassette prompt optimization accepted" in refined["text"]
+    assert "CUSTOM OPTIMIZER DOC" in refined["text"]
+    assert "Preserve explicit user intent" in refined["text"]
+    assert "professional editing brief optimizer" not in refined["text"]
 
 
 def test_smart_bgm_recommendation_menu_requires_five_english_options(cassette_env):
@@ -616,12 +405,6 @@ def test_exact_bgm_selection_choice_calls_exact_tool(cassette_env):
             source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
         ),
         gateway=gateway,
-    )
-    tools._mark_initial_edit_choices_completed(
-        tools._gateway_session_id(SimpleNamespace(source=source), None),
-        optimization_enabled=False,
-        smart_bgm_enabled=True,
-        source="test",
     )
     session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
     tools._save_pending_edit(
@@ -1215,13 +998,9 @@ def test_ingest_gateway_media_binds_confirmation_to_confirmed_optimized_prompt(c
     assert result is not None
     assert result["action"] == "rewrite"
     assert "optimized prompt confirmed" in result["text"]
-    assert "Use that confirmed optimized brief as the instruction" in result["text"]
-    assert "cassette_list_assets" in result["text"]
-    assert "cassette_make_prompt" in result["text"]
-    assert "cassette_run_job" in result["text"]
-    assert "prompt=cassette_make_prompt.data.prompt" in result["text"]
-    assert "chat_message=cassette_make_prompt.data.chat_message" in result["text"]
-    assert "progress screenshot notifications" in result["text"]
+    assert "Use that confirmed optimized brief as the message for cassette_run_job" in result["text"]
+    assert "call cassette_run_job with message set to the edit instruction" in result["text"]
+    assert "Do not call cassette_make_prompt" in result["text"]
     assert "gateway delivery behavior" in result["text"]
     assert "Do not use the short confirmation word itself" in result["text"]
     assert "wxid_chat_raw" not in result["text"]
@@ -1832,13 +1611,9 @@ def test_ingest_gateway_media_asks_hermes_to_classify_ambiguous_followup(cassett
     )
 
     assert result is not None
-    assert result["action"] == "rewrite"
-    assert result["text"].startswith("按这个感觉来")
-    assert "Hermes must semantically decide" in result["text"]
-    assert "是否需要我先把你的剪辑指令优化" in result["text"]
-    pending = tools._load_pending_edit(session_id)
-    assert pending["state"] == "awaiting_optimization_choice"
-    assert pending["semantic_gate"] is True
+    _assert_semantic_edit_gate(result, "按这个感觉来")
+    # No pending funnel state is saved any more — the gate routes verbatim in one hop.
+    assert tools._load_pending_edit(session_id) is None
 
 
 def test_ingest_gateway_media_clears_semantic_gate_on_unrelated_followup(cassette_env):
@@ -1954,7 +1729,8 @@ def test_gateway_edit_slash_command_forces_saved_asset_edit_flow(cassette_env):
     assert result["text"].startswith("按这个感觉来")
     assert "/edit" not in result["text"].split("\n", 1)[0]
     assert "Cassette gateway assets available: 1 asset(s)" in result["text"]
-    assert "whether to use the prompt optimization feature" in result["text"]
+    assert "call cassette_run_job with message set to the edit instruction" in result["text"]
+    assert "Do not call cassette_make_prompt" in result["text"]
     assert "qq_openid_raw" not in result["text"]
 
 
@@ -1992,85 +1768,7 @@ def test_gateway_edit_slash_command_without_assets_gets_fixed_reply(cassette_env
     assert "qq_openid_raw" not in json.dumps(result, ensure_ascii=False)
 
 
-def test_gateway_first_edit_requests_cassette_model_choice_once(cassette_env, monkeypatch):
-    monkeypatch.setenv("CASSETTE_GATEWAY_MODEL_CHOICE_ENABLED", "1")
-    monkeypatch.setattr(
-        tools.browser,
-        "fetch_cassette_model_options",
-        lambda language="zh": {
-            "models": [{"label": "DeepSeek V4 Flash"}, {"label": "Kimi K2.6"}],
-            "thinking_levels": [
-                {"label": "低", "value": "Low"},
-                {"label": "中", "value": "Medium"},
-                {"label": "高", "value": "High"},
-            ],
-            "source": "cassette_agent_page",
-            "language": language,
-        },
-    )
-    media = cassette_env["source_root"] / "clip.mp4"
-    media.write_bytes(b"video")
-    sent = []
-    source = SimpleNamespace(
-        platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm"
-    )
-    gateway = SimpleNamespace(
-        _is_user_authorized=lambda _: True,
-        adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
-    )
-    tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
-        ),
-        gateway=gateway,
-    )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
-
-    requested = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source, media_urls=[], media_types=[], text="/edit 剪成10秒短片", message_id="edit_message_id"
-        ),
-        gateway=gateway,
-    )
-    assert requested is not None
-    assert requested["reason"] == "cassette_model_choice_requested"
-    assert "请选择当前 Cassette 会话使用的模型" in sent[-1][1]
-    assert "1. DeepSeek V4 Flash" in sent[-1][1]
-    assert "2. Kimi K2.6" in sent[-1][1]
-
-    model_choice = tools.ingest_gateway_media(
-        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="2", message_id="model_choice"),
-        gateway=gateway,
-    )
-    assert model_choice is not None
-    assert model_choice["reason"] == "cassette_model_thinking_choice_requested"
-    assert "已选择模型：Kimi K2.6" in sent[-1][1]
-    assert "3. 高" in sent[-1][1]
-
-    thinking_choice = tools.ingest_gateway_media(
-        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="3", message_id="thinking_choice"),
-        gateway=gateway,
-    )
-    assert thinking_choice is not None
-    assert thinking_choice["reason"] == "cassette_prompt_optimization_choice_requested"
-    prefs = tools._load_session_preferences(session_id)
-    assert prefs["cassette_model"] == "Kimi K2.6"
-    assert prefs["cassette_thinking_level"] == "High"
-    assert prefs["cassette_model_selection_completed"] is True
-
-
-def test_gateway_model_choice_rejects_non_choice_without_semantic_fallback(cassette_env, monkeypatch):
-    monkeypatch.setenv("CASSETTE_GATEWAY_MODEL_CHOICE_ENABLED", "1")
-    monkeypatch.setattr(
-        tools.browser,
-        "fetch_cassette_model_options",
-        lambda language="zh": {
-            "models": [{"label": "DeepSeek V4 Flash"}, {"label": "Kimi K2.6"}],
-            "thinking_levels": [{"label": "低", "value": "Low"}],
-            "source": "cassette_agent_page",
-            "language": language,
-        },
-    )
+def test_gateway_model_choice_rejects_non_choice_without_semantic_fallback(cassette_env):
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
     sent = []
@@ -2090,7 +1788,7 @@ def test_gateway_model_choice_rejects_non_choice_without_semantic_fallback(casse
     session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
     tools.ingest_gateway_media(
         event=SimpleNamespace(
-            source=source, media_urls=[], media_types=[], text="剪成10秒短片", message_id="semantic_edit_message_id"
+            source=source, media_urls=[], media_types=[], text="/cassette_model", message_id="model_command"
         ),
         gateway=gateway,
     )
@@ -2108,18 +1806,7 @@ def test_gateway_model_choice_rejects_non_choice_without_semantic_fallback(casse
     assert tools._load_pending_edit(session_id)["state"] == "awaiting_model_choice"
 
 
-def test_gateway_cut_slash_command_clears_pending_model_choice(cassette_env, monkeypatch):
-    monkeypatch.setenv("CASSETTE_GATEWAY_MODEL_CHOICE_ENABLED", "1")
-    monkeypatch.setattr(
-        tools.browser,
-        "fetch_cassette_model_options",
-        lambda language="zh": {
-            "models": [{"label": "DeepSeek V4 Flash"}],
-            "thinking_levels": [{"label": "低", "value": "Low"}],
-            "source": "cassette_agent_page",
-            "language": language,
-        },
-    )
+def test_gateway_cut_slash_command_clears_pending_model_choice(cassette_env):
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
     sent = []
@@ -2139,7 +1826,7 @@ def test_gateway_cut_slash_command_clears_pending_model_choice(cassette_env, mon
     session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
     tools.ingest_gateway_media(
         event=SimpleNamespace(
-            source=source, media_urls=[], media_types=[], text="/edit 剪成10秒短片", message_id="edit_message_id"
+            source=source, media_urls=[], media_types=[], text="/cassette_model", message_id="model_command"
         ),
         gateway=gateway,
     )
@@ -2157,117 +1844,7 @@ def test_gateway_cut_slash_command_clears_pending_model_choice(cassette_env, mon
     assert "已请求停止当前 Cassette 操作" in sent[-1][1]
 
 
-def test_gateway_semantic_first_edit_requests_cassette_model_choice_before_bgm(cassette_env, monkeypatch):
-    monkeypatch.setenv("CASSETTE_GATEWAY_MODEL_CHOICE_ENABLED", "1")
-    monkeypatch.setattr(
-        tools.browser,
-        "fetch_cassette_model_options",
-        lambda language="zh": {
-            "models": [{"label": "DeepSeek V4 Flash"}, {"label": "Kimi K2.6"}],
-            "thinking_levels": [
-                {"label": "低", "value": "Low"},
-                {"label": "中", "value": "Medium"},
-                {"label": "高", "value": "High"},
-            ],
-            "source": "cassette_agent_page",
-            "language": language,
-        },
-    )
-    media = cassette_env["source_root"] / "clip.mp4"
-    media.write_bytes(b"video")
-    sent = []
-    source = SimpleNamespace(
-        platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm"
-    )
-    gateway = SimpleNamespace(
-        _is_user_authorized=lambda _: True,
-        adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
-    )
-    tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
-        ),
-        gateway=gateway,
-    )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
-
-    semantic_gate = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source, media_urls=[], media_types=[], text="剪成10秒短片", message_id="semantic_edit_message_id"
-        ),
-        gateway=gateway,
-    )
-    _assert_semantic_edit_gate(semantic_gate, "剪成10秒短片", expect_prompt_optimization=False)
-    assert "请选择当前 Cassette 会话使用的模型" in semantic_gate["text"]
-    assert "是否需要我先把你的剪辑指令优化" not in semantic_gate["text"]
-    assert "Do not call cassette_list_assets" in semantic_gate["text"]
-
-    model_choice = tools.ingest_gateway_media(
-        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="2", message_id="model_choice"),
-        gateway=gateway,
-    )
-    assert model_choice is not None
-    assert model_choice["reason"] == "cassette_model_thinking_choice_requested"
-    assert "已选择模型：Kimi K2.6" in sent[-1][1]
-
-    thinking_choice = tools.ingest_gateway_media(
-        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="3", message_id="thinking_choice"),
-        gateway=gateway,
-    )
-    assert thinking_choice is not None
-    assert thinking_choice["reason"] == "cassette_prompt_optimization_choice_requested"
-    assert "是否需要我先把你的剪辑指令优化" in sent[-1][1]
-
-    declined = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source, media_urls=[], media_types=[], text="不优化", message_id="optimization_choice"
-        ),
-        gateway=gateway,
-    )
-    assert declined is not None
-    assert declined["reason"] == "cassette_smart_bgm_choice_requested"
-    assert "是否需要我根据剪辑指令智能匹配一首 BGM" in sent[-1][1]
-    pending = tools._load_pending_edit(session_id)
-    assert pending["state"] == "awaiting_bgm_choice"
-    assert pending["optimization_enabled"] is False
-    prefs = tools._load_session_preferences(session_id)
-    assert prefs["cassette_model"] == "Kimi K2.6"
-    assert prefs["cassette_thinking_level"] == "High"
-    assert prefs["cassette_model_selection_completed"] is True
-
-    bgm_declined = tools.ingest_gateway_media(
-        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="不需要 BGM", message_id="bgm_choice"),
-        gateway=gateway,
-    )
-    assert bgm_declined is not None
-    assert "prompt optimization declined" in bgm_declined["text"]
-
-    followup = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source, media_urls=[], media_types=[], text="把字幕换成黄色", message_id="followup_edit"
-        ),
-        gateway=gateway,
-    )
-    assert followup is not None
-    assert followup["action"] == "rewrite"
-    assert followup["text"].startswith("把字幕换成黄色")
-    assert "follow-up edit" in followup["text"]
-    assert "请选择当前 Cassette 会话使用的模型" not in followup["text"]
-    assert "whether to use the prompt optimization feature" not in followup["text"]
-    assert "是否需要我先把你的剪辑指令优化" not in followup["text"]
-
-
 def test_gateway_cassette_model_command_sets_preference_without_assets(cassette_env, monkeypatch):
-    monkeypatch.setattr(
-        tools.browser,
-        "fetch_cassette_model_options",
-        lambda language="zh": {
-            "models": [{"label": "DeepSeek V4 Flash"}, {"label": "MiMo V2.5 Pro"}],
-            "thinking_levels": [{"label": "低", "value": "Low"}, {"label": "高", "value": "High"}],
-            "source": "cassette_agent_page",
-            "language": language,
-        },
-    )
     sent = []
     source = SimpleNamespace(
         platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm"
@@ -2286,7 +1863,7 @@ def test_gateway_cassette_model_command_sets_preference_without_assets(cassette_
     )
     assert result is not None
     assert result["reason"] == "cassette_model_choice_requested"
-    assert "MiMo V2.5 Pro" in sent[-1][1]
+    assert "DeepSeek V4 Pro" in sent[-1][1]
 
     tools.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="2", message_id="model_choice"),
@@ -2299,36 +1876,8 @@ def test_gateway_cassette_model_command_sets_preference_without_assets(cassette_
     assert result is not None
     assert result["reason"] == "cassette_model_set"
     prefs = tools._load_session_preferences(session_id)
-    assert prefs["cassette_model"] == "MiMo V2.5 Pro"
-    assert prefs["cassette_thinking_level"] == "High"
-
-
-def test_gateway_model_choice_does_not_fallback_to_hardcoded_options(cassette_env, monkeypatch):
-    def fail_fetch(language="zh"):
-        raise RuntimeError("cassette_unreachable")
-
-    monkeypatch.setattr(tools.browser, "fetch_cassette_model_options", fail_fetch)
-    sent = []
-    source = SimpleNamespace(
-        platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm"
-    )
-    gateway = SimpleNamespace(
-        _is_user_authorized=lambda _: True,
-        adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
-    )
-
-    result = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source, media_urls=[], media_types=[], text="/cassette_model", message_id="model_command"
-        ),
-        gateway=gateway,
-    )
-
-    assert result is not None
-    assert result["reason"] == "cassette_model_options_unavailable"
-    assert "无法从 Cassette 页面获取模型列表" in sent[-1][1]
-    assert "DeepSeek" not in sent[-1][1]
-    assert "Kimi" not in sent[-1][1]
+    assert prefs["cassette_model"] == "DeepSeek V4 Pro"
+    assert prefs["cassette_thinking_level"] == "Medium"
 
 
 def test_gateway_cut_slash_command_requests_active_job_cancel(cassette_env):
@@ -2681,6 +2230,7 @@ def test_gateway_cassette_cut_subcommand_requests_active_job_cancel(cassette_env
 
 
 def test_gateway_followup_edit_skips_initial_choice_questions(cassette_env):
+    """Every gateway edit — first or follow-up — routes verbatim with no choice questions."""
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
     source = SimpleNamespace(
@@ -2711,34 +2261,7 @@ def test_gateway_followup_edit_skips_initial_choice_questions(cassette_env):
         ),
         gateway=gateway,
     )
-    assert first is not None
     _assert_semantic_edit_gate(first, "剪成 10 秒短视频，加中文字幕")
-
-    declined = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text="不优化",
-            message_id="raw_decline",
-        ),
-        gateway=gateway,
-    )
-    assert declined is not None
-    assert "smart BGM choice is required" in declined["text"]
-
-    bgm_declined = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text="不需要 BGM",
-            message_id="raw_bgm_decline",
-        ),
-        gateway=gateway,
-    )
-    assert bgm_declined is not None
-    assert "prompt optimization declined" in bgm_declined["text"]
 
     followup_instruction = "请把字幕换成黄色并重新导出"
     followup = tools.ingest_gateway_media(
@@ -2751,15 +2274,7 @@ def test_gateway_followup_edit_skips_initial_choice_questions(cassette_env):
         ),
         gateway=gateway,
     )
-
-    assert followup is not None
-    assert followup["action"] == "rewrite"
-    assert followup["text"].startswith(followup_instruction)
-    assert "Hermes must semantically decide" in followup["text"]
-    assert "follow-up edit" in followup["text"]
-    assert "whether to use the prompt optimization feature" not in followup["text"]
-    assert "smart BGM choice" not in followup["text"]
-    assert "qq_openid_raw" not in followup["text"]
+    _assert_semantic_edit_gate(followup, followup_instruction)
 
 
 def test_gateway_retry_after_exact_bgm_selection_does_not_reask_or_rematch_bgm(cassette_env, monkeypatch):
@@ -2786,39 +2301,13 @@ def test_gateway_retry_after_exact_bgm_selection_does_not_reask_or_rematch_bgm(c
     )
 
     first_instruction = "给我的视频配上一个流行歌要温柔男声"
-    first = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text=first_instruction,
-            message_id="raw_first_instruction",
-        ),
-        gateway=gateway,
-    )
-    assert first is not None
-    _assert_semantic_edit_gate(first, first_instruction)
-
-    declined = tools.ingest_gateway_media(
-        event=SimpleNamespace(
-            source=source,
-            media_urls=[],
-            media_types=[],
-            text="不优化",
-            message_id="raw_decline",
-        ),
-        gateway=gateway,
-    )
-    assert declined is not None
-    assert "smart BGM choice is required" in declined["text"]
-
     bgm_accepted = tools.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
             media_types=[],
-            text="需要 BGM",
-            message_id="raw_bgm_accept",
+            text=f"/music {first_instruction}",
+            message_id="raw_music_command",
         ),
         gateway=gateway,
     )
@@ -2857,15 +2346,16 @@ def test_gateway_retry_after_exact_bgm_selection_does_not_reask_or_rematch_bgm(c
     assert retry["action"] == "rewrite"
     assert retry["text"].startswith(first_instruction)
     assert "Hermes must semantically decide" in retry["text"]
-    assert "follow-up edit" in retry["text"]
-    assert "whether to use the prompt optimization feature" not in retry["text"]
-    assert "smart BGM choice" not in retry["text"]
+    assert "call cassette_run_job with message set to the edit instruction" in retry["text"]
+    assert "是否需要" not in retry["text"]
     assert "jamendo_music_matcher" not in retry["text"]
     assert "cassette_match_bgm" not in retry["text"]
     tools._JAMENDO_DISABLED_CODE = None
 
 
-def test_stale_bgm_pending_does_not_overwrite_completed_initial_choices(cassette_env):
+def test_stale_funnel_pending_state_is_cleared_and_routed_verbatim(cassette_env):
+    """Pre-0.4.1 sessions may have awaiting_optimization_choice / awaiting_bgm_choice files on
+    disk; the next message must clear them and route straight to the verbatim direct lane."""
     media = cassette_env["source_root"] / "clip.mp4"
     media.write_bytes(b"video")
     source = SimpleNamespace(
@@ -2875,54 +2365,33 @@ def test_stale_bgm_pending_does_not_overwrite_completed_initial_choices(cassette
         chat_type="dm",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    media_event = SimpleNamespace(
-        source=source,
-        media_urls=[str(media)],
-        media_types=["video/mp4"],
-        text="",
-        message_id="raw_message_id",
-    )
-    session_id = tools._gateway_session_id(media_event)
-    tools.ingest_gateway_media(event=media_event, gateway=gateway)
-    tools._mark_initial_edit_choices_completed(
-        session_id,
-        optimization_enabled=False,
-        smart_bgm_enabled=True,
-        source="initial_bgm_accept",
-    )
-    tools._save_pending_edit(
-        session_id,
-        "给我的视频配上一个流行歌要温柔男声",
-        1,
-        "awaiting_bgm_choice",
-        optimization_enabled=False,
-    )
-
-    retry = tools.ingest_gateway_media(
+    tools.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
-            media_urls=[],
-            media_types=[],
-            text="不需要 BGM",
-            message_id="raw_retry_instruction",
+            media_urls=[str(media)],
+            media_types=["video/mp4"],
+            text="",
+            message_id="raw_message_id",
         ),
         gateway=gateway,
     )
+    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    for stale_state in ("awaiting_optimization_choice", "awaiting_bgm_choice"):
+        tools._save_pending_edit(session_id, "旧的剪辑指令", 1, stale_state)
 
-    prefs = tools._load_session_preferences(session_id)
-    assert prefs["initial_choice_source"] == "initial_bgm_accept"
-    assert prefs["smart_bgm_enabled"] is True
-    assert tools._load_pending_edit(session_id) is None
-    assert retry is not None
-    assert retry["action"] == "rewrite"
-    assert "follow-up edit" in retry["text"]
-    assert "bgm_declined_by_user" not in retry["text"]
+        result = tools.ingest_gateway_media(
+            event=SimpleNamespace(
+                source=source,
+                media_urls=[],
+                media_types=[],
+                text="剪成 10 秒短视频",
+                message_id=f"after_{stale_state}",
+            ),
+            gateway=gateway,
+        )
 
-
-def test_bgm_accept_does_not_treat_full_retry_instruction_as_yes(cassette_env):
-    assert tools._looks_like_bgm_accept("需要 BGM") is True
-    assert tools._looks_like_bgm_accept("好的") is True
-    assert tools._looks_like_bgm_accept("给我的视频配上一个流行歌要温柔男声") is False
+        _assert_semantic_edit_gate(result, "剪成 10 秒短视频")
+        assert tools._load_pending_edit(session_id) is None
 
 
 def test_gateway_reserved_slash_command_does_not_satisfy_pending_choice(cassette_env):
@@ -3733,3 +3202,102 @@ def test_ingest_gateway_media_skips_unauthorized_video(cassette_env):
 
     assert tools.ingest_gateway_media(event=event, gateway=gateway) is None
     assert not cassette_env["asset_root"].exists()
+
+
+def test_run_job_message_only_is_verbatim_and_sufficient(cassette_env, monkeypatch):
+    observed = {}
+
+    def fake_browser_run(job):
+        observed["job"] = dict(job)
+        return {
+            "status": "succeeded",
+            "outputs": [],
+            "questions": [],
+            "errors": [],
+            "quality": {},
+            "final_screenshot": None,
+        }
+
+    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    payload = json.loads(tools.cassette_run_job({"message": "把开头两秒剪掉", "session_id": "verbatim"}))
+
+    assert payload["ok"] is True
+    assert observed["job"]["message"] == "把开头两秒剪掉"
+    # No export arg -> the job carries no export_on_complete override (transport default applies).
+    assert "export_on_complete" not in observed["job"]
+
+
+def test_run_job_export_flag_sets_per_turn_export_intent(cassette_env, monkeypatch):
+    observed = {}
+
+    def fake_browser_run(job):
+        observed["job"] = dict(job)
+        return {
+            "status": "succeeded",
+            "outputs": [],
+            "questions": [],
+            "errors": [],
+            "quality": {},
+            "final_screenshot": None,
+        }
+
+    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    assert json.loads(tools.cassette_run_job({"message": "导出", "export": True, "session_id": "exp1"}))["ok"]
+    assert observed["job"]["export_on_complete"] == "true"
+    assert json.loads(tools.cassette_run_job({"message": "继续", "export": False, "session_id": "exp2"}))["ok"]
+    assert observed["job"]["export_on_complete"] == "false"
+
+
+def test_run_job_requires_message_or_prompt(cassette_env):
+    payload = json.loads(tools.cassette_run_job({"session_id": "empty"}))
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "missing_required_arg"
+
+
+def test_cassette_config_get_returns_defaults_and_options(cassette_env):
+    payload = json.loads(tools.cassette_config({"session_id": "cfg-get"}))
+    assert payload["ok"] is True
+    data = payload["data"]
+    assert data["model"] == "DeepSeek V4 Flash"
+    assert data["thinking_level"] == "Low"
+    assert data["source"] == "default"
+    labels = [m["label"] for m in data["options"]["models"]]
+    assert labels == ["DeepSeek V4 Flash", "DeepSeek V4 Pro", "GPT 5.4 Mini"]
+    assert data["options"]["source"] == "static_product_list"
+
+
+def test_cassette_config_set_persists_and_applies_to_model_selection(cassette_env):
+    set_payload = json.loads(
+        tools.cassette_config(
+            {"session_id": "cfg-set", "model": "deepseek/deepseek-v4-pro", "thinking_level": "medium"}
+        )
+    )
+    assert set_payload["ok"] is True
+    assert set_payload["data"]["model"] == "DeepSeek V4 Pro"
+    assert set_payload["data"]["thinking_level"] == "Medium"
+    assert set_payload["data"]["source"] == "session_preference"
+
+    # The preference now drives run_job model selection on ANY host (no delivery/platform gate).
+    selection = tools._cassette_model_selection({"session_id": "cfg-set"}, None)
+    assert selection == {"model": "DeepSeek V4 Pro", "thinking_level": "Medium", "source": "session_preference"}
+
+    # Explicit run args still beat the session preference.
+    explicit = tools._cassette_model_selection({"session_id": "cfg-set", "cassette_model": "GPT 5.4 Mini"}, None)
+    assert explicit["model"] == "GPT 5.4 Mini"
+    assert explicit["source"] == "user_or_default"
+
+
+def test_cassette_config_accepts_label_and_rejects_unknown(cassette_env):
+    by_label = json.loads(tools.cassette_config({"session_id": "cfg-label", "model": "gpt 5.4 mini"}))
+    assert by_label["ok"] and by_label["data"]["model"] == "GPT 5.4 Mini"
+
+    bad_model = json.loads(tools.cassette_config({"session_id": "cfg-label", "model": "gpt-9-ultra"}))
+    assert bad_model["ok"] is False and bad_model["error"]["code"] == "invalid_cassette_model"
+
+    bad_thinking = json.loads(tools.cassette_config({"session_id": "cfg-label", "thinking_level": "max"}))
+    assert bad_thinking["ok"] is False and bad_thinking["error"]["code"] == "invalid_thinking_level"
+
+    # Thinking-only set keeps the saved model.
+    only_thinking = json.loads(tools.cassette_config({"session_id": "cfg-label", "thinking_level": "high"}))
+    assert only_thinking["ok"] and only_thinking["data"]["model"] == "GPT 5.4 Mini"
+    assert only_thinking["data"]["thinking_level"] == "High"

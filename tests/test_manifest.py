@@ -99,3 +99,27 @@ def test_qq_video_is_saved_as_internal_h264(cassette_env, monkeypatch):
 
     assert Path(ingested["saved_path"]).name.endswith(".h264.mp4")
     assert Path(ingested["saved_path"]).read_bytes() == b"h264-video"
+
+
+def test_session_thread_round_trip(cassette_env):
+    sess_hash = manifest.resolve_session_hash(session_id="try-session-abc")
+    assert manifest.load_session_thread(sess_hash) == {}
+
+    manifest.save_session_thread(sess_hash, "11111111-2222-3333-4444-555555555555", "http://web/try?x=1")
+    saved = manifest.load_session_thread(sess_hash)
+    assert saved["thread_id"] == "11111111-2222-3333-4444-555555555555"
+    assert saved["editor_url"] == "http://web/try?x=1"
+    assert saved["updated_at"]
+
+    manifest.save_session_thread(sess_hash, "new-thread", None)
+    assert manifest.load_session_thread(sess_hash)["thread_id"] == "new-thread"
+
+
+def test_session_thread_corrupt_file_returns_empty(cassette_env):
+    sess_hash = manifest.resolve_session_hash(session_id="try-session-corrupt")
+    path = manifest.session_thread_path(sess_hash)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("not-json{", encoding="utf-8")
+    assert manifest.load_session_thread(sess_hash) == {}
+    path.write_text('["a-list"]', encoding="utf-8")
+    assert manifest.load_session_thread(sess_hash) == {}
