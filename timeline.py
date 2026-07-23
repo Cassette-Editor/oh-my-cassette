@@ -103,6 +103,14 @@ def clip_letters(document: dict) -> dict[str, str]:
     return letters
 
 
+def clips_in_timeline_order(document: dict) -> list[dict]:
+    """All non-gap clips, track order then start time — the order the contact sheet tiles."""
+    ordered: list[dict] = []
+    for track in _tracks_in_order(document):
+        ordered.extend(_track_clips(document, str(track.get("id"))))
+    return ordered
+
+
 def total_duration_seconds(document: dict) -> float:
     fps = _timebase(document)
     end = 0.0

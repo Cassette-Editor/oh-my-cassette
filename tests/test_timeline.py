@@ -137,3 +137,46 @@ def test_plan_review_block_bounded():
     assert "1 generative moment" in block
     long = timeline.plan_review_block({"reviewMarkdown": "x" * 2000}, doc)
     assert len(long) <= 700
+
+
+def test_contact_sheet_from_data_uri_posters(tmp_path, monkeypatch):
+    import base64
+    import shutil
+    import subprocess
+
+    import pytest as _pytest
+
+    from cassette import tools
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        _pytest.skip("ffmpeg not installed")
+    monkeypatch.setenv("CASSETTE_ASSET_ROOT", str(tmp_path))
+    # Render two tiny real jpegs via ffmpeg so the tile input is a decodable poster.
+    poster = tmp_path / "poster.jpg"
+    subprocess.run(
+        [ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x36:d=1", "-frames:v", "1", str(poster)],
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )
+    data_uri = "data:image/jpeg;base64," + base64.b64encode(poster.read_bytes()).decode()
+    doc = _sample_doc()
+    for clip in doc["entities"]["clips"].values():
+        clip["thumbnail"] = data_uri
+
+    sheet = tools.build_contact_sheet(doc, "try-session-abc")
+    assert sheet is not None
+    from pathlib import Path
+
+    out = Path(sheet)
+    assert out.exists() and out.stat().st_size > 0
+    assert out.parent == tmp_path / "previews" / "try-session-abc"
+    assert out.name == "sheet-v42.jpg"
+
+
+def test_contact_sheet_skips_without_posters(tmp_path, monkeypatch):
+    from cassette import tools
+
+    monkeypatch.setenv("CASSETTE_ASSET_ROOT", str(tmp_path))
+    assert tools.build_contact_sheet(_sample_doc(), "try-session-abc") is None

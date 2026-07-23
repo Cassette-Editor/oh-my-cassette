@@ -30,6 +30,7 @@ EXPECTED_TOOLS = {
     "cassette_job_status",
     "cassette_review_completion",
     "cassette_cancel_job",
+    "cassette_timeline",
 }
 
 

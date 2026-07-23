@@ -434,6 +434,9 @@ class ApiTransport:
                         "completion_source": "cassette_agent_success",
                         "progress_summary": edit_summary,
                         "current_stage": "agent",
+                        # The export gate must never again be judged blind: attach the timeline
+                        # digest + contact sheet so the reviewer sees what would be exported.
+                        **self._timeline_review_context(session_id),
                     },
                 )
             if not _export_on_complete(job):
@@ -620,6 +623,9 @@ class ApiTransport:
                         "completion_source": "cassette_agent_success",
                         "progress_summary": edit_summary,
                         "current_stage": "agent",
+                        # The export gate must never again be judged blind: attach the timeline
+                        # digest + contact sheet so the reviewer sees what would be exported.
+                        **self._timeline_review_context(session_id),
                     },
                 )
             if not _export_on_complete(job):
@@ -949,6 +955,33 @@ class ApiTransport:
             raise ApiTransportError("upload_put_failed", f"Presigned PUT failed (HTTP {exc.code})") from exc
         except URLError as exc:
             raise ApiTransportError("upload_put_failed", f"Presigned PUT failed: {exc.reason}") from exc
+
+    def _timeline_review_context(self, session_id: str) -> dict:
+        """Best-effort CTL + contact sheet for review moments — never fails the run."""
+        try:
+            from . import timeline as timeline_mod
+            from . import tools as tools_mod
+
+            document = self.get_project_document(session_id)
+            context: dict[str, Any] = {"timeline_ctl": timeline_mod.render_ctl(document)}
+            sheet = tools_mod.build_contact_sheet(document, session_id)
+            if sheet:
+                context["contact_sheet"] = sheet
+            return context
+        except Exception:  # noqa: BLE001
+            return {}
+
+    # ── project document read ─────────────────────────────────────────────────
+    def get_project_document(self, session_id: str) -> dict:
+        """Fetch the live ProjectDocument for a session's project (agent-tier read)."""
+        from urllib.parse import quote
+
+        self._authenticate()
+        _, body = self._request("GET", f"/api/projects/{quote(str(session_id), safe='')}", expect=200)
+        document = body.get("document") if isinstance(body, dict) else None
+        if not isinstance(document, dict):
+            raise ApiTransportError("project_document_missing", "Cassette returned no project document")
+        return document
 
     # ── agent run ─────────────────────────────────────────────────────────────
     def _create_thread(self, session_id: str, job: dict) -> str:

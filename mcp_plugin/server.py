@@ -27,6 +27,7 @@ from .models import (
     JamendoMatcherInput,
     JobStatusInput,
     ListAssetsInput,
+    TimelineInput,
     MakePromptInput,
     MatchBgmInput,
     MatchExactBgmInput,
@@ -245,6 +246,25 @@ async def cassette_list_assets(
 ) -> ToolEnvelope:
     request = ListAssetsInput(session_id=session_id, chat_id=chat_id)
     return await _run_sync(_runtime(ctx).list_assets, request.model_dump(exclude_none=True))
+
+
+@mcp.tool(
+    description=(
+        "Read the live Cassette timeline as a bounded text digest (CTL). Call this before any "
+        "statement about project state — never answer from memory. contact_sheet=true also tiles "
+        "the stored clip posters into one image (zero render)."
+    ),
+    structured_output=True,
+)
+async def cassette_timeline(
+    session_id: str,
+    ctx: Context,
+    detail: str | None = None,
+    profile: Literal["aligned", "gateway"] | None = None,
+    contact_sheet: bool = False,
+) -> ToolEnvelope:
+    request = TimelineInput(session_id=session_id, detail=detail, profile=profile, contact_sheet=contact_sheet)
+    return await _run_sync(_runtime(ctx).timeline, request.model_dump(exclude_none=True))
 
 
 @mcp.tool(

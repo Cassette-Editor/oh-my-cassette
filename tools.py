@@ -1024,6 +1024,104 @@ def cassette_cancel_job(a: dict, **kw) -> str:
     return ok({"job_id": job["job_id"], "status": job["status"]}, job_id=job["job_id"])
 
 
+def _previews_dir(session_id: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", session_id)[:120] or "session"
+    return Path(os.getenv("CASSETTE_ASSET_ROOT", str(manifest.get_asset_root()))) / "previews" / safe
+
+
+def build_contact_sheet(document: dict, session_id: str) -> str | None:
+    """Tile stored clip poster thumbnails (base64 data URIs on the document) into one jpeg.
+
+    Zero server render: the posters were captured at upload time. Returns None when there is
+    nothing to tile or ffmpeg is unavailable — the CTL text always stands on its own."""
+    import base64
+    import shutil
+    import subprocess
+
+    from . import timeline as timeline_mod
+
+    try:
+        clips = [
+            c
+            for c in timeline_mod.clips_in_timeline_order(document)
+            if isinstance(c.get("thumbnail"), str) and c["thumbnail"].startswith("data:image")
+        ][:8]
+        if not clips:
+            return None
+        ffmpeg = os.getenv("CASSETTE_FFMPEG_BIN", "ffmpeg")
+        if not shutil.which(ffmpeg):
+            return None
+        out_dir = _previews_dir(session_id)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        target = out_dir / f"sheet-v{document.get('version', 0)}.jpg"
+        if target.exists() and target.stat().st_size:
+            return str(target)  # per-version sheets are immutable
+        with tempfile.TemporaryDirectory(dir=str(out_dir)) as tmp:
+            for index, clip in enumerate(clips):
+                _, _, b64 = str(clip["thumbnail"]).partition(",")
+                (Path(tmp) / f"in_{index:02d}.jpg").write_bytes(base64.b64decode(b64 or "", validate=False))
+            cols = min(4, len(clips))
+            rows = -(-len(clips) // cols)
+            subprocess.run(
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-y",
+                    "-framerate",
+                    "1",
+                    "-i",
+                    str(Path(tmp) / "in_%02d.jpg"),
+                    "-vf",
+                    (
+                        "scale=320:180:force_original_aspect_ratio=decrease,"
+                        "pad=320:180:(ow-iw)/2:(oh-ih)/2:color=0x07080b,"
+                        f"tile={cols}x{rows}:padding=4:color=0x07080b"
+                    ),
+                    "-frames:v",
+                    "1",
+                    str(target),
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+        return str(target) if target.exists() and target.stat().st_size else None
+    except Exception:  # noqa: BLE001 — the sheet is an enhancement, never a failure mode
+        return None
+
+
+@safe_tool
+def cassette_timeline(a: dict, **kw) -> str:
+    """Read the live project timeline as a bounded text digest (+ optional contact sheet)."""
+    session_id = str(a.get("session_id") or "").strip()
+    if not session_id:
+        raise CassetteError("missing_required_arg", "session_id is required")
+    from . import api_transport as api_mod
+    from . import timeline as timeline_mod
+
+    document = api_mod.ApiTransport().get_project_document(session_id)
+    profile = str(a.get("profile") or "").strip().lower()
+    detail = str(a.get("detail") or "").strip() or None
+    if profile == "gateway":
+        ctl = timeline_mod.render_ctl_gateway(document)
+    else:
+        ctl = timeline_mod.render_ctl(document, detail=detail)
+    data: dict[str, Any] = {
+        "ctl": ctl,
+        "version": document.get("version", 0),
+        "duration_sec": round(timeline_mod.total_duration_seconds(document), 1),
+        "clip_count": len(timeline_mod.clips_in_timeline_order(document)),
+    }
+    if a.get("contact_sheet"):
+        sheet = build_contact_sheet(document, session_id)
+        if sheet:
+            data["contact_sheet_path"] = sheet
+        else:
+            data["contact_sheet_path"] = None
+            data["contact_sheet_note"] = "no clip posters available yet (or ffmpeg missing)"
+    return ok(data)
+
+
 def check_playwright() -> bool:
     # Transport-readiness gate: under the browser transport this checks Playwright;
     # under the API transport it checks that the API base URL + credentials are configured.

@@ -197,6 +197,39 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
                     ],
                 },
             )
+        if path.startswith("/api/projects/"):
+            sid = path.split("/api/projects/", 1)[1]
+            return self._json(
+                200,
+                {
+                    "document": {
+                        "schemaVersion": 2,
+                        "projectId": sid,
+                        "version": 7,
+                        "sequenceTimebase": {"num": 30, "den": 1},
+                        "fps": 30,
+                        "compositionWidth": 1920,
+                        "compositionHeight": 1080,
+                        "entities": {
+                            "tracks": {
+                                "t1": {"id": "t1", "name": "Video 1", "type": "video"},
+                            },
+                            "clips": {
+                                "c1": {
+                                    "id": "c1",
+                                    "name": "intro.mp4",
+                                    "type": "video",
+                                    "trackId": "t1",
+                                    "startFrame": 0,
+                                    "durationInFrames": 90,
+                                },
+                            },
+                            "transitions": {},
+                        },
+                        "order": {"trackIds": ["t1"], "clipIds": ["c1"], "transitionIds": []},
+                    }
+                },
+            )
         if path == "/api/export/jobs/ej-1":
             return self._json(200, {"jobId": "ej-1", "status": "done", "fileUrl": "/api/export/jobs/ej-1/file"})
         if path == "/api/export/jobs/ej-1/file":
@@ -949,3 +982,35 @@ def test_auth_token_override_skips_verify(cassette_env, mock_api, monkeypatch):
     result = ApiTransport().run_job(job)
     assert result["status"] == "succeeded", result["errors"]
     assert ("POST", "/api/agent-auth/verify") not in mock_api.rec["requests"]
+
+
+def test_cassette_timeline_tool_reads_live_document(cassette_env, mock_api):
+    result = json.loads(tools.cassette_timeline({"session_id": "try-session-abc"}))
+    assert result["ok"], result
+    data = result["data"]
+    assert data["version"] == 7
+    assert data["clip_count"] == 1
+    assert data["duration_sec"] == 3.0
+    assert data["ctl"].splitlines()[0].startswith("TIMELINE try-session-abc v7")
+    assert "intro.mp4" in data["ctl"]
+    # Gateway profile renders without column padding.
+    gateway = json.loads(tools.cassette_timeline({"session_id": "try-session-abc", "profile": "gateway"}))
+    assert gateway["ok"] and "→" in gateway["data"]["ctl"] or "intro.mp4" in gateway["data"]["ctl"]
+
+
+def test_completion_review_carries_timeline_context(cassette_env, mock_api, monkeypatch, tmp_path):
+    """The export-review gate attaches the CTL (and sheet when possible) — never judged blind."""
+    monkeypatch.delenv("CASSETTE_API_AUTO_EXPORT", raising=False)
+    job = {
+        "job_id": "job-review-ctx",
+        "session_hash": "rv",
+        "cassette_session_id": "try-session-rv",
+        "prompt": "edit",
+        "asset_paths": [],
+        "timeout_sec": 60,
+        "options": {},
+    }
+    result = ApiTransport().run_job(job)
+    assert result["status"] == "needs_user"
+    assert result["quality"]["completion_review_required"] is True
+    assert result["quality"]["timeline_ctl"].startswith("TIMELINE try-session-rv v7")

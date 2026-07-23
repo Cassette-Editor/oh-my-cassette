@@ -321,6 +321,33 @@ CASSETTE_REVIEW_COMPLETION = {
     },
 }
 
+CASSETTE_TIMELINE = {
+    "name": "cassette_timeline",
+    "description": (
+        "Read the live Cassette project timeline as a bounded text digest (CTL). Use it before any "
+        "statement about project state — never answer from memory. Optional contact_sheet tiles the "
+        "stored clip posters into one image (zero render)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "session_id": {"type": "string"},
+            "detail": {
+                "type": "string",
+                "description": "Expand one track fully, e.g. 'track:V1'. Omit for the capped digest.",
+            },
+            "profile": {
+                "type": "string",
+                "enum": ["aligned", "gateway"],
+                "description": "aligned = fixed-width for monospace surfaces; gateway = unpadded for chat apps.",
+            },
+            "contact_sheet": {"type": "boolean", "default": False},
+        },
+        "required": ["session_id"],
+        "additionalProperties": False,
+    },
+}
+
 CASSETTE_CANCEL_JOB = {
     "name": "cassette_cancel_job",
     "description": "Request cancellation for a persisted Cassette job. The worker observes the state and exits cleanly.",
