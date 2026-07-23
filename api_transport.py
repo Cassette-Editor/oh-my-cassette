@@ -248,6 +248,47 @@ def _http_timeout() -> float:
     return _env_num("CASSETTE_API_HTTP_TIMEOUT_SEC", 60.0, 5.0)
 
 
+def _unattended() -> bool:
+    # One switch restoring today's fully headless semantics (auto-approve plans, classifier-answered
+    # questions) for CI-style runs.
+    return _env("CASSETTE_UNATTENDED").lower() in {"1", "true", "yes", "on"}
+
+
+def _plan_review_mode() -> str:
+    """'user' surfaces edit_plan_review as a real question; 'auto' keeps silent approval.
+
+    Default: 'user' on MCP hosts (the person is present in the chat), 'auto' for gateway/Hermes
+    background jobs where a blocking review would stall unattended pipelines."""
+    value = _env("CASSETTE_PLAN_REVIEW").lower()
+    if value in {"user", "auto"}:
+        return value
+    try:
+        import runtime_config
+
+        if runtime_config.runtime_adapter() == runtime_config.MCP_ADAPTER:
+            return "user"
+    except Exception:  # noqa: BLE001
+        pass
+    return "auto"
+
+
+def _plan_review_resume(answer: str) -> dict:
+    """Map a free-text reply onto the bare PlanReviewDecision the graph expects."""
+    text = str(answer or "").strip()
+    lowered = text.lower()
+    if lowered in {"approve", "approved", "yes", "ok", "okay", "lgtm", "同意", "批准", "可以"} or lowered.startswith(
+        "approve"
+    ):
+        return {"action": "approve"}
+    if lowered in {"reject", "rejected", "no", "cancel", "拒绝", "取消"}:
+        return {"action": "reject"}
+    if lowered.startswith("revise"):
+        feedback = text[len("revise") :].strip(" :,-") or "Please revise the plan."
+        return {"action": "revise", "feedback": feedback}
+    # Any other free text is revision feedback — the safest reading of "change it to…".
+    return {"action": "revise", "feedback": text}
+
+
 def _stream_enabled() -> bool:
     # SSE event listener (timeline deltas + plan progress). Default on; CASSETTE_API_STREAM=0
     # restores a pure-poll transport. Status polling stays the run driver either way — the
@@ -386,7 +427,15 @@ class ApiTransport:
                     completion_observed=True,
                     export_completed=False,
                     risk="medium",
-                    extra_quality={"progress_summary": self._questions_summary(questions)},
+                    extra_quality={
+                        "progress_summary": self._questions_summary(questions),
+                        # Plan review is judged against the timeline, so attach the digest.
+                        **(
+                            self._timeline_review_context(session_id)
+                            if any(q.get("reason") == "edit_plan_review" for q in questions)
+                            else {}
+                        ),
+                    },
                 )
             if run_status == _TIMED_OUT:
                 errors.append(
@@ -564,7 +613,15 @@ class ApiTransport:
                 raise ApiTransportError("missing_required_arg", "response is required to resume a Cassette job")
             self._authenticate()
             interrupts = self._pending_interrupts(thread_id)
-            if not any((item.get("value") or {}).get("type") == "ask_user" for item in interrupts):
+            pending_kinds = {(item.get("value") or {}).get("type") for item in interrupts}
+            if "edit_plan_review" in pending_kinds:
+                # Bare PlanReviewDecision — approve / revise <feedback> / reject, mapped from the
+                # user's free-text reply. First-answer-wins with an open editor tab: if the tab
+                # already decided, the pending set is empty and we raise the same clean error.
+                resume_payload: dict[str, Any] = _plan_review_resume(answer)
+            elif "ask_user" in pending_kinds:
+                resume_payload = {"action": "respond", "userResponse": answer}
+            else:
                 raise ApiTransportError(
                     "resume_not_waiting_for_user",
                     "The persisted API thread is no longer waiting for a user response.",
@@ -574,7 +631,7 @@ class ApiTransport:
                 thread_id,
                 {
                     "assistant_id": "cassette-chat",
-                    "command": {"resume": {"action": "respond", "userResponse": answer}},
+                    "command": {"resume": resume_payload},
                     "config": config,
                     "multitask_strategy": "interrupt",
                     "stream_mode": _RUN_STREAM_MODES,
@@ -599,7 +656,15 @@ class ApiTransport:
                     completion_observed=True,
                     export_completed=False,
                     risk="medium",
-                    extra_quality={"progress_summary": self._questions_summary(questions)},
+                    extra_quality={
+                        "progress_summary": self._questions_summary(questions),
+                        # Plan review is judged against the timeline, so attach the digest.
+                        **(
+                            self._timeline_review_context(session_id)
+                            if any(q.get("reason") == "edit_plan_review" for q in questions)
+                            else {}
+                        ),
+                    },
                 )
             if run_status == _TIMED_OUT:
                 errors.append(
@@ -1533,15 +1598,31 @@ class ApiTransport:
             # Each auto-handled interrupt leaves an audit record (requires_user=False), matching the
             # browser path's routine-approval question entries.
             if kind == "edit_plan_review":
+                if _unattended() or _plan_review_mode() != "user":
+                    questions.append(
+                        {
+                            "question": "Cassette requested plan approval.",
+                            "requires_user": False,
+                            "reason": "routine_plan_approval",
+                            "answer": "Auto-approved the edit plan.",
+                        }
+                    )
+                    return {"action": "approve"}, questions, False
+                # Web-agent-page parity: the plan is a decision, not a formality. Surface it as a
+                # real question (approve / revise <feedback> / reject) instead of eating it.
+                from . import timeline as timeline_mod
+
+                payload = value.get("payload") if isinstance(value.get("payload"), dict) else {}
+                block = timeline_mod.plan_review_block(payload)
                 questions.append(
                     {
-                        "question": "Cassette requested plan approval.",
-                        "requires_user": False,
-                        "reason": "routine_plan_approval",
-                        "answer": "Auto-approved the edit plan.",
+                        "question": block,
+                        "requires_user": True,
+                        "reason": "edit_plan_review",
+                        "answer": "",
                     }
                 )
-                return {"action": "approve"}, questions, False
+                return None, questions, True
             if kind == "mode_switch":
                 questions.append(
                     {

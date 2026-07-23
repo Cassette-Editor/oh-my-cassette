@@ -1014,3 +1014,104 @@ def test_completion_review_carries_timeline_context(cassette_env, mock_api, monk
     assert result["status"] == "needs_user"
     assert result["quality"]["completion_review_required"] is True
     assert result["quality"]["timeline_ctl"].startswith("TIMELINE try-session-rv v7")
+
+
+class _PlanReviewAPI(_MockCassetteAPI):
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/langgraph/threads/th-1/state":
+            self.rec["requests"].append(("GET", path))
+            return self._json(
+                200,
+                {
+                    "values": {},
+                    "tasks": [
+                        {
+                            "interrupts": [
+                                {
+                                    "id": "int-plan",
+                                    "value": {
+                                        "type": "edit_plan_review",
+                                        "toolCallId": "tc-1",
+                                        "payload": {
+                                            "reviewMarkdown": "1. Trim beach to 9.5s\n2. Add title 'Sunset'",
+                                            "planContract": {},
+                                        },
+                                    },
+                                }
+                            ]
+                        }
+                    ],
+                },
+            )
+        return super().do_GET()
+
+
+@pytest.fixture
+def plan_review_api(monkeypatch):
+    server = _serve(_PlanReviewAPI, monkeypatch)
+    monkeypatch.delenv("CASSETTE_API_AUTO_EXPORT", raising=False)
+    monkeypatch.delenv("CASSETTE_UNATTENDED", raising=False)
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+def test_plan_review_surfaces_as_question_and_resumes(cassette_env, plan_review_api, monkeypatch):
+    monkeypatch.setenv("CASSETTE_PLAN_REVIEW", "user")
+    job = jobs.create_job("pr", "edit", None, [], {"cassette_session_id": "try-session-pr"})
+
+    result = ApiTransport().run_job(job)
+    assert result["status"] == "needs_user", result["errors"]
+    question = next(q for q in result["questions"] if q["reason"] == "edit_plan_review")
+    assert question["requires_user"] is True
+    assert "Trim beach" in question["question"]
+    assert "approve / revise" in question["question"]
+    # Plan review is judged against the timeline: the CTL digest rides along.
+    assert result["quality"]["timeline_ctl"].startswith("TIMELINE try-session-pr")
+
+    # Resume with a decision word -> bare PlanReviewDecision on the wire.
+    jobs.update_job(job["job_id"], **result, continuation=jobs.load_job(job["job_id"]).get("continuation"))
+    resumed = ApiTransport().resume(jobs.load_job(job["job_id"]), "approve")
+    assert plan_review_api.rec["resume_value"] == {"action": "approve"}
+    assert resumed["status"] in {"succeeded", "needs_user"}
+
+
+def test_plan_review_auto_approved_when_unattended(cassette_env, plan_review_api, monkeypatch):
+    monkeypatch.setenv("CASSETTE_PLAN_REVIEW", "user")
+    monkeypatch.setenv("CASSETTE_UNATTENDED", "1")
+    job = jobs.create_job("pru", "edit", None, [], {"cassette_session_id": "try-session-pru"})
+    result = ApiTransport().run_job(job)
+    assert result["status"] in {"succeeded", "needs_user"}
+    assert plan_review_api.rec["resume_value"] == {"action": "approve"}
+    audit = next(q for q in result["questions"] if q["reason"] == "routine_plan_approval")
+    assert audit["requires_user"] is False
+
+
+def test_plan_review_resume_mapping():
+    from cassette.api_transport import _plan_review_resume
+
+    assert _plan_review_resume("approve") == {"action": "approve"}
+    assert _plan_review_resume("Approved!") == {"action": "approve"}
+    assert _plan_review_resume("reject") == {"action": "reject"}
+    assert _plan_review_resume("revise: use the sunset clip first") == {
+        "action": "revise",
+        "feedback": "use the sunset clip first",
+    }
+    assert _plan_review_resume("make the intro shorter") == {
+        "action": "revise",
+        "feedback": "make the intro shorter",
+    }
+
+
+def test_plan_review_mode_defaults(monkeypatch):
+    from cassette.api_transport import _plan_review_mode
+
+    monkeypatch.delenv("CASSETTE_PLAN_REVIEW", raising=False)
+    monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "mcp")
+    assert _plan_review_mode() == "user"
+    monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "")
+    assert _plan_review_mode() == "auto"
+    monkeypatch.setenv("CASSETTE_PLAN_REVIEW", "auto")
+    monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "mcp")
+    assert _plan_review_mode() == "auto"
