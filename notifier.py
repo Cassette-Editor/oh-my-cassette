@@ -636,6 +636,16 @@ def _append_delivery_block(lines: list[str], message: str, *, language: str) -> 
     lines.extend(["", "**Delivery**" if language == "en" else "**交付状态**", f"- {message}"])
 
 
+def _append_live_context(lines: list[str], job: dict, language: str) -> None:
+    """Timeline delta (needs_user only) + the /try live link, both bounded by construction."""
+    delta = str(job.get("timeline_delta") or "").strip()
+    if delta and job.get("status") == "needs_user":
+        lines.append(f"```\n{delta}\n```")
+    url = str(job.get("editor_url") or "").strip()
+    if url:
+        lines.append(("Watch live: " if language == "en" else "实时查看：") + url)
+
+
 def format_platform_final_message(job: dict, media_delivery: str | None = None, platform: str | None = None) -> str:
     platform = _normalize_platform(platform or (job.get("delivery") or {}).get("platform"))
     platform_label = _platform_label(platform)
@@ -684,6 +694,7 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
             elif export_pending:
                 delivery_line = "No exported video file was detected yet."
             _append_delivery_block(lines, delivery_line, language=language)
+        _append_live_context(lines, job, language)
         return "\n".join(lines).strip()
 
     if status == "succeeded":
@@ -730,6 +741,7 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
         elif export_pending:
             delivery_line = "当前未检测到导出视频文件。"
         _append_delivery_block(lines, delivery_line, language=language)
+    _append_live_context(lines, job, language)
     return "\n".join(lines).strip()
 
 
@@ -1270,8 +1282,10 @@ def notify_progress_snapshot(job: dict, screenshot_path: str, summary: str = "")
 def _desktop_terminal_message(job: dict) -> str:
     status = str(job.get("status") or "")
     job_id = str(job.get("job_id") or "")
+    url = str(job.get("editor_url") or "").strip()
+    suffix = f" — {url}" if url and status == "needs_user" else ""
     if status == "needs_user":
-        return f"Cassette needs your input ({job_id})"
+        return f"Cassette needs your input ({job_id}){suffix}"
     if status == "succeeded":
         for output in job.get("outputs") or []:
             if isinstance(output, dict) and output.get("local_path"):
@@ -1332,6 +1346,15 @@ def notify_terminal_job(job: dict) -> dict:
         return {"status": "skipped", "reason": "missing_chat_id"}
     chat_type = delivery.get("chat_type")
     thread_id = delivery.get("thread_id")
+    # Completion review is judged from the phone: push the contact sheet (stored clip posters,
+    # zero render) alongside the review question so the export gate is never decided blind.
+    quality = job.get("quality") if isinstance(job.get("quality"), dict) else {}
+    sheet = str(quality.get("contact_sheet") or "").strip()
+    if job.get("status") == "needs_user" and sheet and Path(sheet).exists():
+        try:
+            notify_progress_snapshot(job, sheet, summary="Timeline contact sheet (source frames, not composed output)")
+        except Exception:  # noqa: BLE001 — the sheet is an enhancement, never a delivery blocker
+            pass
     if platform == "web":
         exported_paths = _exported_media_paths(job) if job.get("status") == "succeeded" else []
         message = format_platform_final_message(

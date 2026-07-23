@@ -46,6 +46,16 @@ The named monitoring budget is `CASSETTE_MCP_MONITOR_BUDGET_SEC`, defaulting to 
 
 API jobs persist private thread and interrupt metadata and can resume after Codex or Claude restarts. Browser-transport jobs can resume only while the same MCP process retains the browser session; after restart, surface `browser_session_lost` and start a new browser job if the user wants to continue.
 
+## Timeline grounding and the live editor
+
+- Every user-visible statement about project state comes from `cassette_timeline`, never from memory. Name the version in replies: "Quick edit v42→v43: trimmed the intro to 4.0s."
+- Lane routing: when the ask names specific clips or values and needs at most a handful of operations, read `cassette_timeline` then use `cassette_edit` (requires `CASSETTE_DIRECT_EDIT=1`; pass `expected_version` from the read; a `stale_timeline` error means re-read and retry). When it needs watching footage, music sync, or a plan, use `cassette_run_job`.
+- Job envelopes carry `editor_url` — a live view of the real editor (timeline, scrubbing preview, plan-review card; zero render). Hand it to the user once at job start and again at questions/review; on desktop offer to open it (`open <url>` on macOS, `xdg-open` on Linux). Do not repeat it on every status poll.
+- `cassette_job_status` responses carry `timeline_delta` (cumulative changes since the run started) and `plan_progress`; relay the delta rather than re-describing the timeline.
+- At completion review, `quality.timeline_ctl` and the contact-sheet artifact (source frames, not composed output) accompany the review question — judge the export against them and the live link, not against prose alone.
+- Preview escalation, one step per explicit user ask: text digest → contact sheet (`cassette_timeline` with `contact_sheet=true`) → the `editor_url` live view → full export. Never auto-render.
+- Plan review: with `CASSETTE_PLAN_REVIEW=user` (the MCP default) a job pauses with an `edit_plan_review` question — the plan itself. Relay it verbatim with the link; answer via `cassette_answer_question` with `approve`, `revise <feedback>`, or `reject`. The user may instead decide in the open editor tab: a `resume_not_waiting_for_user` error means the tab answered first — just re-check status.
+
 ## Cancellation and handoff
 
 - Call `cassette_cancel_job` only when the user asks to stop the edit.
