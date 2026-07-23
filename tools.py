@@ -1180,7 +1180,7 @@ def cassette_edit(a: dict, **kw) -> str:
                 details={"tools": _DIRECT_EDIT_TOOLS, "undo": _UNDO_TOOL},
             )
         if not isinstance(a.get("input"), dict):
-            raise CassetteError("missing_required_arg", "input (the tool's payload object) is required")
+            raise CassetteError("missing_required_arg", 'input is required and always shaped {"payload": {...}}')
         command = {"type": "agent-tool", "toolName": tool_name, "input": a["input"]}
         envelope = {
             "commandId": str(_uuid.uuid4()),

@@ -371,7 +371,7 @@ CASSETTE_EDIT = {
                     "timeline_audio, timeline_track, timeline_transition, undo."
                 ),
             },
-            "input": {"type": "object", "description": "The tool's payload; server-validated with precise errors."},
+            "input": {"type": "object", "description": "Always {\"payload\": {...}} — the tool's payload wrapped in a payload key; server-validated with precise errors."},
             "expected_version": {"type": "integer", "description": "Document version from the last timeline read."},
         },
         "required": ["session_id", "tool_name"],
