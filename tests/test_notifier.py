@@ -938,3 +938,34 @@ def test_terminal_notify_pushes_contact_sheet_at_turn_end(tmp_path: Path, monkey
     }
     notifier.notify_terminal_job(job)
     assert pushed.get("path") == str(sheet)
+
+
+def test_terminal_notify_prefers_storyboard_sheet_at_plan_review(tmp_path: Path, monkeypatch):
+    from cassette import notifier
+
+    contact = tmp_path / "sheet-v3.jpg"
+    contact.write_bytes(b"jpg")
+    storyboard = tmp_path / "storyboard-abc.jpg"
+    storyboard.write_bytes(b"jpg")
+    pushed = []
+
+    monkeypatch.setattr(
+        notifier,
+        "notify_progress_snapshot",
+        lambda job, screenshot_path, summary="": pushed.append((screenshot_path, summary)) or {"status": "sent"},
+    )
+    monkeypatch.setattr(notifier, "format_platform_final_message", lambda *a, **k: "plan?")
+    monkeypatch.setattr(notifier, "_send_telegram_text", lambda *a, **k: {"success": True, "message_id": "m1"})
+
+    job = {
+        "job_id": "cassette_plan1",
+        "status": "needs_user",
+        "outputs": [],
+        "quality": {"contact_sheet": str(contact), "storyboard_sheet": str(storyboard)},
+        "delivery": {"platform": "telegram", "chat_id": "tg-chat"},
+    }
+    notifier.notify_terminal_job(job)
+    # One image per notification: the plan is judged on PLANNED beats, so the
+    # storyboard wins over the current-timeline contact sheet.
+    assert [p for p, _ in pushed] == [str(storyboard)]
+    assert "storyboard" in pushed[0][1].lower()

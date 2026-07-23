@@ -1090,6 +1090,84 @@ def test_plan_review_surfaces_as_question_and_resumes(cassette_env, plan_review_
     assert resumed["status"] in {"succeeded", "needs_user"}
 
 
+class _StoryboardPlanReviewAPI(_PlanReviewAPI):
+    # One beat-board card + one generative-moment card, hrefs from repo B's real encoder.
+    _MARKDOWN = (
+        "## Beat board\n"
+        "[Hook · 0:18–0:22](media://storyboard/media-hook?i=0&role=hook&d=4&look=manual&cov=source&hero=1"
+        "&s=18&e=22&p=Open+on+the+wave) "
+        "[B Roll · 3s](media://storyboard/none?i=1&role=b_roll&d=3&look=manual&cov=generated&p=Cover+the+gap)\n"
+        "## Generative moments\n"
+        "- **Restyle** · 0:00–0:02 [Source](media://storyboard/media-hook?i=0&role=restyle&d=2&look=restyle"
+        "&cov=mixed&s=0&e=2&p=neon+look)"
+    )
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/langgraph/threads/th-1/state":
+            self.rec["requests"].append(("GET", path))
+            return self._json(
+                200,
+                {
+                    "values": {},
+                    "tasks": [
+                        {
+                            "interrupts": [
+                                {
+                                    "id": "int-plan",
+                                    "value": {
+                                        "type": "edit_plan_review",
+                                        "toolCallId": "tc-1",
+                                        "payload": {"reviewMarkdown": self._MARKDOWN, "planContract": {}},
+                                    },
+                                }
+                            ]
+                        }
+                    ],
+                },
+            )
+        return _MockCassetteAPI.do_GET(self)
+
+
+def test_plan_review_storyboard_cells_and_sheet(cassette_env, monkeypatch):
+    from cassette import tools
+
+    server = _serve(_StoryboardPlanReviewAPI, monkeypatch)
+    try:
+        monkeypatch.delenv("CASSETTE_UNATTENDED", raising=False)
+        monkeypatch.setenv("CASSETTE_PLAN_REVIEW", "user")
+        monkeypatch.setattr(tools, "build_storyboard_sheet", lambda sid, frames: "/tmp/storyboard-abc.jpg")
+        job = jobs.create_job("prs", "edit", None, [], {"cassette_session_id": "try-session-prs"})
+
+        result = ApiTransport().run_job(job)
+        assert result["status"] == "needs_user", result["errors"]
+        question = next(q for q in result["questions"] if q["reason"] == "edit_plan_review")
+        # The raw urlencoded hrefs never reach the digest; the readable labels do.
+        assert "media://storyboard" not in question["question"]
+        assert "Hook · 0:18–0:22" in question["question"]
+        # Typed beat cells ride the question AND the quality context (both beat-board
+        # cards plus the restyle moment card, in markdown order).
+        frames = question["storyboard"]
+        assert [f["role"] for f in frames] == ["hook", "b_roll", "restyle"]
+        assert frames[0] == {
+            "index": 0,
+            "mediaFileId": "media-hook",
+            "startSec": 18,
+            "endSec": 22,
+            "role": "hook",
+            "durationSec": 4,
+            "look": "manual",
+            "hero": True,
+            "coverage": "source",
+            "purpose": "Open on the wave",
+        }
+        assert result["quality"]["storyboard"] == frames
+        assert result["quality"]["storyboard_sheet"] == "/tmp/storyboard-abc.jpg"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_plan_review_auto_approved_when_unattended(cassette_env, plan_review_api, monkeypatch):
     monkeypatch.setenv("CASSETTE_PLAN_REVIEW", "user")
     monkeypatch.setenv("CASSETTE_UNATTENDED", "1")

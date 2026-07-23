@@ -12,6 +12,12 @@ conventional commits.
 ### Features
 
 * direct line + multi-turn sessions — verbatim messages, session threads, per-turn previews, cassette_config ([#35](https://github.com/Cassette-Editor/oh-my-cassette/issues/35)) ([1494c0c](https://github.com/Cassette-Editor/oh-my-cassette/commit/1494c0cd00f603d906ca7feec9790c199199b6d3))
+* plan-review storyboard — the edit plan's `media://storyboard/...` beat links are decoded into readable cells in the question text (no urlencoded noise), exposed as typed `quality.storyboard` beat data, and rendered locally into a `quality.storyboard_sheet` image (one source frame per planned beat from the session's ingested media, zero server render); gateways receive the storyboard sheet with the plan-review push, other preview moments keep the timeline contact sheet
+
+
+### Notes
+
+* the Cassette backend now deterministically reconciles a plan's numeric self-contradictions (beat pacing vs its own authored selects, source ranges beyond the media end) instead of failing the run with `GuideValidationError`; a turn that previously died mid-run now completes or degrades to a conversational "retry" reply
 
 ## [0.4.0](https://github.com/Cassette-Editor/oh-my-cassette/compare/v0.3.3...v0.4.0) (2026-07-23)
 
