@@ -1274,6 +1274,108 @@ def build_contact_sheet(document: dict, session_id: str) -> str | None:
         return None
 
 
+def build_storyboard_sheet(session_id: str, frames: list[dict]) -> str | None:
+    """Tile one poster frame per planned storyboard beat into a jpeg (zero server render).
+
+    ``frames`` are decoded ``media://storyboard/...`` refs from the plan's reviewMarkdown
+    (timeline.storyboard_frames). Each beat's frame comes from the locally ingested source
+    file (mediaFileId via the session upload cache), taken at the beat's source-window
+    midpoint — the exact footage the plan proposes, before anything is executed. A beat
+    with no resolvable source (generated coverage, or media the plugin never ingested)
+    gets a dark placeholder cell so cell order always matches the digest's beat order,
+    mirroring the web StoryboardCard's fail-open. Restyle-moment refs (role 'restyle')
+    duplicate beat windows and are skipped. Sheets are cached per frame-set digest.
+    Returns None when ffmpeg is unavailable or no beats decode."""
+    import hashlib
+    import shutil
+    import subprocess
+
+    try:
+        beats = [f for f in frames if isinstance(f, dict) and f.get("role") != "restyle"][:8]
+        if not beats:
+            return None
+        ffmpeg = os.getenv("CASSETTE_FFMPEG_BIN", "ffmpeg")
+        if not shutil.which(ffmpeg):
+            return None
+        out_dir = _previews_dir(session_id)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha1(json.dumps(beats, sort_keys=True).encode("utf-8")).hexdigest()[:10]
+        target = out_dir / f"storyboard-{digest}.jpg"
+        if target.exists() and target.stat().st_size:
+            return str(target)  # per-plan sheets are immutable
+
+        by_id, _ = _sheet_media_lookup(session_id)
+        with tempfile.TemporaryDirectory(dir=str(out_dir)) as tmp:
+            cell_index = 0
+            for frame in beats:
+                cell = Path(tmp) / f"cell_{cell_index:02d}.jpg"
+                source = by_id.get(str(frame.get("mediaFileId") or ""))
+                start, end = frame.get("startSec"), frame.get("endSec")
+                seek = (
+                    (float(start) + float(end)) / 2.0
+                    if isinstance(start, (int, float)) and isinstance(end, (int, float))
+                    else float(start)
+                    if isinstance(start, (int, float))
+                    else None
+                )
+                if source:
+                    for attempt_seek in [seek, 0.0] if seek else [None]:
+                        cmd = [ffmpeg, "-v", "error", "-y"]
+                        if attempt_seek:
+                            cmd += ["-ss", f"{attempt_seek:.3f}"]
+                        cmd += ["-i", source, "-frames:v", "1", "-vf", _SHEET_CELL_FILTER, str(cell)]
+                        subprocess.run(cmd, capture_output=True, timeout=25)
+                        if cell.exists() and cell.stat().st_size:
+                            break
+                        # A seek past the media's end yields no frame; retry from the start.
+                if not (cell.exists() and cell.stat().st_size):
+                    subprocess.run(
+                        [
+                            ffmpeg,
+                            "-v",
+                            "error",
+                            "-y",
+                            "-f",
+                            "lavfi",
+                            "-i",
+                            "color=c=0x1a1c22:size=320x180",
+                            "-frames:v",
+                            "1",
+                            str(cell),
+                        ],
+                        capture_output=True,
+                        timeout=25,
+                    )
+                if cell.exists() and cell.stat().st_size:
+                    cell_index += 1
+            if not cell_index:
+                return None
+            cols = min(4, cell_index)
+            rows = -(-cell_index // cols)
+            subprocess.run(
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-y",
+                    "-framerate",
+                    "1",
+                    "-i",
+                    str(Path(tmp) / "cell_%02d.jpg"),
+                    "-vf",
+                    f"tile={cols}x{rows}:padding=4:color=0x07080b",
+                    "-frames:v",
+                    "1",
+                    str(target),
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+        return str(target) if target.exists() and target.stat().st_size else None
+    except Exception:  # noqa: BLE001 — the sheet is an enhancement, never a failure mode
+        return None
+
+
 # Curated no-LLM direct-edit surface: the intersection of the public tool catalog with the
 # server command lane's dispatch (toolNameToTimelineIntentType — verified live: addTextClip/
 # textStyle/textLayout/effect 500 as "Unsupported server project tool"), minus the

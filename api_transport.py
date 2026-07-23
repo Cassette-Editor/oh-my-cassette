@@ -438,7 +438,7 @@ class ApiTransport:
                         "progress_summary": self._questions_summary(questions),
                         # Plan review is judged against the timeline, so attach the digest.
                         **(
-                            self._timeline_review_context(session_id)
+                            self._timeline_review_context(session_id, questions)
                             if any(q.get("reason") == "edit_plan_review" for q in questions)
                             else {}
                         ),
@@ -673,7 +673,7 @@ class ApiTransport:
                         "progress_summary": self._questions_summary(questions),
                         # Plan review is judged against the timeline, so attach the digest.
                         **(
-                            self._timeline_review_context(session_id)
+                            self._timeline_review_context(session_id, questions)
                             if any(q.get("reason") == "edit_plan_review" for q in questions)
                             else {}
                         ),
@@ -1057,20 +1057,39 @@ class ApiTransport:
         except URLError as exc:
             raise ApiTransportError("upload_put_failed", f"Presigned PUT failed: {exc.reason}") from exc
 
-    def _timeline_review_context(self, session_id: str) -> dict:
-        """Best-effort CTL + contact sheet for review moments — never fails the run."""
+    def _timeline_review_context(self, session_id: str, questions: list[dict] | None = None) -> dict:
+        """Best-effort CTL + contact sheet for review moments — never fails the run.
+
+        At a plan review, ``questions`` carries the decoded storyboard beat cells; they
+        are rendered into a per-plan storyboard sheet (planned source frames, zero
+        render) alongside the current-timeline contact sheet."""
+        context: dict[str, Any] = {}
         try:
             from . import timeline as timeline_mod
             from . import tools as tools_mod
 
             document = self.get_project_document(session_id)
-            context: dict[str, Any] = {"timeline_ctl": timeline_mod.render_ctl(document)}
+            context["timeline_ctl"] = timeline_mod.render_ctl(document)
             sheet = tools_mod.build_contact_sheet(document, session_id)
             if sheet:
                 context["contact_sheet"] = sheet
-            return context
         except Exception:  # noqa: BLE001
-            return {}
+            pass
+        try:
+            from . import tools as tools_mod
+
+            frames = next(
+                (q["storyboard"] for q in (questions or []) if isinstance(q, dict) and q.get("storyboard")),
+                None,
+            )
+            if frames:
+                context["storyboard"] = frames
+                storyboard_sheet = tools_mod.build_storyboard_sheet(session_id, frames)
+                if storyboard_sheet:
+                    context["storyboard_sheet"] = storyboard_sheet
+        except Exception:  # noqa: BLE001
+            pass
+        return context
 
     # ── project document read ─────────────────────────────────────────────────
     def get_project_document(self, session_id: str) -> dict:
@@ -1693,14 +1712,19 @@ class ApiTransport:
 
                 payload = value.get("payload") if isinstance(value.get("payload"), dict) else {}
                 block = timeline_mod.plan_review_block(payload)
-                questions.append(
-                    {
-                        "question": block,
-                        "requires_user": True,
-                        "reason": "edit_plan_review",
-                        "answer": "",
-                    }
-                )
+                question: dict[str, Any] = {
+                    "question": block,
+                    "requires_user": True,
+                    "reason": "edit_plan_review",
+                    "answer": "",
+                }
+                # Typed beat cells decoded from the plan's storyboard links (the digest
+                # carries only their labels); _timeline_review_context renders them into
+                # a storyboard-sheet image from the locally ingested sources.
+                frames = timeline_mod.storyboard_frames(str(payload.get("reviewMarkdown") or ""))
+                if frames:
+                    question["storyboard"] = frames
+                questions.append(question)
                 return None, questions, True
             if kind == "mode_switch":
                 questions.append(

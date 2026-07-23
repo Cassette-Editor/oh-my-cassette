@@ -1358,8 +1358,19 @@ def notify_terminal_job(job: dict) -> dict:
     # edit looks like before deciding to continue or export.
     quality = job.get("quality") if isinstance(job.get("quality"), dict) else {}
     sheet = str(quality.get("contact_sheet") or "").strip()
+    storyboard = str(quality.get("storyboard_sheet") or "").strip()
     turn_done_no_render = job.get("status") == "succeeded" and not (job.get("outputs") or job.get("output_links"))
-    if (job.get("status") == "needs_user" or turn_done_no_render) and sheet and Path(sheet).exists():
+    # A plan review is judged on the PLANNED beats, so it pushes the storyboard sheet
+    # (one source frame per proposed beat); other preview moments push the
+    # current-timeline contact sheet. One image per notification, never both.
+    if job.get("status") == "needs_user" and storyboard and Path(storyboard).exists():
+        try:
+            notify_progress_snapshot(
+                job, storyboard, summary="Planned storyboard (one source frame per beat, zero render)"
+            )
+        except Exception:  # noqa: BLE001 — the sheet is an enhancement, never a delivery blocker
+            pass
+    elif (job.get("status") == "needs_user" or turn_done_no_render) and sheet and Path(sheet).exists():
         try:
             notify_progress_snapshot(job, sheet, summary="Timeline contact sheet (source frames, not composed output)")
         except Exception:  # noqa: BLE001 — the sheet is an enhancement, never a delivery blocker

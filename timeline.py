@@ -18,7 +18,9 @@ document (per-track timeline order).
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
+from urllib.parse import parse_qsl, unquote
 
 CTL_MAX_LINES = 30
 DELTA_MAX_LINES = 15
@@ -352,6 +354,81 @@ def render_delta(before: dict, after: dict) -> str:
 # ── plan review block ─────────────────────────────────────────────────────────
 
 
+# ── plan-review storyboard links ──────────────────────────────────────────────
+# The plan's reviewMarkdown embeds one typed `media://storyboard/...` markdown
+# link per beat (repo B packages/shared/src/storyboard-link.ts — the web plan
+# card hydrates them into playable frame cards). This is the Python port of that
+# href contract: decode the refs so the plugin can render its own storyboard
+# sheet from locally ingested media, and keep the urlencoded hrefs out of the
+# text digest.
+
+_STORYBOARD_LINK_RE = re.compile(r"\[([^\]]*)\]\((media:/+storyboard/[^)\s]+)\)", re.IGNORECASE)
+_STORYBOARD_HREF_RE = re.compile(r"^media:/*storyboard/([^?#\s]*)(?:\?([^#\s]*))?", re.IGNORECASE)
+
+
+def _storyboard_number(value: str | None) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def parse_storyboard_href(href: str | None) -> dict | None:
+    """Decode one `media://storyboard/...` href into a typed frame ref, or None.
+
+    Faithful port of parseStoryboardHref (tolerant of the single-slash form some
+    sanitizers emit; `none` path segment = generated beat with no source)."""
+    if not href:
+        return None
+    match = _STORYBOARD_HREF_RE.match(href.strip())
+    if not match:
+        return None
+    raw_segment = match.group(1) or ""
+    params: dict[str, str] = {}
+    for key, value in parse_qsl(match.group(2) or "", keep_blank_values=True):
+        params.setdefault(key, value)
+    role = params.get("role")
+    if not role:
+        return None
+    media_file_id = None
+    if raw_segment and raw_segment.lower() != "none":
+        media_file_id = unquote(raw_segment) or None
+    index = _storyboard_number(params.get("i"))
+    return {
+        "index": int(index) if index is not None else 0,
+        "mediaFileId": media_file_id,
+        "startSec": _storyboard_number(params.get("s")),
+        "endSec": _storyboard_number(params.get("e")),
+        "role": role,
+        "durationSec": _storyboard_number(params.get("d")) or 0.0,
+        "look": "restyle" if params.get("look") == "restyle" else "manual",
+        "hero": params.get("hero") == "1",
+        "coverage": params.get("cov") if params.get("cov") in {"generated", "mixed"} else "source",
+        "purpose": params.get("p") or "",
+    }
+
+
+def storyboard_frames(markdown: str) -> list[dict]:
+    """Every decodable storyboard frame ref in the review markdown, in order."""
+    frames = []
+    for match in _STORYBOARD_LINK_RE.finditer(str(markdown or "")):
+        frame = parse_storyboard_href(match.group(2))
+        if frame is not None:
+            frames.append(frame)
+    return frames
+
+
+def _strip_storyboard_links(markdown: str) -> str:
+    """Replace `[label](media://storyboard/...)` with its already-readable label.
+
+    The labels are human text ("Hook · 0:18–0:22"); the urlencoded hrefs are
+    machine payload that would otherwise eat the digest's char budget as noise."""
+    return _STORYBOARD_LINK_RE.sub(lambda m: m.group(1).strip(), str(markdown or ""))
+
+
 def plan_review_block(payload: dict, document: dict | None = None, *, max_chars: int = 700) -> str:
     """Render an edit_plan_review interrupt payload for a needs_user question."""
     lines = ["PLAN REVIEW  (approve / revise <feedback> / reject)"]
@@ -361,7 +438,7 @@ def plan_review_block(payload: dict, document: dict | None = None, *, max_chars:
             f"Current: {len(clips)} clip{'s' if len(clips) != 1 else ''}, "
             f"v{document.get('version', 0)}, {_tc(total_duration_seconds(document))}"
         )
-    review = str(payload.get("reviewMarkdown") or payload.get("summary") or "").strip()
+    review = _strip_storyboard_links(str(payload.get("reviewMarkdown") or payload.get("summary") or "").strip())
     if review:
         lines.append(review)
     moments = payload.get("generativeMoments")
