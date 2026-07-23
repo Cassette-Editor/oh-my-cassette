@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
-from http.server import ThreadingHTTPServer
 
 import pytest
 
