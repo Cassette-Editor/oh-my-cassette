@@ -462,10 +462,18 @@ class LocalMcpRuntime:
                 phase=SessionPhase.NEW,
             )
         current_phase = self._load_state_phase(session_id)
-        if current_phase != SessionPhase.READY:
+        if current_phase in {
+            SessionPhase.NEW,
+            SessionPhase.RUNNING,
+            SessionPhase.NEEDS_USER,
+            SessionPhase.REVIEW_REQUIRED,
+            SessionPhase.EXPORTING,
+        }:
+            # Multi-turn: any settled phase (ready/assets/guided or a terminal turn) may start the
+            # next conversational turn; only an in-flight or user-blocked turn refuses.
             return self._failure(
                 "invalid_transition",
-                f"Cassette job execution requires phase ready; current phase is {current_phase.value}.",
+                f"Cassette job execution requires a settled session; current phase is {current_phase.value}.",
                 session_id=session_id,
                 phase=current_phase,
             )
