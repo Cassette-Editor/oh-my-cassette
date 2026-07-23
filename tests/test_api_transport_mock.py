@@ -136,6 +136,7 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
         if path == "/api/langgraph/threads":
             self.rec["thread_metadata"] = body.get("metadata")
             self.rec["thread_create_body"] = body
+            self.rec.setdefault("thread_create_bodies", []).append(body)
             return self._json(200, {"thread_id": "th-1"})
         if path == "/api/langgraph/threads/th-1/runs":
             if isinstance(body.get("command"), dict):
@@ -143,10 +144,20 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
                 return self._json(200, {"run_id": "r-2", "status": "pending"})
             self.rec["run_input"] = body.get("input")
             self.rec["run_config"] = body.get("config")
+            self.rec["run_multitask"] = body.get("multitask_strategy")
             return self._json(200, {"run_id": "r-1", "status": "pending"})
         if path.startswith("/api/export/projects/") and path.endswith("/jobs"):
             self.rec["export_session"] = path.split("/api/export/projects/", 1)[1].rsplit("/jobs", 1)[0]
             return self._json(202, {"jobId": "ej-1", "status": "queued", "statusUrl": "/api/export/jobs/ej-1"})
+        return self._json(404, {"error": "not found"})
+
+    def do_PATCH(self):
+        path = self.path.split("?", 1)[0]
+        body = self._body()
+        self.rec["requests"].append(("PATCH", path))
+        if path.startswith("/api/langgraph/threads/"):
+            self.rec.setdefault("thread_patch_bodies", []).append(body)
+            return self._json(200, {"thread_id": path.rsplit("/", 1)[1]})
         return self._json(404, {"error": "not found"})
 
     def do_GET(self):
@@ -1115,3 +1126,126 @@ def test_plan_review_mode_defaults(monkeypatch):
     monkeypatch.setenv("CASSETTE_PLAN_REVIEW", "auto")
     monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "mcp")
     assert _plan_review_mode() == "auto"
+
+
+# ── multi-turn: session-scoped thread reuse (v0.4.1) ──────────────────────────
+
+
+def _is_cassette_thread_metadata(value) -> bool:
+    """Python port of the editor's isCassetteThreadMetadata (ChatPanel.tsx) — pins the contract
+    the /try tab's resume path enforces. If repo B tightens the predicate, update BOTH."""
+    if not isinstance(value, dict):
+        return False
+    return (
+        value.get("schemaVersion") == 1
+        and value.get("threadKind") == "cassette-chat"
+        and isinstance(value.get("chatSessionId"), str)
+        and isinstance(value.get("mediaSessionId"), str)
+        and value.get("mode") in {"auto", "chat"}
+        and isinstance(value.get("turnStrategy"), str)
+        and value.get("turnKind") in {"conversation", "context_init", "context_compact"}
+    )
+
+
+def test_thread_reused_across_jobs_with_stable_editor_url(cassette_env, mock_api, monkeypatch):
+    monkeypatch.setenv("CASSETTE_WEB_URL", "http://127.0.0.1:8080")
+    base = {
+        "session_hash": "multi",
+        "cassette_session_id": "try-session-multi",
+        "prompt": "turn",
+        "asset_paths": [],
+        "timeout_sec": 60,
+    }
+    job_a = {**base, "job_id": "job-t1"}
+    job_b = {**base, "job_id": "job-t2"}
+    assert ApiTransport().run_job(job_a)["status"] == "succeeded"
+    assert ApiTransport().run_job(job_b)["status"] == "succeeded"
+    rec = mock_api.rec
+
+    creates = rec["thread_create_bodies"]
+    assert len(creates) == 2
+    # Turn 2 re-ensures the SAME thread the server echoed for turn 1 (th-1), not a fresh UUID.
+    assert creates[1]["thread_id"] == "th-1"
+    assert creates[1]["if_exists"] == "do_nothing"
+    # One conversation → one stable deep link across turns.
+    assert job_a["editor_url"] == job_b["editor_url"]
+    assert job_a["chat_thread_id"] == job_b["chat_thread_id"] == "th-1"
+    # The reused ensure also PATCHes metadata so the tab's resume context stays fresh.
+    assert rec.get("thread_patch_bodies"), "expected a thread metadata PATCH on the reused ensure"
+    assert _is_cassette_thread_metadata(rec["thread_patch_bodies"][-1]["metadata"])
+
+
+def test_thread_metadata_is_full_cassette_shape(cassette_env, mock_api):
+    job = {
+        "job_id": "job-meta",
+        "session_hash": "meta",
+        "cassette_session_id": "try-session-meta",
+        "prompt": "edit",
+        "asset_paths": [],
+        "timeout_sec": 60,
+        "cassette_language": "en",
+    }
+    assert ApiTransport().run_job(job)["status"] == "succeeded"
+    metadata = mock_api.rec["thread_metadata"]
+    assert _is_cassette_thread_metadata(metadata), metadata
+    assert metadata["projectId"] == "try-session-meta"
+    assert metadata["modelId"]  # resolved product model id rides the metadata for tab resume
+    assert "graph_id" not in metadata
+
+
+def test_fresh_runs_use_reject_multitask_strategy(cassette_env, mock_api):
+    job = {
+        "job_id": "job-mt",
+        "session_hash": "mt",
+        "cassette_session_id": "try-session-mt",
+        "prompt": "edit",
+        "asset_paths": [],
+        "timeout_sec": 60,
+    }
+    assert ApiTransport().run_job(job)["status"] == "succeeded"
+    assert mock_api.rec["run_multitask"] == "reject"
+
+
+class _ThreadBusyAPI(_MockCassetteAPI):
+    def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/langgraph/threads/th-1/runs":
+            body = self._body()
+            if not isinstance(body.get("command"), dict):
+                return self._json(422, {"error": "Thread is already running a task."})
+        return super().do_POST()
+
+    def _body(self):
+        # BaseHTTPRequestHandler streams can only be read once; cache for super().do_POST.
+        if not hasattr(self, "_cached_body"):
+            self._cached_body = super()._body()
+        return self._cached_body
+
+
+def test_thread_busy_422_surfaces_typed_error(cassette_env, monkeypatch):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _ThreadBusyAPI)
+    server.rec = {"requests": [], "put_count": 0, "init_count": 0, "complete_count": 0,
+                  "init_bodies": [], "complete_bodies": [], "upload_session_ids": [],
+                  "upload_project_ids": [], "auth_email": None, "resume_value": None,
+                  "run_input": None, "run_config": None, "thread_metadata": None,
+                  "export_session": None, "media_ready_polls": 0}
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    _, port = server.server_address
+    monkeypatch.setenv("CASSETTE_API_URL", f"http://127.0.0.1:{port}")
+    monkeypatch.setenv("CASSETTE_AUTH_EMAIL", "e@x.io")
+    monkeypatch.setenv("CASSETTE_AUTH_PASSWORD", "pw")
+    try:
+        job = {
+            "job_id": "job-busy",
+            "session_hash": "busy",
+            "cassette_session_id": "try-session-busy",
+            "prompt": "edit",
+            "asset_paths": [],
+            "timeout_sec": 60,
+        }
+        result = ApiTransport().run_job(job)
+        assert result["status"] == "failed"
+        assert any(err.get("code") == "thread_busy" for err in result["errors"]), result["errors"]
+    finally:
+        server.shutdown()
+        server.server_close()
