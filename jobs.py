@@ -59,6 +59,7 @@ def create_job(
         "finished_at": None,
         "prompt_redacted": _redact_prompt(prompt),
         "prompt": prompt,
+        "message": options.get("message") or "",
         "chat_message": options.get("chat_message") or instruction or prompt,
         "instruction": instruction or "",
         "asset_paths": asset_paths,
@@ -78,6 +79,8 @@ def create_job(
         "plan_progress": [],
         "worker_pid": None,
     }
+    if options.get("export_on_complete") is not None:
+        job["export_on_complete"] = options["export_on_complete"]
     save_job(job)
     return job
 

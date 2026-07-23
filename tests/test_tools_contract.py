@@ -3733,3 +3733,41 @@ def test_ingest_gateway_media_skips_unauthorized_video(cassette_env):
 
     assert tools.ingest_gateway_media(event=event, gateway=gateway) is None
     assert not cassette_env["asset_root"].exists()
+
+
+def test_run_job_message_only_is_verbatim_and_sufficient(cassette_env, monkeypatch):
+    observed = {}
+
+    def fake_browser_run(job):
+        observed["job"] = dict(job)
+        return {"status": "succeeded", "outputs": [], "questions": [], "errors": [], "quality": {},
+                "final_screenshot": None}
+
+    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    payload = json.loads(tools.cassette_run_job({"message": "把开头两秒剪掉", "session_id": "verbatim"}))
+
+    assert payload["ok"] is True
+    assert observed["job"]["message"] == "把开头两秒剪掉"
+    # No export arg -> the job carries no export_on_complete override (transport default applies).
+    assert "export_on_complete" not in observed["job"]
+
+
+def test_run_job_export_flag_sets_per_turn_export_intent(cassette_env, monkeypatch):
+    observed = {}
+
+    def fake_browser_run(job):
+        observed["job"] = dict(job)
+        return {"status": "succeeded", "outputs": [], "questions": [], "errors": [], "quality": {},
+                "final_screenshot": None}
+
+    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    assert json.loads(tools.cassette_run_job({"message": "导出", "export": True, "session_id": "exp1"}))["ok"]
+    assert observed["job"]["export_on_complete"] == "true"
+    assert json.loads(tools.cassette_run_job({"message": "继续", "export": False, "session_id": "exp2"}))["ok"]
+    assert observed["job"]["export_on_complete"] == "false"
+
+
+def test_run_job_requires_message_or_prompt(cassette_env):
+    payload = json.loads(tools.cassette_run_job({"session_id": "empty"}))
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "missing_required_arg"

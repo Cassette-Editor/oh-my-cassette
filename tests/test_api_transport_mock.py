@@ -459,6 +459,7 @@ def test_api_transport_completion_review_gate(cassette_env, mock_api, monkeypatc
         "prompt": "make a short captioned video",
         "asset_paths": [str(asset)],
         "timeout_sec": 60,
+        "export_on_complete": "true",  # explicit export intent engages the review gate
     }
     result = ApiTransport().run_job(job)
     # The run committed the edit but export is gated on Hermes review.
@@ -567,7 +568,7 @@ def test_api_interrupt_persists_and_resumes_on_same_thread_after_restart(cassett
             prompt="edit",
             instruction=None,
             asset_paths=[],
-            options={"cassette_session_id": "resume-session"},
+            options={"cassette_session_id": "resume-session", "export_on_complete": "true"},
         )
         first = ApiTransport().run_job(job)
         assert first["status"] == "needs_user"
@@ -1019,6 +1020,7 @@ def test_completion_review_carries_timeline_context(cassette_env, mock_api, monk
         "prompt": "edit",
         "asset_paths": [],
         "timeout_sec": 60,
+        "export_on_complete": "true",
         "options": {},
     }
     result = ApiTransport().run_job(job)
@@ -1249,3 +1251,46 @@ def test_thread_busy_422_surfaces_typed_error(cassette_env, monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_message_is_the_verbatim_human_message(cassette_env, mock_api, monkeypatch):
+    """Direct line: the agent hears message byte-for-byte — not the make_prompt wrapper."""
+    monkeypatch.delenv("CASSETTE_API_AUTO_EXPORT", raising=False)
+    verbatim = "把开头两秒剪掉，加一个标题'Hello'"
+    job = {
+        "job_id": "job-verbatim",
+        "session_hash": "vb",
+        "cassette_session_id": "try-session-vb",
+        "message": verbatim,
+        "chat_message": "legacy user-facing text",
+        "prompt": "SUPERVISORY WRAPPER that must never reach the agent",
+        "asset_paths": [],
+        "timeout_sec": 60,
+    }
+    result = ApiTransport().run_job(job)
+    rec = mock_api.rec
+
+    assert result["status"] == "succeeded", result["errors"]
+    assert rec["run_input"]["messages"][0] == {"type": "human", "content": verbatim}
+    assert rec["run_config"]["configurable"]["sessionContext"]["currentUserRequest"] == verbatim
+
+
+def test_conversational_turn_carries_ctl_preview(cassette_env, mock_api, monkeypatch):
+    """A turn without export intent ends succeeded WITH the per-turn preview context attached."""
+    monkeypatch.delenv("CASSETTE_API_AUTO_EXPORT", raising=False)
+    job = {
+        "job_id": "job-turn-preview",
+        "session_hash": "tp",
+        "cassette_session_id": "try-session-tp",
+        "message": "turn one",
+        "asset_paths": [],
+        "timeout_sec": 60,
+    }
+    result = ApiTransport().run_job(job)
+
+    assert result["status"] == "succeeded", result["errors"]
+    assert result["quality"]["export_completed"] is False
+    assert not any(q.get("reason") == "completion_requires_hermes_review" for q in result["questions"])
+    assert result["quality"]["timeline_ctl"].startswith("TIMELINE try-session-tp v7")
+    # No render was triggered.
+    assert not any(p.startswith("/api/export/projects/") for _, p in mock_api.rec["requests"])

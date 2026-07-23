@@ -183,7 +183,10 @@ class JamendoMatcherInput(StrictModel):
 
 
 class RunJobInput(StrictModel):
-    prompt: str
+    message: str | None = None
+    # None = not provided: the transport keeps its own default (API: no render; browser: render).
+    export: bool | None = None
+    prompt: str | None = None
     chat_message: str | None = None
     cassette_message: str | None = None
     instruction: str | None = None
@@ -198,6 +201,12 @@ class RunJobInput(StrictModel):
     thinking_level: str | None = None
     cassette_language: Literal["zh", "en"] | None = None
     language: Literal["zh", "en"] | None = None
+
+    @model_validator(mode="after")
+    def _require_some_text(self) -> RunJobInput:
+        if not ((self.message or "").strip() or (self.prompt or "").strip() or (self.chat_message or "").strip()):
+            raise ValueError("cassette_run_job requires message (preferred) or prompt")
+        return self
 
 
 class JobStatusInput(StrictModel):

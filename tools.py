@@ -787,12 +787,15 @@ def _start_inprocess_cassette_job(job: dict, *, runtime_host: str = "gateway") -
 
 @safe_tool
 def cassette_run_job(a: dict, **kw) -> str:
+    message = (a.get("message") or "").strip()
     prompt_text = (a.get("prompt") or "").strip()
     chat_message = (a.get("chat_message") or a.get("cassette_message") or "").strip()
     if not prompt_text and chat_message:
         prompt_text = chat_message
-    if not prompt_text:
-        raise CassetteError("missing_required_arg", "prompt is required")
+    if not prompt_text and message:
+        prompt_text = message
+    if not (message or prompt_text):
+        raise CassetteError("missing_required_arg", "message (preferred) or prompt is required")
     raw_session_id = str(a.get("session_id") or kw.get("task_id") or "").strip()
     session_hash, asset_paths, delivery = _asset_paths_for_session(
         a.get("session_id"), a.get("chat_id"), kw.get("task_id")
@@ -812,6 +815,7 @@ def cassette_run_job(a: dict, **kw) -> str:
         instruction=a.get("instruction"),
         asset_paths=asset_paths,
         options={
+            "message": message,
             "chat_message": chat_message,
             "url": a.get("url"),
             "timeout_sec": a.get("timeout_sec"),
@@ -820,6 +824,8 @@ def cassette_run_job(a: dict, **kw) -> str:
             "cassette_session_id": a.get("session_id"),
             "model_selection": _cassette_model_selection(a, delivery),
             "cassette_language": _cassette_language_for_run(a, delivery),
+            # Tri-state: absent keeps the transport default (API: no render; browser: render).
+            **({"export_on_complete": "true" if a.get("export") else "false"} if a.get("export") is not None else {}),
         },
     )
     if _should_run_gateway_job_in_background(a, delivery):

@@ -98,8 +98,10 @@ def _require_model_selection() -> bool:
 
 
 def _export_on_complete(job: dict) -> bool:
-    # Mirrors browser._export_on_complete: whether a finished edit should be exported. Default true.
-    raw = _env("CASSETTE_EXPORT_ON_COMPLETE") or str(job.get("export_on_complete", "true"))
+    # Whether a finished turn should route to the export/review ceremony. API default is FALSE
+    # (a conversational turn ends committed-but-unrendered; run_job export=true opts in per turn).
+    # browser._export_on_complete keeps its own default-true — single-shot browser parity.
+    raw = _env("CASSETTE_EXPORT_ON_COMPLETE") or str(job.get("export_on_complete", "false"))
     return str(raw).strip().lower() not in {"0", "false", "no", "off"}
 
 
@@ -387,7 +389,9 @@ class ApiTransport:
     def run_job(self, job: dict) -> dict:
         job_id = str(job.get("job_id") or "")
         session_id = _session_id(job)
-        prompt = str(job.get("prompt") or job.get("chat_message") or "").strip()
+        # Direct line: the agent hears the user's verbatim words (message), matching the web chat
+        # box. chat_message (the user-facing text of legacy briefs) beats the make_prompt wrapper.
+        prompt = str(job.get("message") or job.get("chat_message") or job.get("prompt") or "").strip()
         asset_paths = [p for p in (job.get("asset_paths") or []) if p]
         questions: list[dict] = []
         errors: list[dict] = []
@@ -506,8 +510,10 @@ class ApiTransport:
                         **self._timeline_review_context(session_id),
                     },
                 )
-            if not _export_on_complete(job):
-                # Export not requested for this job — finish without rendering (browser parity).
+            if not _export_on_complete(job) and not _auto_export():
+                # Conversational turn: the edit is committed, nothing rendered. Attach the CTL
+                # digest + contact sheet as the per-turn preview so the user judges the result
+                # visually (0.4.0 preview stack) and decides when to export.
                 return self._result(
                     _SUCCEEDED,
                     questions=questions,
@@ -516,7 +522,11 @@ class ApiTransport:
                     export_completed=False,
                     export_pending=False,
                     risk="medium",
-                    extra_quality={"progress_summary": edit_summary, "current_stage": "agent"},
+                    extra_quality={
+                        "progress_summary": edit_summary,
+                        "current_stage": "agent",
+                        **self._timeline_review_context(session_id),
+                    },
                 )
 
             # Auto-export (opt-in). If it fails, the edit still happened, so report 'succeeded' with
@@ -712,7 +722,7 @@ class ApiTransport:
                         **self._timeline_review_context(session_id),
                     },
                 )
-            if not _export_on_complete(job):
+            if not _export_on_complete(job) and not _auto_export():
                 return self._result(
                     _SUCCEEDED,
                     questions=questions,
@@ -721,7 +731,11 @@ class ApiTransport:
                     export_completed=False,
                     export_pending=False,
                     risk="medium",
-                    extra_quality={"progress_summary": edit_summary, "current_stage": "agent"},
+                    extra_quality={
+                        "progress_summary": edit_summary,
+                        "current_stage": "agent",
+                        **self._timeline_review_context(session_id),
+                    },
                 )
             self._enter_stage(job_id, "export", "Rendering the export")
             outputs = self._export_project(session_id, job_id, deadline=deadline)

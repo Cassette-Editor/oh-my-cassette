@@ -243,11 +243,23 @@ JAMENDO_MUSIC_MATCHER = {
 
 CASSETTE_RUN_JOB = {
     "name": "cassette_run_job",
-    "description": "Open Cassette in Playwright, upload manifest assets, submit the user-facing chat message, monitor completion, and persist job status. For QQ, Telegram, and Weixin gateway jobs with a stored delivery target, the plugin runs the job in the background and Hermes should stop the turn after reporting that the job started; do not repeatedly poll cassette_job_status unless the user explicitly asks.",
+    "description": "Run one conversational turn with the Cassette agent: upload any new session assets, send the user's verbatim message to the session's persistent agent thread, monitor completion, and persist job status. The same session keeps one thread, so follow-up turns share memory. Turns end without rendering; pass export=true only when the user expresses finish/export intent. For QQ, Telegram, and Weixin gateway jobs with a stored delivery target, the plugin runs the job in the background and Hermes should stop the turn after reporting that the job started; do not repeatedly poll cassette_job_status unless the user explicitly asks.",
     "parameters": {
         "type": "object",
         "properties": {
-            "prompt": {"type": "string", "description": "Required normal path. Pass cassette_make_prompt.data.prompt."},
+            "message": {
+                "type": "string",
+                "description": "The user's verbatim words for this conversational turn. Preferred input; passed to the Cassette agent unmodified — never rewrite, optimize, or expand them.",
+            },
+            "export": {
+                "type": "boolean",
+                "default": False,
+                "description": "Render/export at the end of this turn. Pass true only when the user expresses finish/export intent; the turn then ends in completion review gating the render.",
+            },
+            "prompt": {
+                "type": "string",
+                "description": "Legacy browser-transport brief (cassette_make_prompt.data.prompt). On the API transport prefer message.",
+            },
             "chat_message": {
                 "type": "string",
                 "description": "User-facing edit request to send into Cassette chat panel. Pass cassette_make_prompt.data.chat_message. Do not pass Hermes internal planning prompts here.",
@@ -280,7 +292,7 @@ CASSETTE_RUN_JOB = {
             },
             "language": {"type": "string", "enum": ["zh", "en"], "description": "Alias for cassette_language."},
         },
-        "required": ["prompt"],
+        "anyOf": [{"required": ["message"]}, {"required": ["prompt"]}],
         "additionalProperties": False,
     },
 }

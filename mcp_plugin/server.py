@@ -496,8 +496,10 @@ async def cassette_answer_question(
     structured_output=True,
 )
 async def cassette_run_job(
-    prompt: str,
     ctx: Context,
+    message: str | None = None,
+    export: bool | None = None,
+    prompt: str | None = None,
     chat_message: str | None = None,
     cassette_message: str | None = None,
     instruction: str | None = None,
@@ -515,6 +517,8 @@ async def cassette_run_job(
 ) -> ToolEnvelope:
     request = RunJobInput.model_validate(
         {
+            "message": message,
+            "export": export,
             "prompt": prompt,
             "chat_message": chat_message,
             "cassette_message": cassette_message,

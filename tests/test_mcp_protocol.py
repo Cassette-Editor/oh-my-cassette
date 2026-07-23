@@ -478,6 +478,7 @@ def test_real_protocol_resumes_api_job_after_mcp_host_restart(tmp_path):
                         "prompt": prepared.structuredContent["data"]["prompt"],
                         "session_id": "restart-session",
                         "wait": True,
+                        "export": True,  # explicit export intent keeps the completion-review gate
                     },
                 )
                 assert result.structuredContent["phase"] == "needs_user"
