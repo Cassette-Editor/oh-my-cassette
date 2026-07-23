@@ -521,31 +521,36 @@ Browser jobs can resume while the same MCP process is alive. After a host restar
 
 ### MCP tools
 
-The local MCP runtime exposes the same 13 tool names as Hermes:
+The local MCP runtime exposes the same 14 tool names as Hermes:
 
 | Tool | Purpose |
 |---|---|
 | `cassette_ingest_media` | Safely ingest trusted project media into an isolated session |
 | `cassette_list_assets` | Read the session's media manifest |
-| `cassette_make_prompt` | Build the complete Cassette edit brief |
+| `cassette_make_prompt` | (legacy, browser transport) Build a full edit brief |
 | `cassette_match_bgm` | Match Free To Use background music |
 | `cassette_match_exact_bgm` | Match a specific title and artist |
 | `jamendo_music_matcher` | Match structured Jamendo preferences |
 | `cassette_answer_question` | Answer a guided question or resume a paused job |
-| `cassette_run_job` | Start an edit, in the background by default |
+| `cassette_run_job` | Run one conversational turn (`message` = the user's verbatim words); `export=true` renders |
 | `cassette_job_status` | Read status or wait briefly for a change |
 | `cassette_review_completion` | Review completion and explicitly approve export |
 | `cassette_cancel_job` | Request cooperative cancellation |
 | `cassette_timeline` | Read the live project timeline as a bounded text digest (+ optional contact sheet) |
 | `cassette_edit` | Surgical no-LLM edit / undo through the manual command lane (`CASSETTE_DIRECT_EDIT=1`) |
+| `cassette_config` | Get/set the session's model + thinking level (static product list, applies next turn) |
 
 Every tool returns a structured envelope with `ok`, typed `data` or `error`, `session_id`, `job_id`, the current phase, and a runtime-derived `next_action`.
 
 ### The live editor deep link and plan review
 
-Every job on the API transport now carries `editor_url` — a `…/try?projectSessionId=<id>&chatSessionId=<uuid>` link that opens the **real Cassette editor on this job's live session**: the timeline repaints as edits land, the preview plays without any server render, and the plan-review card is interactive. Anyone with the link can view *and* edit that one project (the same capability-URL posture as Cassette's public try page), so treat it like a share link.
+Every session on the API transport carries ONE stable `editor_url` — a `…/try?projectSessionId=<id>&chatSessionId=<uuid>` link that opens the **real Cassette editor on the session's live conversation**: the timeline repaints as edits land, the preview plays without any server render, and the plan-review card is interactive. The link stays the same across every turn of the session (jobs are conversational turns on one persistent agent thread with memory). Anyone with the link can view *and* edit that one project (the same capability-URL posture as Cassette's public try page), so treat it like a share link.
 
-**Behavior change:** on MCP hosts, `edit_plan_review` now surfaces as a real question by default (`CASSETTE_PLAN_REVIEW=user`) instead of being silently auto-approved — answer with `approve`, `revise <feedback>`, or `reject`, in chat or in the open editor tab (first answer wins). Set `CASSETTE_UNATTENDED=1` to restore the previous fully headless behavior. Status envelopes additionally carry `timeline_delta` (what changed) and `plan_progress`, fed by the run's SSE event stream (`CASSETTE_API_STREAM=0` disables).
+Two concurrency semantics worth knowing: a plugin turn never cancels a run started from the open editor tab (it fails typed as `thread_busy` instead — wait and retry), while typing a fresh message in the tab DOES cancel an in-flight plugin turn (the tab takes over; existing product behavior).
+
+**Behavior change (0.4.1):** the agent now receives the user's `message` verbatim (no brief wrapper), sessions are multi-turn on one thread, and a turn ends with the edit committed but **nothing rendered** — the envelope carries `timeline_delta`, `quality.timeline_ctl`, and a contact-sheet preview instead; pass `export=true` on the turn where the user asks to finish (browser transport keeps its render-per-job behavior). Model/thinking are session preferences via `cassette_config` — never asked upfront, defaults match the web editor.
+
+**Behavior change (0.4.0):** on MCP hosts, `edit_plan_review` now surfaces as a real question by default (`CASSETTE_PLAN_REVIEW=user`) instead of being silently auto-approved — answer with `approve`, `revise <feedback>`, or `reject`, in chat or in the open editor tab (first answer wins). Set `CASSETTE_UNATTENDED=1` to restore the previous fully headless behavior. Status envelopes additionally carry `timeline_delta` (what changed) and `plan_progress`, fed by the run's SSE event stream (`CASSETTE_API_STREAM=0` disables).
 
 ## Ready to Use with Hermes 📼
 **Now you can pick up your phone and DM your agent! Don't forget to keep your agent alive and network connected.**
@@ -554,10 +559,8 @@ In QQ or Telegram:
 
 1. Send one or more video, image, or audio files.
 2. Wait for the saved-material acknowledgement.
-3. Send an edit instruction in the same conversation, or prefix it with `/edit`.
-4. On the first edit in a Hermes session, choose the Cassette model and thinking level.
-5. On the first edit in a Hermes session, choose whether Hermes should optimize the edit brief and whether it should smart-match BGM.
-6. The plugin uploads saved assets to Cassette, drives the chat panel, monitors progress, exports the MP4, and sends final status/media back through the gateway when supported.
+3. Send an edit instruction in the same conversation, or prefix it with `/edit`. Your words go to the Cassette agent verbatim — no model/optimization/BGM questionnaire. Use `/refine`, `/music`, or `/cassette_model` when you want those.
+4. Each turn ends with the edit saved (timeline delta + contact-sheet preview + live link, no render). Keep editing in the same conversation — the agent remembers. Say "export" when you want the video, and the plugin renders and delivers it through the gateway when supported.
 
 | Command | Explanation |
 |---|---|

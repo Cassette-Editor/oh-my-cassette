@@ -1226,11 +1226,23 @@ class _ThreadBusyAPI(_MockCassetteAPI):
 
 def test_thread_busy_422_surfaces_typed_error(cassette_env, monkeypatch):
     server = ThreadingHTTPServer(("127.0.0.1", 0), _ThreadBusyAPI)
-    server.rec = {"requests": [], "put_count": 0, "init_count": 0, "complete_count": 0,
-                  "init_bodies": [], "complete_bodies": [], "upload_session_ids": [],
-                  "upload_project_ids": [], "auth_email": None, "resume_value": None,
-                  "run_input": None, "run_config": None, "thread_metadata": None,
-                  "export_session": None, "media_ready_polls": 0}
+    server.rec = {
+        "requests": [],
+        "put_count": 0,
+        "init_count": 0,
+        "complete_count": 0,
+        "init_bodies": [],
+        "complete_bodies": [],
+        "upload_session_ids": [],
+        "upload_project_ids": [],
+        "auth_email": None,
+        "resume_value": None,
+        "run_input": None,
+        "run_config": None,
+        "thread_metadata": None,
+        "export_session": None,
+        "media_ready_polls": 0,
+    }
     threading.Thread(target=server.serve_forever, daemon=True).start()
     _, port = server.server_address
     monkeypatch.setenv("CASSETTE_API_URL", f"http://127.0.0.1:{port}")

@@ -3209,8 +3209,14 @@ def test_run_job_message_only_is_verbatim_and_sufficient(cassette_env, monkeypat
 
     def fake_browser_run(job):
         observed["job"] = dict(job)
-        return {"status": "succeeded", "outputs": [], "questions": [], "errors": [], "quality": {},
-                "final_screenshot": None}
+        return {
+            "status": "succeeded",
+            "outputs": [],
+            "questions": [],
+            "errors": [],
+            "quality": {},
+            "final_screenshot": None,
+        }
 
     monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
     payload = json.loads(tools.cassette_run_job({"message": "把开头两秒剪掉", "session_id": "verbatim"}))
@@ -3226,8 +3232,14 @@ def test_run_job_export_flag_sets_per_turn_export_intent(cassette_env, monkeypat
 
     def fake_browser_run(job):
         observed["job"] = dict(job)
-        return {"status": "succeeded", "outputs": [], "questions": [], "errors": [], "quality": {},
-                "final_screenshot": None}
+        return {
+            "status": "succeeded",
+            "outputs": [],
+            "questions": [],
+            "errors": [],
+            "quality": {},
+            "final_screenshot": None,
+        }
 
     monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
     assert json.loads(tools.cassette_run_job({"message": "导出", "export": True, "session_id": "exp1"}))["ok"]
@@ -3256,7 +3268,9 @@ def test_cassette_config_get_returns_defaults_and_options(cassette_env):
 
 def test_cassette_config_set_persists_and_applies_to_model_selection(cassette_env):
     set_payload = json.loads(
-        tools.cassette_config({"session_id": "cfg-set", "model": "deepseek/deepseek-v4-pro", "thinking_level": "medium"})
+        tools.cassette_config(
+            {"session_id": "cfg-set", "model": "deepseek/deepseek-v4-pro", "thinking_level": "medium"}
+        )
     )
     assert set_payload["ok"] is True
     assert set_payload["data"]["model"] == "DeepSeek V4 Pro"

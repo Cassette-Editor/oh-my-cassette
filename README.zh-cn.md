@@ -483,21 +483,24 @@ python3 scripts/setup_local_mcp.py --with-browser
 
 ### MCP 工具
 
-本地 MCP 运行时与 Hermes 保持完全相同的 11 个工具名：
+本地 MCP 运行时与 Hermes 保持完全相同的 14 个工具名：
 
 | 工具 | 用途 |
 |---|---|
 | `cassette_ingest_media` | 把可信项目素材安全地导入隔离会话 |
 | `cassette_list_assets` | 读取会话素材清单 |
-| `cassette_make_prompt` | 生成完整的 Cassette 剪辑需求 |
+| `cassette_make_prompt` | （旧版，仅浏览器传输）生成完整剪辑需求 |
 | `cassette_match_bgm` | 匹配 Free To Use 背景音乐 |
 | `cassette_match_exact_bgm` | 按明确的曲名和艺人匹配音乐 |
 | `jamendo_music_matcher` | 按结构化偏好匹配 Jamendo 音乐 |
 | `cassette_answer_question` | 回答引导问题或恢复暂停任务 |
-| `cassette_run_job` | 启动剪辑，MCP 默认后台执行 |
+| `cassette_run_job` | 执行一轮对话式剪辑（`message` 为用户原话逐字传递）；`export=true` 才渲染 |
 | `cassette_job_status` | 读取状态，或短暂等待状态变化 |
 | `cassette_review_completion` | 审阅完成结果并明确批准导出 |
 | `cassette_cancel_job` | 请求协作式取消任务 |
+| `cassette_timeline` | 读取实时项目时间线文本摘要（可选缩略图拼版） |
+| `cassette_edit` | 手动指令通道的精准无 LLM 剪辑/撤销（需 `CASSETTE_DIRECT_EDIT=1`） |
+| `cassette_config` | 查询/设置会话的模型与思考等级（静态产品列表，下一轮生效） |
 
 每个工具都会返回结构化结果，其中包含 `ok`、带类型的 `data` 或 `error`、`session_id`、`job_id`、当前阶段，以及由运行时状态推导出的 `next_action`。
 
@@ -509,10 +512,8 @@ python3 scripts/setup_local_mcp.py --with-browser
 
 1. 发送一个或多个视频、图片或音频文件。
 2. 等待素材已保存的确认消息。
-3. 在同一个会话中发送剪辑指令，也可以在指令前加 `/edit`。
-4. 每个 Hermes 会话第一次剪辑时，选择 Cassette 模型和思考等级。
-5. 每个 Hermes 会话第一次剪辑时，选择是否让 Hermes 优化剪辑需求，以及是否智能匹配背景音乐。
-6. 插件会把保存的素材上传到 Cassette，驱动聊天面板，监控进度，导出 MP4，并在网关支持时把最终状态或媒体发回会话。
+3. 在同一个会话中发送剪辑指令，也可以在指令前加 `/edit`。你的原话会逐字发给 Cassette 智能体——没有模型/优化/配乐问卷；需要时用 `/refine`、`/music` 或 `/cassette_model`。
+4. 每一轮剪辑完成后会收到时间线变更、缩略图拼版预览和实时编辑器链接（不渲染成片）。继续在同一会话里修改——智能体记得上下文；想要成片时回复"导出"，插件会渲染并在网关支持时发回视频。
 
 | 命令 | 说明 |
 |---|---|
