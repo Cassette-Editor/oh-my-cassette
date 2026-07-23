@@ -38,9 +38,11 @@ AGENTS.md
 .claude/
 .impeccable/
 .github/skills/
-cassette_hermes_codex_development_plan.md
 
 # OS/editor
 .DS_Store
 .idea/
 .vscode/
+.agents/skills/*
+!.agents/skills/cassette-video-edit/
+skills-lock.json
