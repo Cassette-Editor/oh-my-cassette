@@ -259,3 +259,21 @@ def test_job_status_long_poll_reports_wait_ticks_and_survives_tick_errors(tmp_pa
         on_wait_tick=broken_tick,
     )
     assert envelope.ok is True
+
+
+def test_mcp_ingest_mints_try_session_ids(tmp_path, monkeypatch):
+    runtime = _runtime(tmp_path, monkeypatch)
+    captured: dict = {}
+
+    def fake_invoke(tool, args, *, session_id, roots):
+        captured["session_id"] = session_id
+        return {"ok": True, "data": {}}
+
+    monkeypatch.setattr(runtime, "_invoke_core", fake_invoke)
+    envelope = runtime.ingest_media({"source_path": "unused"}, roots=[])
+    assert envelope.ok
+    assert captured["session_id"].startswith("try-session-")
+    # Explicit session ids are never rewritten.
+    envelope = runtime.ingest_media({"source_path": "unused", "session_id": "legacy"}, roots=[])
+    assert envelope.ok
+    assert captured["session_id"] == "legacy"

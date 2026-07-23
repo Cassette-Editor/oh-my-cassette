@@ -521,7 +521,7 @@ Browser jobs can resume while the same MCP process is alive. After a host restar
 
 ### MCP tools
 
-The local MCP runtime exposes the same 11 tool names as Hermes:
+The local MCP runtime exposes the same 13 tool names as Hermes:
 
 | Tool | Purpose |
 |---|---|
@@ -536,8 +536,16 @@ The local MCP runtime exposes the same 11 tool names as Hermes:
 | `cassette_job_status` | Read status or wait briefly for a change |
 | `cassette_review_completion` | Review completion and explicitly approve export |
 | `cassette_cancel_job` | Request cooperative cancellation |
+| `cassette_timeline` | Read the live project timeline as a bounded text digest (+ optional contact sheet) |
+| `cassette_edit` | Surgical no-LLM edit / undo through the manual command lane (`CASSETTE_DIRECT_EDIT=1`) |
 
 Every tool returns a structured envelope with `ok`, typed `data` or `error`, `session_id`, `job_id`, the current phase, and a runtime-derived `next_action`.
+
+### The live editor deep link and plan review
+
+Every job on the API transport now carries `editor_url` — a `…/try?projectSessionId=<id>&chatSessionId=<uuid>` link that opens the **real Cassette editor on this job's live session**: the timeline repaints as edits land, the preview plays without any server render, and the plan-review card is interactive. Anyone with the link can view *and* edit that one project (the same capability-URL posture as Cassette's public try page), so treat it like a share link.
+
+**Behavior change:** on MCP hosts, `edit_plan_review` now surfaces as a real question by default (`CASSETTE_PLAN_REVIEW=user`) instead of being silently auto-approved — answer with `approve`, `revise <feedback>`, or `reject`, in chat or in the open editor tab (first answer wins). Set `CASSETTE_UNATTENDED=1` to restore the previous fully headless behavior. Status envelopes additionally carry `timeline_delta` (what changed) and `plan_progress`, fed by the run's SSE event stream (`CASSETTE_API_STREAM=0` disables).
 
 ## Ready to Use with Hermes 📼
 **Now you can pick up your phone and DM your agent! Don't forget to keep your agent alive and network connected.**
@@ -738,6 +746,17 @@ JAMENDO_CLIENT_SECRET=your_client_secret
 ```
 
 `JAMENDO_CLIENT_SECRET` is reserved for future use. It is not sent to Jamendo and is not written to job metadata.
+
+Transparency and direct-edit flags (API transport):
+
+| Flag | Default | Effect |
+|---|---|---|
+| `CASSETTE_API_STREAM` | on | SSE run-event listener feeding `timeline_delta`/`plan_progress`; `0` = pure polling |
+| `CASSETTE_PLAN_REVIEW` | `user` on MCP, `auto` on gateway | surface `edit_plan_review` as a question vs auto-approve |
+| `CASSETTE_UNATTENDED` | off | `1` restores fully headless auto-approve semantics |
+| `CASSETTE_DIRECT_EDIT` | off | enable the `cassette_edit` surgical no-LLM lane |
+| `CASSETTE_AUTH_TOKEN` | unset | pre-issued bearer, skips `/api/agent-auth/verify` (local dev/CI) |
+| `CASSETTE_WEB_URL` | origin of `CASSETTE_URL` | web origin used for `editor_url` deep links |
 </details>
 
 

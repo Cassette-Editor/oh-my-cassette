@@ -58,6 +58,8 @@ jobs:
             mcp:
               - 'mcp_plugin/**'
               - 'runtime_config.py'
+              - 'timeline.py'
+              - 'api_transport.py'
               - 'requirements-mcp.in'
               - 'requirements-mcp.lock'
               - 'requirements-browser.in'
@@ -178,6 +180,7 @@ jobs:
           tests/test_mcp_protocol.py
           tests/test_mcp_runtime.py
           tests/test_mcp_state.py
+          tests/test_timeline.py
       - name: Smoke-test locked launcher bootstrap twice
         run: |
           export CASSETTE_MCP_PYTHON="$(command -v python)"

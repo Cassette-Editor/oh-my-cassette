@@ -26,7 +26,9 @@ from .models import (
     IngestMediaInput,
     JamendoMatcherInput,
     JobStatusInput,
+    EditInput,
     ListAssetsInput,
+    TimelineInput,
     MakePromptInput,
     MatchBgmInput,
     MatchExactBgmInput,
@@ -119,6 +121,19 @@ mcp = ArtifactFastMCP(
         "review_required means evaluate the result and call cassette_review_completion (only "
         "decision=export renders); exported or succeeded means present the validated artifacts; "
         "failed, cancelled, or timed_out means report the structured error. Do not tight-poll. "
+        "Ground every statement about project state in cassette_timeline, never in memory, and "
+        "name the version in replies. Small named edits (trim, text, delete, undo) go through "
+        "cassette_edit when CASSETTE_DIRECT_EDIT=1: read the timeline first, pass "
+        "expected_version, and on stale_timeline re-read and retry; creative or multi-step "
+        "briefs go through cassette_run_job. Job envelopes carry editor_url — a live view of "
+        "the real editor (timeline + preview, zero render): hand it to the user once at job "
+        "start and again at questions/review, offering to open it locally; do not repeat it on "
+        "every poll. Status envelopes carry timeline_delta (what changed) and plan_progress — "
+        "relay them instead of re-describing state. A needs_user question with reason "
+        "edit_plan_review is the edit plan itself: relay it with the link and answer via "
+        "cassette_answer_question with approve, revise <feedback>, or reject; if the resume "
+        "returns resume_not_waiting_for_user the user already decided in the editor tab — "
+        "re-check status. "
         "If a tool returns auth_required, show error.details.setup_command as a private terminal "
         "command; never collect credentials in chat."
     ),
@@ -245,6 +260,47 @@ async def cassette_list_assets(
 ) -> ToolEnvelope:
     request = ListAssetsInput(session_id=session_id, chat_id=chat_id)
     return await _run_sync(_runtime(ctx).list_assets, request.model_dump(exclude_none=True))
+
+
+@mcp.tool(
+    description=(
+        "Read the live Cassette timeline as a bounded text digest (CTL). Call this before any "
+        "statement about project state — never answer from memory. contact_sheet=true also tiles "
+        "the stored clip posters into one image (zero render)."
+    ),
+    structured_output=True,
+)
+async def cassette_timeline(
+    session_id: str,
+    ctx: Context,
+    detail: str | None = None,
+    profile: Literal["aligned", "gateway"] | None = None,
+    contact_sheet: bool = False,
+) -> ToolEnvelope:
+    request = TimelineInput(session_id=session_id, detail=detail, profile=profile, contact_sheet=contact_sheet)
+    return await _run_sync(_runtime(ctx).timeline, request.model_dump(exclude_none=True))
+
+
+@mcp.tool(
+    description=(
+        "Surgical no-LLM timeline edit through the manual-editor command lane (requires "
+        "CASSETTE_DIRECT_EDIT=1). Use for small named changes (trim, text, delete, undo) after "
+        "reading cassette_timeline; big or creative briefs go through cassette_run_job. input is "
+        'always {"payload": {...}}. Pass '
+        "expected_version from the last timeline read; tool_name 'undo' with "
+        "input.cursorSequence rewinds the shared operation history."
+    ),
+    structured_output=True,
+)
+async def cassette_edit(
+    session_id: str,
+    tool_name: str,
+    ctx: Context,
+    input: dict[str, Any] | None = None,
+    expected_version: int | None = None,
+) -> ToolEnvelope:
+    request = EditInput(session_id=session_id, tool_name=tool_name, input=input, expected_version=expected_version)
+    return await _run_sync(_runtime(ctx).edit, request.model_dump(exclude_none=True))
 
 
 @mcp.tool(

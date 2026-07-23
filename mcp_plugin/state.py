@@ -113,7 +113,21 @@ def phase_from_job(job: dict) -> SessionPhase:
     return SessionPhase.READY
 
 
-def next_action_for(phase: SessionPhase, *, job_id: str | None = None) -> str:
+def next_action_for(phase: SessionPhase, *, job_id: str | None = None, editor_url: str | None = None) -> str:
+    action = _next_action_base(phase, job_id=job_id)
+    # Live-view moments: hand the user the editor deep link exactly where watching helps
+    # (running / question / review), never on the mechanical phases.
+    if editor_url and phase in {
+        SessionPhase.RUNNING,
+        SessionPhase.EXPORTING,
+        SessionPhase.NEEDS_USER,
+        SessionPhase.REVIEW_REQUIRED,
+    }:
+        return f"{action} Watch live: {editor_url}"
+    return action
+
+
+def _next_action_base(phase: SessionPhase, *, job_id: str | None = None) -> str:
     if phase == SessionPhase.NEW:
         return "Call cassette_ingest_media with a trusted project media path."
     if phase == SessionPhase.GUIDED_CHOICES:

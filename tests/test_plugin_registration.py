@@ -39,6 +39,8 @@ def test_plugin_registers_tools_command_hooks_and_skill():
         "cassette_job_status",
         "cassette_review_completion",
         "cassette_cancel_job",
+        "cassette_timeline",
+        "cassette_edit",
     }
     assert {command["name"] for command in ctx.commands} == {"cassette", "cut", "cassette_model"}
     assert next(command for command in ctx.commands if command["name"] == "cassette")["args_hint"] == (

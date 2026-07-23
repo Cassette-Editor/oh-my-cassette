@@ -35,11 +35,13 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from .manifest import get_asset_root
@@ -220,13 +222,93 @@ def _session_id(job: dict) -> str:
     return str(job.get("cassette_session_id") or job.get("session_hash") or "default")
 
 
+_TRY_SESSION_PREFIX = "try-session-"
+
+
+def _editor_url(session_id: str, thread_id: str, job: dict) -> str | None:
+    """Deep link into the live editor for this session's project and chat thread.
+
+    Only try-session-* projects are reachable token-free (publicTry tier); older un-prefixed
+    session ids have no browsable link, so this returns None for them."""
+    if not session_id.startswith(_TRY_SESSION_PREFIX):
+        return None
+    base = _env("CASSETTE_WEB_URL")
+    if not base:
+        raw = str(job.get("url") or os.getenv("CASSETTE_URL", "https://sg.trycassette.online/agent"))
+        parts = urlparse(raw)
+        if not parts.scheme or not parts.netloc:
+            return None
+        base = f"{parts.scheme}://{parts.netloc}"
+    session_hash = session_id[len(_TRY_SESSION_PREFIX) :]
+    query = urlencode({"projectSessionId": session_hash, "chatSessionId": thread_id})
+    return f"{base.rstrip('/')}/try?{query}"
+
+
 def _http_timeout() -> float:
     return _env_num("CASSETTE_API_HTTP_TIMEOUT_SEC", 60.0, 5.0)
+
+
+def _unattended() -> bool:
+    # One switch restoring today's fully headless semantics (auto-approve plans, classifier-answered
+    # questions) for CI-style runs.
+    return _env("CASSETTE_UNATTENDED").lower() in {"1", "true", "yes", "on"}
+
+
+def _plan_review_mode() -> str:
+    """'user' surfaces edit_plan_review as a real question; 'auto' keeps silent approval.
+
+    Default: 'user' on MCP hosts (the person is present in the chat), 'auto' for gateway/Hermes
+    background jobs where a blocking review would stall unattended pipelines."""
+    value = _env("CASSETTE_PLAN_REVIEW").lower()
+    if value in {"user", "auto"}:
+        return value
+    try:
+        import runtime_config
+
+        if runtime_config.runtime_adapter() == runtime_config.MCP_ADAPTER:
+            return "user"
+    except Exception:  # noqa: BLE001
+        pass
+    return "auto"
+
+
+def _plan_review_resume(answer: str) -> dict:
+    """Map a free-text reply onto the bare PlanReviewDecision the graph expects."""
+    text = str(answer or "").strip()
+    lowered = text.lower()
+    if lowered in {"approve", "approved", "yes", "ok", "okay", "lgtm", "同意", "批准", "可以"} or lowered.startswith(
+        "approve"
+    ):
+        return {"action": "approve"}
+    if lowered in {"reject", "rejected", "no", "cancel", "拒绝", "取消"}:
+        return {"action": "reject"}
+    if lowered.startswith("revise"):
+        feedback = text[len("revise") :].strip(" :,-") or "Please revise the plan."
+        return {"action": "revise", "feedback": feedback}
+    # Any other free text is revision feedback — the safest reading of "change it to…".
+    return {"action": "revise", "feedback": text}
+
+
+def _stream_enabled() -> bool:
+    # SSE event listener (timeline deltas + plan progress). Default on; CASSETTE_API_STREAM=0
+    # restores a pure-poll transport. Status polling stays the run driver either way — the
+    # stream is the event channel, never the completion signal.
+    return _env("CASSETTE_API_STREAM").lower() not in {"0", "false", "no", "off"}
+
+
+def _stream_read_timeout() -> float:
+    return _env_num("CASSETTE_API_STREAM_TIMEOUT_SEC", 900.0, 30.0)
+
+
+# Stream modes requested for every run so a later join (plugin listener OR the user's /try tab)
+# replays commit/plan events; 'custom' carries ProjectCommitEvents, 'updates' the node progress.
+_RUN_STREAM_MODES = ["updates", "custom"]
 
 
 class ApiTransport:
     def __init__(self) -> None:
         self._token: str | None = None
+        self._active_stream_stop: threading.Event | None = None
         # Progress state (reset per run in _init_progress; defaults keep helpers safe on the export path).
         self._job: dict | None = None
         self._stage_timings: dict[str, dict] = {}
@@ -345,7 +427,15 @@ class ApiTransport:
                     completion_observed=True,
                     export_completed=False,
                     risk="medium",
-                    extra_quality={"progress_summary": self._questions_summary(questions)},
+                    extra_quality={
+                        "progress_summary": self._questions_summary(questions),
+                        # Plan review is judged against the timeline, so attach the digest.
+                        **(
+                            self._timeline_review_context(session_id)
+                            if any(q.get("reason") == "edit_plan_review" for q in questions)
+                            else {}
+                        ),
+                    },
                 )
             if run_status == _TIMED_OUT:
                 errors.append(
@@ -411,6 +501,9 @@ class ApiTransport:
                         "completion_source": "cassette_agent_success",
                         "progress_summary": edit_summary,
                         "current_stage": "agent",
+                        # The export gate must never again be judged blind: attach the timeline
+                        # digest + contact sheet so the reviewer sees what would be exported.
+                        **self._timeline_review_context(session_id),
                     },
                 )
             if not _export_on_complete(job):
@@ -520,7 +613,15 @@ class ApiTransport:
                 raise ApiTransportError("missing_required_arg", "response is required to resume a Cassette job")
             self._authenticate()
             interrupts = self._pending_interrupts(thread_id)
-            if not any((item.get("value") or {}).get("type") == "ask_user" for item in interrupts):
+            pending_kinds = {(item.get("value") or {}).get("type") for item in interrupts}
+            if "edit_plan_review" in pending_kinds:
+                # Bare PlanReviewDecision — approve / revise <feedback> / reject, mapped from the
+                # user's free-text reply. First-answer-wins with an open editor tab: if the tab
+                # already decided, the pending set is empty and we raise the same clean error.
+                resume_payload: dict[str, Any] = _plan_review_resume(answer)
+            elif "ask_user" in pending_kinds:
+                resume_payload = {"action": "respond", "userResponse": answer}
+            else:
                 raise ApiTransportError(
                     "resume_not_waiting_for_user",
                     "The persisted API thread is no longer waiting for a user response.",
@@ -530,9 +631,10 @@ class ApiTransport:
                 thread_id,
                 {
                     "assistant_id": "cassette-chat",
-                    "command": {"resume": {"action": "respond", "userResponse": answer}},
+                    "command": {"resume": resume_payload},
                     "config": config,
                     "multitask_strategy": "interrupt",
+                    "stream_mode": _RUN_STREAM_MODES,
                 },
             )
             self._persist_continuation(job_id, thread_id, session_id, config, run_id, interrupts=[])
@@ -554,7 +656,15 @@ class ApiTransport:
                     completion_observed=True,
                     export_completed=False,
                     risk="medium",
-                    extra_quality={"progress_summary": self._questions_summary(questions)},
+                    extra_quality={
+                        "progress_summary": self._questions_summary(questions),
+                        # Plan review is judged against the timeline, so attach the digest.
+                        **(
+                            self._timeline_review_context(session_id)
+                            if any(q.get("reason") == "edit_plan_review" for q in questions)
+                            else {}
+                        ),
+                    },
                 )
             if run_status == _TIMED_OUT:
                 errors.append(
@@ -597,6 +707,9 @@ class ApiTransport:
                         "completion_source": "cassette_agent_success",
                         "progress_summary": edit_summary,
                         "current_stage": "agent",
+                        # The export gate must never again be judged blind: attach the timeline
+                        # digest + contact sheet so the reviewer sees what would be exported.
+                        **self._timeline_review_context(session_id),
                     },
                 )
             if not _export_on_complete(job):
@@ -657,6 +770,12 @@ class ApiTransport:
     # ── auth ──────────────────────────────────────────────────────────────────
     def _authenticate(self) -> None:
         if self._token:
+            return
+        override = _env("CASSETTE_AUTH_TOKEN")
+        if override:
+            # Pre-issued bearer (local dev's local-dev-access-token, CI-minted JWTs); skips
+            # /api/agent-auth/verify entirely.
+            self._token = override
             return
         email, password = _credentials()
         if not email or not password:
@@ -921,29 +1040,97 @@ class ApiTransport:
         except URLError as exc:
             raise ApiTransportError("upload_put_failed", f"Presigned PUT failed: {exc.reason}") from exc
 
+    def _timeline_review_context(self, session_id: str) -> dict:
+        """Best-effort CTL + contact sheet for review moments — never fails the run."""
+        try:
+            from . import timeline as timeline_mod
+            from . import tools as tools_mod
+
+            document = self.get_project_document(session_id)
+            context: dict[str, Any] = {"timeline_ctl": timeline_mod.render_ctl(document)}
+            sheet = tools_mod.build_contact_sheet(document, session_id)
+            if sheet:
+                context["contact_sheet"] = sheet
+            return context
+        except Exception:  # noqa: BLE001
+            return {}
+
+    # ── project document read ─────────────────────────────────────────────────
+    def get_project_document(self, session_id: str) -> dict:
+        """Fetch the live ProjectDocument for a session's project (agent-tier read)."""
+        from urllib.parse import quote
+
+        self._authenticate()
+        _, body = self._request("GET", f"/api/projects/{quote(str(session_id), safe='')}", expect=200)
+        document = body.get("document") if isinstance(body, dict) else None
+        if not isinstance(document, dict):
+            raise ApiTransportError("project_document_missing", "Cassette returned no project document")
+        return document
+
+    def post_project_command(self, session_id: str, envelope: dict) -> dict:
+        """POST a no-LLM project command (the manual-editor lane); returns the ProjectCommitEvent.
+
+        The route replies 200 for both outcomes: a commit event on success, or
+        {ok:false, code, message} on validation/commit failure."""
+        from urllib.parse import quote
+
+        self._authenticate()
+        _, body = self._request(
+            "POST",
+            f"/api/projects/{quote(str(session_id), safe='')}/commands",
+            json_body=envelope,
+            expect=200,
+        )
+        if not isinstance(body, dict):
+            raise ApiTransportError("command_failed", "Cassette returned a malformed command response")
+        if body.get("ok") is False:
+            code = str(body.get("code") or "command_failed").lower()
+            raise ApiTransportError(code, str(body.get("message") or "Project command failed"))
+        return body
+
     # ── agent run ─────────────────────────────────────────────────────────────
     def _create_thread(self, session_id: str, job: dict) -> str:
+        # The upstream LangGraph server 422s non-UUID thread ids, so the thread id cannot be the
+        # session id. Mint it client-side and put it in the editor deep link as ?chatSessionId= —
+        # a browser tab then bootstraps the SAME thread (ifExists:'do_nothing') and rejoins the
+        # live run (reconnectOnMount), which is what makes the /try page a live view of this job.
+        thread_id = str(uuid.uuid4())
         metadata = {
             "graph_id": "cassette-chat",
             "projectId": session_id,
             "mediaSessionId": session_id,
-            "chatSessionId": session_id,
+            "chatSessionId": thread_id,
         }
         _, body = self._request(
-            "POST", "/api/langgraph/threads", json_body={"metadata": metadata, "if_exists": "do_nothing"}, expect=200
+            "POST",
+            "/api/langgraph/threads",
+            json_body={"thread_id": thread_id, "metadata": metadata, "if_exists": "do_nothing"},
+            expect=200,
         )
-        thread_id = (body.get("thread_id") or body.get("threadId")) if isinstance(body, dict) else None
-        if not thread_id:
-            raise ApiTransportError("thread_create_failed", "LangGraph thread create returned no thread_id")
-        return str(thread_id)
+        created = (body.get("thread_id") or body.get("threadId")) if isinstance(body, dict) else None
+        if created:
+            thread_id = str(created)
+        editor_url = _editor_url(session_id, thread_id, job)
+        job["chat_thread_id"] = thread_id
+        job["editor_url"] = editor_url
+        job_id = str(job.get("job_id") or "")
+        if job_id:
+            try:
+                from . import jobs
 
-    def _session_context(self, session_id: str, job: dict, prompt: str) -> dict:
-        # Mirrors CassetteAgentSessionContext (buildCurrentSessionContext in the editor). All of
-        # projectId/mediaSessionId/chatSessionId/threadId collapse onto one id in the real editor
-        # (BROWSER_SESSION_ID == getCurrentProjectId()), so the plugin uses the single session id.
+                jobs.update_job(job_id, chat_thread_id=thread_id, editor_url=editor_url)
+            except Exception:  # noqa: BLE001 — persisting the link must not fail the run
+                pass
+        return thread_id
+
+    def _session_context(self, session_id: str, job: dict, prompt: str, thread_id: str | None = None) -> dict:
+        # Mirrors CassetteAgentSessionContext (buildCurrentSessionContext in the editor):
+        # projectId/mediaSessionId collapse onto the project session id, while chatSessionId/
+        # threadId carry the UUID thread the editor's ChatPanel also uses as its stream thread.
+        chat_id = thread_id or str(job.get("chat_thread_id") or session_id)
         return {
-            "chatSessionId": session_id,
-            "threadId": session_id,
+            "chatSessionId": chat_id,
+            "threadId": chat_id,
             "mediaSessionId": session_id,
             "projectId": session_id,
             "mode": "auto",
@@ -1047,7 +1234,7 @@ class ApiTransport:
         catalog keyed by sessionContext.mediaSessionId (== the upload x-session-id)."""
         job_id = str(job.get("job_id") or "")
         turn_id = f"{job_id or session_id}-turn"
-        session_context = self._session_context(session_id, job, prompt)
+        session_context = self._session_context(session_id, job, prompt, thread_id=thread_id)
         config = {
             # recursion_limit is what the upstream LangGraph server reads; the editor also sends the
             # camelCase duplicate, harmless to include for parity.
@@ -1064,6 +1251,7 @@ class ApiTransport:
             "input": {"messages": [{"type": "human", "content": prompt}]},
             "config": config,
             "multitask_strategy": "rollback",
+            "stream_mode": _RUN_STREAM_MODES,
         }
         run_id = self._post_run(thread_id, run_body)
         self._persist_continuation(
@@ -1088,7 +1276,28 @@ class ApiTransport:
         questions: list[dict] = []
         job_id = str(job.get("job_id") or "")
         session_id = _session_id(job)
+        try:
+            return self._drive_run_inner(thread_id, run_id, config, job, deadline, questions, job_id, session_id)
+        finally:
+            if (stop := getattr(self, "_active_stream_stop", None)) is not None:
+                stop.set()
+                self._active_stream_stop = None
+
+    def _drive_run_inner(
+        self,
+        thread_id: str,
+        run_id: str,
+        config: dict[str, Any],
+        job: dict,
+        deadline: float,
+        questions: list[dict],
+        job_id: str,
+        session_id: str,
+    ) -> tuple[str, list[dict]]:
         while True:
+            self._active_stream_stop = self._refresh_stream_listener(
+                thread_id, run_id, job, getattr(self, "_active_stream_stop", None)
+            )
             status = self._await_run(thread_id, run_id, deadline, job_id)
             if status == "interrupted":
                 interrupts = self._pending_interrupts(thread_id)
@@ -1127,6 +1336,7 @@ class ApiTransport:
                         "command": {"resume": resume_value},
                         "config": config,
                         "multitask_strategy": "interrupt",
+                        "stream_mode": _RUN_STREAM_MODES,
                     },
                 )
                 self._persist_continuation(job_id, thread_id, session_id, config, run_id, interrupts=[])
@@ -1222,6 +1432,95 @@ class ApiTransport:
                 if err:
                     details.append(str(err)[:300])
         return "; ".join(details) or "unknown error"
+
+    # ── run event stream (enhancement channel; poll drives completion) ───────
+    @staticmethod
+    def _iter_sse(resp):
+        """Yield (event, data) pairs from a line-iterable SSE response body."""
+        event: str | None = None
+        data_lines: list[str] = []
+        for raw in resp:
+            line = raw.decode("utf-8", "replace").rstrip("\r\n") if isinstance(raw, bytes) else str(raw).rstrip("\r\n")
+            if line == "":
+                if data_lines:
+                    yield (event or "message", "\n".join(data_lines))
+                event, data_lines = None, []
+                continue
+            if line.startswith(":"):
+                continue
+            if line.startswith("event:"):
+                event = line[len("event:") :].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[len("data:") :].lstrip())
+        if data_lines:
+            yield (event or "message", "\n".join(data_lines))
+
+    def _refresh_stream_listener(self, thread_id: str, run_id: str, job: dict, prev: threading.Event | None):
+        """(Re)start the run-stream listener when the run id changes; return the live stop event."""
+        if not _stream_enabled() or not str(job.get("job_id") or ""):
+            return prev
+        if prev is not None and getattr(prev, "run_id", None) == run_id:
+            return prev
+        if prev is not None:
+            prev.set()
+        stop = threading.Event()
+        stop.run_id = run_id  # type: ignore[attr-defined]
+        threading.Thread(
+            target=self._consume_run_stream,
+            args=(thread_id, run_id, dict(job), stop),
+            daemon=True,
+            name=f"cassette-run-stream-{run_id[:8]}",
+        ).start()
+        return stop
+
+    def _consume_run_stream(self, thread_id: str, run_id: str, job: dict, stop: threading.Event) -> None:
+        """Join the run's SSE stream and fold events onto the persisted job.
+
+        Best-effort by design: any failure (drop, parse error, timeout) simply ends the listener —
+        the poll loop still drives the run, so the only loss is event granularity."""
+        job_id = str(job.get("job_id") or "")
+        session_id = _session_id(job)
+        try:
+            from . import jobs as jobs_mod
+            from . import timeline as timeline_mod
+
+            try:
+                baseline = self.get_project_document(session_id)
+            except Exception:  # noqa: BLE001 — fresh project: delta baseline is the empty document
+                baseline = {"version": 0, "entities": {}, "order": {}}
+            url = f"{_api_base()}/api/langgraph/threads/{thread_id}/runs/{run_id}/stream"
+            request = Request(url, headers=self._auth_headers({"Accept": "text/event-stream"}))
+            with urlopen(request, timeout=_stream_read_timeout()) as resp:
+                progress: list[str] = list(job.get("plan_progress") or [])
+                for event, data in self._iter_sse(resp):
+                    if stop.is_set():
+                        return
+                    if event != "custom":
+                        continue
+                    try:
+                        payload = json.loads(data)
+                    except ValueError:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    if payload.get("type") == "project_operation_committed" and isinstance(
+                        payload.get("document"), dict
+                    ):
+                        delta = timeline_mod.render_delta(baseline, payload["document"])
+                        jobs_mod.update_job(job_id, timeline_delta=delta)
+                    else:
+                        label = str(
+                            payload.get("label")
+                            or payload.get("status")
+                            or payload.get("title")
+                            or payload.get("type")
+                            or ""
+                        ).strip()[:80]
+                        if label:
+                            progress = (progress + [label])[-10:]
+                            jobs_mod.update_job(job_id, plan_progress=progress)
+        except Exception:  # noqa: BLE001 — enhancement channel only
+            return
 
     def _post_run(self, thread_id: str, body: dict) -> str:
         _, resp = self._request("POST", f"/api/langgraph/threads/{thread_id}/runs", json_body=body, expect=200)
@@ -1320,15 +1619,31 @@ class ApiTransport:
             # Each auto-handled interrupt leaves an audit record (requires_user=False), matching the
             # browser path's routine-approval question entries.
             if kind == "edit_plan_review":
+                if _unattended() or _plan_review_mode() != "user":
+                    questions.append(
+                        {
+                            "question": "Cassette requested plan approval.",
+                            "requires_user": False,
+                            "reason": "routine_plan_approval",
+                            "answer": "Auto-approved the edit plan.",
+                        }
+                    )
+                    return {"action": "approve"}, questions, False
+                # Web-agent-page parity: the plan is a decision, not a formality. Surface it as a
+                # real question (approve / revise <feedback> / reject) instead of eating it.
+                from . import timeline as timeline_mod
+
+                payload = value.get("payload") if isinstance(value.get("payload"), dict) else {}
+                block = timeline_mod.plan_review_block(payload)
                 questions.append(
                     {
-                        "question": "Cassette requested plan approval.",
-                        "requires_user": False,
-                        "reason": "routine_plan_approval",
-                        "answer": "Auto-approved the edit plan.",
+                        "question": block,
+                        "requires_user": True,
+                        "reason": "edit_plan_review",
+                        "answer": "",
                     }
                 )
-                return {"action": "approve"}, questions, False
+                return None, questions, True
             if kind == "mode_switch":
                 questions.append(
                     {

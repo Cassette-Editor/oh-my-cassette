@@ -135,6 +135,7 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
             return self._json(200, {"mediaFileId": f"m-{self.rec['complete_count']}", "uploadStatus": "completed"})
         if path == "/api/langgraph/threads":
             self.rec["thread_metadata"] = body.get("metadata")
+            self.rec["thread_create_body"] = body
             return self._json(200, {"thread_id": "th-1"})
         if path == "/api/langgraph/threads/th-1/runs":
             if isinstance(body.get("command"), dict):
@@ -194,6 +195,39 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
                             ]
                         }
                     ],
+                },
+            )
+        if path.startswith("/api/projects/"):
+            sid = path.split("/api/projects/", 1)[1]
+            return self._json(
+                200,
+                {
+                    "document": {
+                        "schemaVersion": 2,
+                        "projectId": sid,
+                        "version": 7,
+                        "sequenceTimebase": {"num": 30, "den": 1},
+                        "fps": 30,
+                        "compositionWidth": 1920,
+                        "compositionHeight": 1080,
+                        "entities": {
+                            "tracks": {
+                                "t1": {"id": "t1", "name": "Video 1", "type": "video"},
+                            },
+                            "clips": {
+                                "c1": {
+                                    "id": "c1",
+                                    "name": "intro.mp4",
+                                    "type": "video",
+                                    "trackId": "t1",
+                                    "startFrame": 0,
+                                    "durationInFrames": 90,
+                                },
+                            },
+                            "transitions": {},
+                        },
+                        "order": {"trackIds": ["t1"], "clipIds": ["c1"], "transitionIds": []},
+                    }
                 },
             )
         if path == "/api/export/jobs/ej-1":
@@ -870,3 +904,214 @@ def test_await_run_cancels_the_server_side_run(cassette_env, monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_thread_create_sends_uuid_and_persists_editor_url(cassette_env, mock_api, monkeypatch):
+    """The thread id must be a client-minted UUID (LangGraph 422s anything else), the metadata must
+    split project ids from chat ids, and the job must gain the /try deep link with both."""
+    import uuid as _uuid
+
+    monkeypatch.setenv("CASSETTE_WEB_URL", "http://127.0.0.1:8080")
+    job = {
+        "job_id": "job-link",
+        "session_hash": "abc",
+        "cassette_session_id": "try-session-abc",
+        "prompt": "edit",
+        "asset_paths": [],
+        "timeout_sec": 60,
+    }
+    result = ApiTransport().run_job(job)
+    rec = mock_api.rec
+
+    assert result["status"] == "succeeded", result["errors"]
+    body = rec["thread_create_body"]
+    minted = str(body.get("thread_id"))
+    _uuid.UUID(minted)  # raises if the transport did not mint a UUID
+    assert body["if_exists"] == "do_nothing"
+    # projectId/mediaSessionId carry the project; chatSessionId carries the (UUID) thread.
+    assert body["metadata"]["projectId"] == "try-session-abc"
+    assert body["metadata"]["mediaSessionId"] == "try-session-abc"
+    assert body["metadata"]["chatSessionId"] == minted
+    # The server echo is authoritative for the thread id the run actually uses.
+    assert job["chat_thread_id"] == "th-1"
+    assert job["editor_url"] == "http://127.0.0.1:8080/try?projectSessionId=abc&chatSessionId=th-1"
+    # sessionContext mirrors the split: chat/thread ids are the UUID thread, project ids the session.
+    session_context = rec["run_config"]["configurable"]["sessionContext"]
+    assert session_context["chatSessionId"] == "th-1"
+    assert session_context["threadId"] == "th-1"
+    assert session_context["projectId"] == "try-session-abc"
+    assert session_context["mediaSessionId"] == "try-session-abc"
+
+
+def test_editor_url_only_for_try_session_projects(cassette_env, mock_api):
+    """Old un-prefixed sessions have no token-free browser view, so no deep link is composed."""
+    job = {
+        "job_id": "job-old",
+        "session_hash": "sess",
+        "cassette_session_id": "sess",
+        "prompt": "edit",
+        "asset_paths": [],
+        "timeout_sec": 60,
+    }
+    result = ApiTransport().run_job(job)
+    assert result["status"] == "succeeded", result["errors"]
+    assert job["editor_url"] is None
+
+
+def test_editor_url_falls_back_to_cassette_url_origin(monkeypatch):
+    from cassette.api_transport import _editor_url
+
+    monkeypatch.delenv("CASSETTE_WEB_URL", raising=False)
+    url = _editor_url("try-session-h4sh", "aaaa-bbbb", {"url": "https://sg.trycassette.online/agent"})
+    assert url == "https://sg.trycassette.online/try?projectSessionId=h4sh&chatSessionId=aaaa-bbbb"
+    assert _editor_url("legacy-id", "aaaa-bbbb", {}) is None
+
+
+def test_auth_token_override_skips_verify(cassette_env, mock_api, monkeypatch):
+    monkeypatch.setenv("CASSETTE_AUTH_TOKEN", "pre-issued-token")
+    monkeypatch.delenv("CASSETTE_AUTH_EMAIL", raising=False)
+    monkeypatch.delenv("CASSETTE_AUTH_PASSWORD", raising=False)
+    job = {
+        "job_id": "job-token",
+        "session_hash": "tok",
+        "cassette_session_id": "try-session-tok",
+        "prompt": "edit",
+        "asset_paths": [],
+        "timeout_sec": 60,
+    }
+    result = ApiTransport().run_job(job)
+    assert result["status"] == "succeeded", result["errors"]
+    assert ("POST", "/api/agent-auth/verify") not in mock_api.rec["requests"]
+
+
+def test_cassette_timeline_tool_reads_live_document(cassette_env, mock_api):
+    result = json.loads(tools.cassette_timeline({"session_id": "try-session-abc"}))
+    assert result["ok"], result
+    data = result["data"]
+    assert data["version"] == 7
+    assert data["clip_count"] == 1
+    assert data["duration_sec"] == 3.0
+    assert data["ctl"].splitlines()[0].startswith("TIMELINE try-session-abc v7")
+    assert "intro.mp4" in data["ctl"]
+    # Gateway profile renders without column padding.
+    gateway = json.loads(tools.cassette_timeline({"session_id": "try-session-abc", "profile": "gateway"}))
+    assert gateway["ok"] and "→" in gateway["data"]["ctl"] or "intro.mp4" in gateway["data"]["ctl"]
+
+
+def test_completion_review_carries_timeline_context(cassette_env, mock_api, monkeypatch, tmp_path):
+    """The export-review gate attaches the CTL (and sheet when possible) — never judged blind."""
+    monkeypatch.delenv("CASSETTE_API_AUTO_EXPORT", raising=False)
+    job = {
+        "job_id": "job-review-ctx",
+        "session_hash": "rv",
+        "cassette_session_id": "try-session-rv",
+        "prompt": "edit",
+        "asset_paths": [],
+        "timeout_sec": 60,
+        "options": {},
+    }
+    result = ApiTransport().run_job(job)
+    assert result["status"] == "needs_user"
+    assert result["quality"]["completion_review_required"] is True
+    assert result["quality"]["timeline_ctl"].startswith("TIMELINE try-session-rv v7")
+
+
+class _PlanReviewAPI(_MockCassetteAPI):
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/langgraph/threads/th-1/state":
+            self.rec["requests"].append(("GET", path))
+            return self._json(
+                200,
+                {
+                    "values": {},
+                    "tasks": [
+                        {
+                            "interrupts": [
+                                {
+                                    "id": "int-plan",
+                                    "value": {
+                                        "type": "edit_plan_review",
+                                        "toolCallId": "tc-1",
+                                        "payload": {
+                                            "reviewMarkdown": "1. Trim beach to 9.5s\n2. Add title 'Sunset'",
+                                            "planContract": {},
+                                        },
+                                    },
+                                }
+                            ]
+                        }
+                    ],
+                },
+            )
+        return super().do_GET()
+
+
+@pytest.fixture
+def plan_review_api(monkeypatch):
+    server = _serve(_PlanReviewAPI, monkeypatch)
+    monkeypatch.delenv("CASSETTE_API_AUTO_EXPORT", raising=False)
+    monkeypatch.delenv("CASSETTE_UNATTENDED", raising=False)
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+def test_plan_review_surfaces_as_question_and_resumes(cassette_env, plan_review_api, monkeypatch):
+    monkeypatch.setenv("CASSETTE_PLAN_REVIEW", "user")
+    job = jobs.create_job("pr", "edit", None, [], {"cassette_session_id": "try-session-pr"})
+
+    result = ApiTransport().run_job(job)
+    assert result["status"] == "needs_user", result["errors"]
+    question = next(q for q in result["questions"] if q["reason"] == "edit_plan_review")
+    assert question["requires_user"] is True
+    assert "Trim beach" in question["question"]
+    assert "approve / revise" in question["question"]
+    # Plan review is judged against the timeline: the CTL digest rides along.
+    assert result["quality"]["timeline_ctl"].startswith("TIMELINE try-session-pr")
+
+    # Resume with a decision word -> bare PlanReviewDecision on the wire.
+    jobs.update_job(job["job_id"], **result, continuation=jobs.load_job(job["job_id"]).get("continuation"))
+    resumed = ApiTransport().resume(jobs.load_job(job["job_id"]), "approve")
+    assert plan_review_api.rec["resume_value"] == {"action": "approve"}
+    assert resumed["status"] in {"succeeded", "needs_user"}
+
+
+def test_plan_review_auto_approved_when_unattended(cassette_env, plan_review_api, monkeypatch):
+    monkeypatch.setenv("CASSETTE_PLAN_REVIEW", "user")
+    monkeypatch.setenv("CASSETTE_UNATTENDED", "1")
+    job = jobs.create_job("pru", "edit", None, [], {"cassette_session_id": "try-session-pru"})
+    result = ApiTransport().run_job(job)
+    assert result["status"] in {"succeeded", "needs_user"}
+    assert plan_review_api.rec["resume_value"] == {"action": "approve"}
+    audit = next(q for q in result["questions"] if q["reason"] == "routine_plan_approval")
+    assert audit["requires_user"] is False
+
+
+def test_plan_review_resume_mapping():
+    from cassette.api_transport import _plan_review_resume
+
+    assert _plan_review_resume("approve") == {"action": "approve"}
+    assert _plan_review_resume("Approved!") == {"action": "approve"}
+    assert _plan_review_resume("reject") == {"action": "reject"}
+    assert _plan_review_resume("revise: use the sunset clip first") == {
+        "action": "revise",
+        "feedback": "use the sunset clip first",
+    }
+    assert _plan_review_resume("make the intro shorter") == {
+        "action": "revise",
+        "feedback": "make the intro shorter",
+    }
+
+
+def test_plan_review_mode_defaults(monkeypatch):
+    from cassette.api_transport import _plan_review_mode
+
+    monkeypatch.delenv("CASSETTE_PLAN_REVIEW", raising=False)
+    monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "mcp")
+    assert _plan_review_mode() == "user"
+    monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "")
+    assert _plan_review_mode() == "auto"
+    monkeypatch.setenv("CASSETTE_PLAN_REVIEW", "auto")
+    monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "mcp")
+    assert _plan_review_mode() == "auto"

@@ -62,6 +62,11 @@ def _safe_call(tool_name: str, fn, args: dict, **kwargs) -> str:
     except CassetteError as exc:
         return err(tool_name, exc.code, str(exc), exc.details, exc.recoverable)
     except Exception as exc:
+        # Coded transport errors (ApiTransportError and friends) keep their code so hosts can
+        # react to e.g. validation_failed / stale_timeline instead of an opaque internal_error.
+        code = getattr(exc, "code", None)
+        if isinstance(code, str) and code:
+            return err(tool_name, code, str(exc), {"type": type(exc).__name__}, True)
         return err(tool_name, "internal_error", str(exc), {"type": type(exc).__name__}, True)
 
 
@@ -1022,6 +1027,320 @@ def cassette_cancel_job(a: dict, **kw) -> str:
         raise CassetteError("missing_required_arg", "job_id is required")
     job = jobs.request_cancel(a["job_id"])
     return ok({"job_id": job["job_id"], "status": job["status"]}, job_id=job["job_id"])
+
+
+def _previews_dir(session_id: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", session_id)[:120] or "session"
+    return Path(os.getenv("CASSETTE_ASSET_ROOT", str(manifest.get_asset_root()))) / "previews" / safe
+
+
+_SHEET_CLIP_TYPES = {"video", "image", "motion-graphic"}
+_SHEET_CELL_FILTER = "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=0x07080b"
+
+
+def _clip_source_midpoint_sec(clip: dict, fps: float) -> float:
+    """Source-time midpoint of what the timeline actually uses from this clip."""
+    try:
+        in_sec = float(clip.get("inSec") or 0.0)
+        duration = float(clip.get("durationInFrames") or 0) / fps if fps else 0.0
+        speed = float(clip.get("speed") or 1.0) or 1.0
+        mid = in_sec + (duration * speed) / 2.0
+        source_max = clip.get("sourceDurationSeconds")
+        if isinstance(source_max, (int, float)) and source_max > 0.2:
+            mid = min(mid, float(source_max) - 0.1)
+        return max(0.0, mid)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _sheet_media_lookup(session_id: str) -> tuple[dict[str, str], dict[str, str]]:
+    """(mediaFileId -> local path, lowercase name -> local path) for the session's ingested media.
+
+    The upload cache maps local-file fingerprints to the mediaFileIds the server assigned, so
+    clips resolve back to the exact files the plugin uploaded. The project session id and the
+    ingest session id can differ by the try-session- prefix (Hermes mode) — try both."""
+    from . import api_transport as api_mod
+
+    by_id: dict[str, str] = {}
+    by_name: dict[str, str] = {}
+    candidates = [session_id]
+    if session_id.startswith("try-session-"):
+        candidates.append(session_id[len("try-session-") :])
+    cache: dict[str, str] = {}
+    for sid in candidates:
+        try:
+            cache.update(api_mod.ApiTransport()._load_upload_cache(sid) or {})
+        except Exception:  # noqa: BLE001
+            pass
+    for sid in candidates:
+        try:
+            listed = manifest.list_assets(sid)
+            assets = (listed.get("manifest") or {}).get("assets") or []
+        except Exception:  # noqa: BLE001
+            continue
+        for asset in assets:
+            path = str(asset.get("saved_path") or "")
+            if not path or not Path(path).exists():
+                continue
+            fingerprint = api_mod.ApiTransport._asset_fingerprint(path)
+            media_id = cache.get(fingerprint)
+            if media_id:
+                by_id.setdefault(str(media_id), path)
+            for key in (asset.get("original_name"), Path(path).name):
+                normalized = str(key or "").strip().lower()
+                if normalized:
+                    by_name.setdefault(normalized, path)
+    return by_id, by_name
+
+
+def build_contact_sheet(document: dict, session_id: str) -> str | None:
+    """Tile one frame per timeline clip into a contact-sheet jpeg (zero server render).
+
+    Frame sources, in order: the clip's stored poster data URI (browser uploads), the locally
+    ingested media file (matched by mediaFileId via the session upload cache, then by name via
+    the manifest), then the clip's preview/source URL fetched by ffmpeg with the agent bearer
+    (server-side/generated assets). Frames are taken at each clip's mid-point source position,
+    so the sheet is a filmstrip of what the timeline actually uses — still source frames, not
+    composed output. Returns None when nothing can be tiled or ffmpeg is unavailable."""
+    import base64
+    import shutil
+    import subprocess
+
+    from . import api_transport as api_mod
+    from . import timeline as timeline_mod
+
+    try:
+        fps = float((document.get("sequenceTimebase") or {}).get("num") or document.get("fps") or 30) / float(
+            (document.get("sequenceTimebase") or {}).get("den") or 1
+        )
+        clips = [
+            c
+            for c in timeline_mod.clips_in_timeline_order(document)
+            if c.get("type") in _SHEET_CLIP_TYPES or str(c.get("thumbnail") or "").startswith("data:image")
+        ][:8]
+        if not clips:
+            return None
+        ffmpeg = os.getenv("CASSETTE_FFMPEG_BIN", "ffmpeg")
+        if not shutil.which(ffmpeg):
+            return None
+        out_dir = _previews_dir(session_id)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        target = out_dir / f"sheet-v{document.get('version', 0)}.jpg"
+        if target.exists() and target.stat().st_size:
+            return str(target)  # per-version sheets are immutable
+
+        by_id, by_name = _sheet_media_lookup(session_id)
+        transport: Any = None
+
+        with tempfile.TemporaryDirectory(dir=str(out_dir)) as tmp:
+            cell_index = 0
+            for clip in clips:
+                source: str | None = None
+                headers: str | None = None
+                seek: float | None = _clip_source_midpoint_sec(clip, fps)
+                thumb = str(clip.get("thumbnail") or "")
+                if thumb.startswith("data:image"):
+                    _, _, b64 = thumb.partition(",")
+                    poster = Path(tmp) / f"poster_{cell_index:02d}.img"
+                    poster.write_bytes(base64.b64decode(b64 or "", validate=False))
+                    source, seek = str(poster), None
+                if source is None:
+                    source = by_id.get(str(clip.get("mediaFileId") or ""))
+                if source is None:
+                    for key in (clip.get("originalFileName"), clip.get("sourceDisplayName"), clip.get("name")):
+                        normalized = str(key or "").strip().lower()
+                        if normalized and normalized in by_name:
+                            source = by_name[normalized]
+                            break
+                if source is None:
+                    url = str(clip.get("previewSrc") or clip.get("src") or "")
+                    if url.startswith("/"):
+                        url = api_mod._api_base() + url
+                    if url.startswith("http"):
+                        if transport is None:
+                            transport = api_mod.ApiTransport()
+                            transport._authenticate()
+                        source = url
+                        headers = f"Authorization: Bearer {transport._token}\r\n"
+                if source is None:
+                    continue
+                if clip.get("type") == "image":
+                    seek = None
+                cell = Path(tmp) / f"cell_{cell_index:02d}.jpg"
+                for attempt_seek in [seek, 0.0] if seek else [None]:
+                    cmd = [ffmpeg, "-v", "error", "-y"]
+                    if headers:
+                        cmd += ["-headers", headers]
+                    if attempt_seek:
+                        cmd += ["-ss", f"{attempt_seek:.3f}"]
+                    cmd += ["-i", source, "-frames:v", "1", "-vf", _SHEET_CELL_FILTER, str(cell)]
+                    subprocess.run(cmd, capture_output=True, timeout=25)
+                    if cell.exists() and cell.stat().st_size:
+                        cell_index += 1
+                        break
+                    # A seek past the media's end yields no frame; retry from the start.
+            if not cell_index:
+                return None
+            cols = min(4, cell_index)
+            rows = -(-cell_index // cols)
+            subprocess.run(
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-y",
+                    "-framerate",
+                    "1",
+                    "-i",
+                    str(Path(tmp) / "cell_%02d.jpg"),
+                    "-vf",
+                    f"tile={cols}x{rows}:padding=4:color=0x07080b",
+                    "-frames:v",
+                    "1",
+                    str(target),
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+        return str(target) if target.exists() and target.stat().st_size else None
+    except Exception:  # noqa: BLE001 — the sheet is an enhancement, never a failure mode
+        return None
+
+
+# Curated no-LLM direct-edit surface: the intersection of the public tool catalog with the
+# server command lane's dispatch (toolNameToTimelineIntentType — verified live: addTextClip/
+# textStyle/textLayout/effect 500 as "Unsupported server project tool"), minus the
+# media-resolution/generation tools. Inputs are {"payload": {...}} and the server statically
+# validates them, returning precise messages on mismatch.
+_DIRECT_EDIT_TOOLS = {
+    "timeline_trim": "trim/retime a clip",
+    "timeline_arrange": "move/reorder clips",
+    "timeline_deleteClips": "delete clips",
+    "timeline_text": "text content/typography/box (op: setText/setStyle/setTypography/...)",
+    "timeline_properties": "clip properties (volume/speed/opacity/...)",
+    "timeline_filter": "apply/adjust filters",
+    "timeline_keyframe": "keyframes",
+    "timeline_audio": "audio operations",
+    "timeline_track": "track operations",
+    "timeline_transition": "transitions",
+}
+_UNDO_TOOL = "set-operation-history-cursor"
+
+
+def _direct_edit_enabled() -> bool:
+    return str(os.getenv("CASSETTE_DIRECT_EDIT", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@safe_tool
+def cassette_edit(a: dict, **kw) -> str:
+    """Surgical no-LLM timeline edit through the manual-editor command lane (flagged)."""
+    if not _direct_edit_enabled():
+        raise CassetteError(
+            "direct_edit_disabled",
+            "Direct edits are disabled. Set CASSETTE_DIRECT_EDIT=1 to enable cassette_edit.",
+            recoverable=False,
+        )
+    session_id = str(a.get("session_id") or "").strip()
+    tool_name = str(a.get("tool_name") or "").strip()
+    if not session_id or not tool_name:
+        raise CassetteError("missing_required_arg", "session_id and tool_name are required")
+
+    # One session, one writer: refuse while a run (or an unanswered question) holds the session.
+    # ponytail: advisory client-side guard; a server-side session lease only if two hosts ever
+    # share one session concurrently.
+    active = [
+        j
+        for j in jobs.list_jobs(None, limit=20)
+        if j.get("cassette_session_id") == session_id
+        and j.get("status") in {"queued", "running", "needs_user", "cancel_requested"}
+    ]
+    if active:
+        raise CassetteError(
+            "job_active",
+            f"Job {active[0]['job_id']} ({active[0]['status']}) holds this session; wait for it or cancel it first.",
+        )
+
+    from . import api_transport as api_mod
+    from . import timeline as timeline_mod
+
+    transport = api_mod.ApiTransport()
+    before = transport.get_project_document(session_id)
+    current_version = int(before.get("version") or 0)
+    expected_version = a.get("expected_version")
+    if expected_version is not None and int(expected_version) != current_version:
+        raise CassetteError(
+            "stale_timeline",
+            f"The project moved to v{current_version} since you last read it. Re-read and retry.",
+            details={"ctl": timeline_mod.render_ctl(before)},
+        )
+
+    import uuid as _uuid
+
+    if tool_name in {_UNDO_TOOL, "undo"}:
+        cursor_raw = (a.get("input") or {}).get("cursorSequence") if isinstance(a.get("input"), dict) else None
+        if cursor_raw is None:
+            raise CassetteError("missing_required_arg", "undo requires input.cursorSequence")
+        command: dict[str, Any] = {"type": _UNDO_TOOL, "cursorSequence": int(cursor_raw)}
+        envelope = {"commandId": str(_uuid.uuid4()), "source": "agent", "command": command}
+    else:
+        if tool_name not in _DIRECT_EDIT_TOOLS:
+            raise CassetteError(
+                "unknown_tool",
+                f"'{tool_name}' is not a direct-edit tool.",
+                details={"tools": _DIRECT_EDIT_TOOLS, "undo": _UNDO_TOOL},
+            )
+        if not isinstance(a.get("input"), dict):
+            raise CassetteError("missing_required_arg", 'input is required and always shaped {"payload": {...}}')
+        command = {"type": "agent-tool", "toolName": tool_name, "input": a["input"]}
+        envelope = {
+            "commandId": str(_uuid.uuid4()),
+            "source": "agent",
+            "toolName": tool_name,
+            "command": command,
+        }
+
+    event = transport.post_project_command(session_id, envelope)
+    after = event.get("document") if isinstance(event.get("document"), dict) else None
+    data: dict[str, Any] = {
+        "version_before": event.get("versionBefore", current_version),
+        "version_after": event.get("versionAfter"),
+    }
+    if after:
+        data["delta"] = timeline_mod.render_delta(before, after)
+        data["ctl"] = timeline_mod.render_ctl(after)
+    return ok(data)
+
+
+@safe_tool
+def cassette_timeline(a: dict, **kw) -> str:
+    """Read the live project timeline as a bounded text digest (+ optional contact sheet)."""
+    session_id = str(a.get("session_id") or "").strip()
+    if not session_id:
+        raise CassetteError("missing_required_arg", "session_id is required")
+    from . import api_transport as api_mod
+    from . import timeline as timeline_mod
+
+    document = api_mod.ApiTransport().get_project_document(session_id)
+    profile = str(a.get("profile") or "").strip().lower()
+    detail = str(a.get("detail") or "").strip() or None
+    if profile == "gateway":
+        ctl = timeline_mod.render_ctl_gateway(document)
+    else:
+        ctl = timeline_mod.render_ctl(document, detail=detail)
+    data: dict[str, Any] = {
+        "ctl": ctl,
+        "version": document.get("version", 0),
+        "duration_sec": round(timeline_mod.total_duration_seconds(document), 1),
+        "clip_count": len(timeline_mod.clips_in_timeline_order(document)),
+    }
+    if a.get("contact_sheet"):
+        sheet = build_contact_sheet(document, session_id)
+        if sheet:
+            data["contact_sheet_path"] = sheet
+        else:
+            data["contact_sheet_path"] = None
+            data["contact_sheet_note"] = "no clip posters available yet (or ffmpeg missing)"
+    return ok(data)
 
 
 def check_playwright() -> bool:

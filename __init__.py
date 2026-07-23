@@ -25,6 +25,8 @@ def register(ctx) -> None:
         ("cassette_job_status", schemas.CASSETTE_JOB_STATUS, tools.cassette_job_status),
         ("cassette_review_completion", schemas.CASSETTE_REVIEW_COMPLETION, tools.cassette_review_completion),
         ("cassette_cancel_job", schemas.CASSETTE_CANCEL_JOB, tools.cassette_cancel_job),
+        ("cassette_timeline", schemas.CASSETTE_TIMELINE, tools.cassette_timeline),
+        ("cassette_edit", schemas.CASSETTE_EDIT, tools.cassette_edit),
     )
 
     for name, schema, handler in plugin_tools:

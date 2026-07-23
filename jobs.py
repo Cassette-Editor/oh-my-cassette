@@ -49,7 +49,9 @@ def create_job(
     job = {
         "job_id": job_id,
         "session_hash": session_hash,
-        "cassette_session_id": options.get("cassette_session_id") or "",
+        # Default Hermes-mode sessions to the try-session-* namespace so the editor deep link
+        # (publicTry tier) works; explicit ids and pre-existing jobs keep their stored value.
+        "cassette_session_id": options.get("cassette_session_id") or f"try-session-{session_hash}",
         "status": "queued",
         "created_at": now_iso(),
         "updated_at": now_iso(),
@@ -71,6 +73,9 @@ def create_job(
         "errors": [],
         "quality": {},
         "final_screenshot": None,
+        "editor_url": None,
+        "timeline_delta": None,
+        "plan_progress": [],
         "worker_pid": None,
     }
     save_job(job)
@@ -132,6 +137,10 @@ def merge_persisted_runtime_fields(job: dict) -> dict:
         "cassette_language",
         "language_selection",
         "browser_events",
+        "editor_url",
+        "chat_thread_id",
+        "timeline_delta",
+        "plan_progress",
         "continuation",
         "resume_request",
     ):

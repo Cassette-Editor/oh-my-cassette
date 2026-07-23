@@ -30,6 +30,8 @@ EXPECTED_TOOLS = {
     "cassette_job_status",
     "cassette_review_completion",
     "cassette_cancel_job",
+    "cassette_timeline",
+    "cassette_edit",
 }
 
 
@@ -164,7 +166,7 @@ def test_real_stdio_process_initializes_and_calls_every_tool(tmp_path):
                 ingest = await session.call_tool("cassette_ingest_media", {"source_path": str(media)})
                 assert ingest.structuredContent["ok"] is True
                 session_id = ingest.structuredContent["session_id"]
-                assert session_id.startswith("mcp_")
+                assert session_id.startswith("try-session-")
                 rejected = await session.call_tool(
                     "cassette_ingest_media", {"source_path": str(escaped), "session_id": session_id}
                 )
@@ -193,6 +195,12 @@ def test_real_stdio_process_initializes_and_calls_every_tool(tmp_path):
                         "reason": "test",
                     },
                     "cassette_cancel_job": {"job_id": "missing"},
+                    "cassette_timeline": {"session_id": session_id},
+                    "cassette_edit": {
+                        "session_id": session_id,
+                        "tool_name": "timeline_trim",
+                        "input": {"clipId": "c1"},
+                    },
                 }
                 seen = {"cassette_ingest_media"}
                 results = {}

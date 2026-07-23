@@ -91,6 +91,20 @@ class ListAssetsInput(StrictModel):
     chat_id: str | None = None
 
 
+class TimelineInput(StrictModel):
+    session_id: str
+    detail: str | None = None
+    profile: Literal["aligned", "gateway"] | None = None
+    contact_sheet: bool = False
+
+
+class EditInput(StrictModel):
+    session_id: str
+    tool_name: str
+    input: dict[str, Any] | None = None
+    expected_version: int | None = None
+
+
 class MakePromptInput(StrictModel):
     instruction: str
     session_id: str | None = None
