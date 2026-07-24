@@ -98,9 +98,9 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
   </tr>
 </table>
 
-## 🖥️ 工作流程实录 —— 一次真实会话
+## 🖥️ 工作流程
 
-一次未经剪辑的 Claude Code 会话全过程：13 段旅行素材和一首配乐上传到 Cassette，Agent 分析每一段素材、剪辑并打磨时间线，把可读的时间线摘要连同可点击的缩略图拼版一并交还，只有在你明确确认后才开始渲染。
+把素材发过来，再描述你想要的视频。Agent 会把素材上传到 Cassette、分析每一段画面、剪辑并打磨时间线，把可读的时间线摘要连同可点击的缩略图拼版一并交还，只有在你发话后才开始渲染。下面是一段完整的 Claude Code 实录，没有任何摆拍。
 
 <table width="100%">
 <tr><td>
@@ -118,7 +118,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 | 0:30 | 未经确认不会渲染；导出在你发话后才执行 |
 | 0:36 | 成片落到项目目录 |
 
-**这次会话产出的成片**
+**这次实录产出的成片**
 
 <table align="center" width="70%">
 <tr><td>
