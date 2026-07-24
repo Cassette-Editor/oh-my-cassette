@@ -633,6 +633,12 @@ async def cassette_config(
 
 
 def main() -> None:
+    try:
+        from cassette import manifest as _manifest
+
+        _manifest.sweep_stale_artifacts()
+    except Exception:  # noqa: BLE001 — a failed sweep must never block the server
+        pass
     mcp.run(transport="stdio")
 
 

@@ -28,6 +28,57 @@ def get_asset_root() -> Path:
     return Path(os.getenv("CASSETTE_ASSET_ROOT", str(security._hermes_home() / "cassette"))).expanduser().resolve()
 
 
+# Derived/staging artifact classes swept at MCP startup, with default max ages in days.
+# exports/, jobs/, and sessions/ are deliberately NOT here: exports are user deliverables
+# and jobs/sessions power history and resume — only explicit cleanup may touch those.
+_SWEEP_CLASSES: dict[str, int] = {
+    "previews": 30,
+    "api_uploads": 7,
+    "screenshots": 30,
+}
+
+
+def sweep_stale_artifacts(now: float | None = None) -> dict[str, int]:
+    """Delete derived/staging artifacts past their max age; prune emptied subdirs.
+
+    CASSETTE_ARTIFACT_TTL_DAYS overrides every class TTL; 0 disables the sweep.
+    Best-effort by design — a locked or vanished file never breaks startup."""
+    import time as _time
+
+    override = os.getenv("CASSETTE_ARTIFACT_TTL_DAYS")
+    ttl_override: int | None = None
+    if override is not None and override.strip():
+        try:
+            ttl_override = int(override)
+        except ValueError:
+            ttl_override = None
+        if ttl_override == 0:
+            return {}
+    current = now if now is not None else _time.time()
+    root = get_asset_root()
+    removed: dict[str, int] = {}
+    for class_name, default_days in _SWEEP_CLASSES.items():
+        base = root / class_name
+        if not base.is_dir():
+            continue
+        max_age = (ttl_override if ttl_override and ttl_override > 0 else default_days) * 86400
+        count = 0
+        for path in sorted(base.rglob("*"), reverse=True):
+            try:
+                if path.is_symlink():
+                    continue
+                if path.is_file() and current - path.stat().st_mtime > max_age:
+                    path.unlink()
+                    count += 1
+                elif path.is_dir() and not any(path.iterdir()):
+                    path.rmdir()
+            except OSError:
+                continue
+        if count:
+            removed[class_name] = count
+    return removed
+
+
 def session_key(session_id: str | None = None, chat_id: str | None = None, task_id: str | None = None) -> str:
     return str(session_id or chat_id or task_id or "default")
 

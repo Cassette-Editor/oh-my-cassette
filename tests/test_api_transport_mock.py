@@ -1010,6 +1010,19 @@ def test_cassette_timeline_tool_reads_live_document(cassette_env, mock_api):
     assert gateway["ok"] and "→" in gateway["data"]["ctl"] or "intro.mp4" in gateway["data"]["ctl"]
 
 
+def test_cassette_timeline_contact_sheet_carries_clickable_uri(cassette_env, mock_api, monkeypatch, tmp_path):
+    sheet = tmp_path / "sheet-v7.jpg"
+    sheet.write_bytes(b"jpg")
+    monkeypatch.setattr(tools, "build_contact_sheet", lambda doc, sid: str(sheet))
+
+    result = json.loads(tools.cassette_timeline({"session_id": "try-session-abc", "contact_sheet": True}))
+
+    assert result["ok"], result
+    assert result["data"]["contact_sheet_path"] == str(sheet)
+    assert result["data"]["contact_sheet_uri"] == sheet.as_uri()
+    assert result["data"]["contact_sheet_uri"].startswith("file://")
+
+
 def test_completion_review_carries_timeline_context(cassette_env, mock_api, monkeypatch, tmp_path):
     """The export-review gate attaches the CTL (and sheet when possible) — never judged blind."""
     monkeypatch.delenv("CASSETTE_API_AUTO_EXPORT", raising=False)

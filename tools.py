@@ -1564,6 +1564,7 @@ def cassette_timeline(a: dict, **kw) -> str:
         sheet = build_contact_sheet(document, session_id)
         if sheet:
             data["contact_sheet_path"] = sheet
+            data["contact_sheet_uri"] = Path(sheet).as_uri()
         else:
             data["contact_sheet_path"] = None
             data["contact_sheet_note"] = "no clip posters available yet (or ffmpeg missing)"

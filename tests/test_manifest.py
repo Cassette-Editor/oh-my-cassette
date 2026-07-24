@@ -123,3 +123,49 @@ def test_session_thread_corrupt_file_returns_empty(cassette_env):
     assert manifest.load_session_thread(sess_hash) == {}
     path.write_text('["a-list"]', encoding="utf-8")
     assert manifest.load_session_thread(sess_hash) == {}
+
+
+def test_sweep_removes_stale_derived_artifacts_only(cassette_env, monkeypatch):
+    import os
+    import time
+
+    from cassette import manifest
+
+    root = manifest.get_asset_root()
+    old = time.time() - 90 * 86400
+    stale_sheet = root / "previews" / "try-session-old" / "sheet-v3.jpg"
+    fresh_sheet = root / "previews" / "try-session-new" / "sheet-v1.jpg"
+    stale_upload = root / "api_uploads" / "old.mp4"
+    export = root / "exports" / "job-1" / "final.mp4"
+    for p in (stale_sheet, fresh_sheet, stale_upload, export):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+    os.utime(stale_sheet, (old, old))
+    os.utime(stale_upload, (old, old))
+    os.utime(export, (old, old))
+
+    removed = manifest.sweep_stale_artifacts()
+
+    assert removed == {"previews": 1, "api_uploads": 1}
+    assert not stale_sheet.exists()
+    assert not stale_sheet.parent.exists()  # emptied session dir pruned
+    assert fresh_sheet.exists()
+    assert export.exists()  # exports are never swept
+
+
+def test_sweep_disabled_by_zero_ttl(cassette_env, monkeypatch):
+    import os
+    import time
+
+    from cassette import manifest
+
+    monkeypatch.setenv("CASSETTE_ARTIFACT_TTL_DAYS", "0")
+    root = manifest.get_asset_root()
+    stale = root / "previews" / "s" / "sheet.jpg"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_bytes(b"x")
+    old = time.time() - 90 * 86400
+    os.utime(stale, (old, old))
+
+    assert manifest.sweep_stale_artifacts() == {}
+    assert stale.exists()

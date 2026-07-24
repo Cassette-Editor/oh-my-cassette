@@ -1073,6 +1073,8 @@ class ApiTransport:
             sheet = tools_mod.build_contact_sheet(document, session_id)
             if sheet:
                 context["contact_sheet"] = sheet
+                # Clickable in most terminals (cmd+click) — real pixels one gesture away.
+                context["contact_sheet_uri"] = Path(sheet).as_uri()
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -1087,6 +1089,7 @@ class ApiTransport:
                 storyboard_sheet = tools_mod.build_storyboard_sheet(session_id, frames)
                 if storyboard_sheet:
                     context["storyboard_sheet"] = storyboard_sheet
+                    context["storyboard_sheet_uri"] = Path(storyboard_sheet).as_uri()
         except Exception:  # noqa: BLE001
             pass
         return context
