@@ -109,7 +109,7 @@ Upload your clips, describe the video you want, and the agent edits it.
 
 <table width="100%">
 <tr><td>
-  <video src="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.4.1/workflow-showcase.mp4" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/7f747c99-7ecf-40ac-8854-857d4220ff4e" controls width="100%"></video>
 </td></tr>
 </table>
 
@@ -127,11 +127,11 @@ Upload your clips, describe the video you want, and the agent edits it.
 
 <table align="center" width="70%">
 <tr><td>
-  <video src="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.4.1/kota-kinabalu-vlog-readme.mp4" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/34b966af-ef5f-41c6-94f9-a91285cc5f9f" controls width="100%"></video>
 </td></tr>
 </table>
 
-<sub>Both clips are compressed hard to keep this page light, so the terminal text and the footage look softer here than they do on your machine. Prompt to rendered file took about 13 minutes of real time, sped up above.</sub>
+<sub>The screen recording is compressed to keep this page light, so the terminal text looks softer here than it does on your machine; the cut below it is the full-quality render. Prompt to rendered file took about 13 minutes of real time, sped up above.</sub>
 
 ## 🎬 Case Videos
 
