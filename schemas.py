@@ -315,7 +315,8 @@ CASSETTE_REVIEW_COMPLETION = {
     "name": "cassette_review_completion",
     "description": (
         "Hermes supervisor decision for a Cassette job that reached export-enabled state without an unambiguous completion signal. "
-        "Use decision=export only when Hermes judges the latest Cassette assistant reply means the requested edit is complete enough to export."
+        "Use decision=export only when Hermes judges the latest Cassette assistant reply means the requested edit is complete enough to export. "
+        "decision=continue starts a follow-up editing turn on the same session thread (direct line) carrying message (or reason) verbatim."
     ),
     "parameters": {
         "type": "object",
@@ -327,6 +328,10 @@ CASSETTE_REVIEW_COMPLETION = {
                 "description": "Short Hermes supervisor rationale. Do not include local paths or raw IDs.",
             },
             "summary": {"type": "string", "description": "Optional user-safe summary of the Cassette reply."},
+            "message": {
+                "type": "string",
+                "description": "decision=continue only: verbatim message for the follow-up turn (defaults to reason).",
+            },
         },
         "required": ["job_id", "decision", "reason"],
         "additionalProperties": False,

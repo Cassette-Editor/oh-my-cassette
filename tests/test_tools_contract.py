@@ -2809,6 +2809,93 @@ def test_completion_review_export_uses_browser_session(cassette_env, monkeypatch
     assert saved["quality"]["completion_source"] == "hermes_completion_review"
 
 
+def _completion_review_job(session="try-session-continue", question_reason="completion_requires_hermes_review"):
+    job = jobs.create_job(
+        session_hash="review-continue",
+        prompt="internal",
+        instruction="make a short edit",
+        asset_paths=[],
+        options={"cassette_session_id": session},
+    )
+    job["status"] = "needs_user"
+    job["questions"] = [{"reason": question_reason, "question": "ready?"}]
+    job["quality"] = {"completion_review_required": True}
+    jobs.save_job(job)
+    return job
+
+
+class _FollowUpTransportStub:
+    def __init__(self):
+        self.run_jobs = []
+
+    def run_job(self, job):
+        self.run_jobs.append(job)
+        return {
+            "status": "succeeded",
+            "outputs": [],
+            "questions": [],
+            "errors": [],
+            "quality": {"completion_source": "cassette_agent_success"},
+            "final_screenshot": None,
+        }
+
+    def resume(self, job, response):  # pragma: no cover - must never be reached
+        raise AssertionError("transport.resume must not be called for a completed turn")
+
+
+def test_completion_review_continue_starts_follow_up_turn(cassette_env, monkeypatch):
+    job = _completion_review_job()
+    stub = _FollowUpTransportStub()
+    monkeypatch.setattr(tools.transport, "get_transport", lambda: stub)
+    monkeypatch.setattr(tools.notifier, "notify_terminal_job", lambda job: {"status": "skipped"})
+
+    payload = json.loads(
+        tools.cassette_review_completion(
+            {
+                "job_id": job["job_id"],
+                "decision": "continue",
+                "reason": "User asked to hold the final shot longer before export.",
+            }
+        )
+    )
+
+    assert payload["ok"] is True
+    original = jobs.load_job(job["job_id"])
+    assert original["status"] == "succeeded"
+    assert original["quality"]["completion_review"]["decision"] == "continue"
+    assert original["quality"]["completion_review_required"] is False
+    follow_up_id = original["quality"]["follow_up_job_id"]
+    assert follow_up_id and follow_up_id != job["job_id"]
+    assert payload["data"]["follow_up"]["job"]["job_id"] == follow_up_id
+    assert len(stub.run_jobs) == 1
+    follow_job = stub.run_jobs[0]
+    assert follow_job["message"] == "User asked to hold the final shot longer before export."
+    assert follow_job["cassette_session_id"] == "try-session-continue"
+
+
+def test_answer_question_routes_completion_question_as_follow_up_turn(cassette_env, monkeypatch):
+    job = _completion_review_job(question_reason="hermes_completion_review_needs_user")
+    quality = dict(job["quality"])
+    quality["completion_review_required"] = False
+    job["quality"] = quality
+    jobs.save_job(job)
+    stub = _FollowUpTransportStub()
+    monkeypatch.setattr(tools.transport, "get_transport", lambda: stub)
+    monkeypatch.setattr(tools.notifier, "notify_terminal_job", lambda job: {"status": "skipped"})
+
+    payload = json.loads(
+        tools.cassette_answer_question({"job_id": job["job_id"], "response": "Make the ending breathe, then export."})
+    )
+
+    assert payload["ok"] is True
+    original = jobs.load_job(job["job_id"])
+    assert original["status"] == "succeeded"
+    assert original["quality"]["completion_question_answered"] is True
+    assert len(stub.run_jobs) == 1
+    assert stub.run_jobs[0]["message"] == "Make the ending breathe, then export."
+    assert stub.run_jobs[0]["cassette_session_id"] == "try-session-continue"
+
+
 def test_run_job_browser_automation_uses_dedicated_thread(cassette_env, monkeypatch):
     observed_thread_ids = []
 

@@ -144,6 +144,30 @@ def cassette_answer_question(a: dict, **kw) -> str:
                 "cassette_answer_question can resume only a user-input-paused job; use cassette_review_completion for completion review",
                 {"job_id": job_id, "status": job.get("status") or ""},
             )
+        is_completion_question = any(
+            str(q.get("reason") or "").startswith("hermes_completion_review")
+            for q in (job.get("questions") or [])
+        )
+        has_continuation = isinstance(job.get("continuation"), dict) and bool(job.get("continuation"))
+        if is_completion_question and not has_continuation:
+            # Post-review user answer: the reviewed turn already completed, so there is no
+            # interrupt to resume — route the answer as a follow-up direct-line turn instead.
+            live_browser = False
+            if transport.selected_transport() == transport.TRANSPORT_BROWSER:
+                from . import browser as browser_mod
+
+                live_browser = browser_mod.has_live_browser_session_threaded(job)
+            if not live_browser:
+                answered_quality = dict(quality)
+                answered_quality["completion_question_answered"] = True
+                job.update({"status": "succeeded", "quality": answered_quality, "finished_at": jobs.now_iso()})
+                jobs.save_job(job)
+                follow = _completion_follow_up_turn(job, response, kw)
+                follow_data = follow.get("data") if isinstance(follow.get("data"), dict) else {}
+                return ok(
+                    {"job": _scrub_job(job), "follow_up": follow_data or follow},
+                    job_id=job_id,
+                )
         if kw.get("runtime_host") == "mcp":
             if transport.selected_transport() == transport.TRANSPORT_BROWSER:
                 from . import browser
@@ -972,9 +996,26 @@ def cassette_job_status(a: dict, **kw) -> str:
     return ok({"jobs": jobs.list_jobs(sess_hash, int(a.get("limit") or 10))})
 
 
+def _completion_follow_up_turn(job: dict, message: str, kw: dict) -> dict:
+    """Start a follow-up direct-line turn on the reviewed job's session; return the parsed envelope.
+
+    A completed turn has no interrupt to resume, so post-review continuation is a NEW turn on the
+    persisted session thread (0.4.1 direct line) — same context, verbatim message. This is the only
+    correct continuation on the API transport; ``transport.resume`` raises resume_not_waiting_for_user.
+    """
+    delivery = job.get("delivery") if isinstance(job.get("delivery"), dict) else {}
+    follow_args: dict[str, Any] = {
+        "message": message,
+        "session_id": str(job.get("cassette_session_id") or "").strip(),
+        "chat_id": delivery.get("chat_id"),
+        "url": job.get("url"),
+    }
+    follow_args = {k: v for k, v in follow_args.items() if v}
+    return json.loads(cassette_run_job.__wrapped__(follow_args, **kw))
+
+
 @safe_tool
 def cassette_review_completion(a: dict, **kw) -> str:
-    del kw
     job_id = str(a.get("job_id") or "").strip()
     if not job_id:
         raise CassetteError("missing_required_arg", "job_id is required")
@@ -1004,6 +1045,23 @@ def cassette_review_completion(a: dict, **kw) -> str:
     quality["completion_review"] = review
     quality["completion_source"] = "hermes_completion_review"
     quality["progress_summary"] = summary or reason
+    # The review is resolved by this call for every decision; a completion-review question that
+    # remains needs_user must be answerable via cassette_answer_question afterwards.
+    quality["completion_review_required"] = False
+    if decision == "continue":
+        follow_message = str(a.get("message") or "").strip() or reason
+        job.update({"status": "succeeded", "quality": quality, "finished_at": jobs.now_iso()})
+        jobs.save_job(job)
+        follow = _completion_follow_up_turn(job, follow_message, kw)
+        follow_data = follow.get("data") if isinstance(follow.get("data"), dict) else {}
+        follow_job = follow_data.get("job") if isinstance(follow_data.get("job"), dict) else {}
+        quality["follow_up_job_id"] = str(follow_job.get("job_id") or follow.get("job_id") or "")
+        job["quality"] = quality
+        jobs.save_job(job)
+        return ok(
+            {"job": _scrub_job(job), "completion_review": review, "follow_up": follow_data or follow},
+            job_id=job_id,
+        )
     if decision == "failed":
         errors.append(
             {
@@ -4486,7 +4544,7 @@ def inject_cassette_context(**kwargs) -> str | None:
         lines.extend(
             [
                 'If the latest Cassette reply means the requested edit is complete enough to export, call cassette_review_completion with decision="export" and a concise reason.',
-                'If Cassette says it is still editing or needs routine continuation, call cassette_review_completion with decision="continue" and a concise reason.',
+                'If Cassette says it is still editing or needs routine continuation — or the user asked for another change before export — call cassette_review_completion with decision="continue"; it starts a follow-up turn on the same session carrying message (or reason) verbatim.',
                 'If Cassette asks for a material user choice or missing asset, call cassette_review_completion with decision="needs_user".',
                 'If Cassette reports an unrecoverable failure, call cassette_review_completion with decision="failed".',
                 "Do not expose local paths, raw IDs, prompts, or worker commands.",
