@@ -103,9 +103,9 @@ Be the director of your own story, effortlessly.
   </tr>
 </table>
 
-## 🖥️ How it works — one real session
+## 🖥️ How it works
 
-One unedited Claude Code session, start to finish: 13 travel clips and a soundtrack go up to Cassette, the agent analyzes every clip, cuts and refines the timeline, hands back a readable timeline digest with a clickable contact sheet, and renders only after an explicit go-ahead.
+Send your clips and describe the video you want. The agent uploads them to Cassette, analyzes every clip, cuts and refines the timeline, hands back a readable timeline digest with a clickable contact sheet, and renders only after you say go. The recording below is a full run in Claude Code, nothing staged.
 
 <table width="100%">
 <tr><td>
@@ -123,7 +123,7 @@ One unedited Claude Code session, start to finish: 13 travel clips and a soundtr
 | 0:30 | Nothing renders until you say so; the export runs on your go |
 | 0:36 | The finished cut lands in the project folder |
 
-**The video that session produced**
+**The cut it produced**
 
 <table align="center" width="70%">
 <tr><td>
