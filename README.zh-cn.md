@@ -38,6 +38,9 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
   <a href="https://opencode.ai">
     <img src="https://img.shields.io/badge/OpenCode-Compatible-0b0b0b?style=flat-square&logo=opencode&logoColor=white" alt="OpenCode Compatible">
   </a>
+  <a href="https://discord.gg/qd9NY4k8d7">
+    <img src="https://img.shields.io/discord/1514649803626250452?style=flat-square&logo=discord&logoColor=white&label=Discord&color=5865F2" alt="Discord">
+  </a>
 </p>
 
 <p align="center">
@@ -55,45 +58,47 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 <h3 align="center">
   <em>
   让 Codex、Claude 或 <a href="https://github.com/nousresearch/hermes-agent">Hermes</a> 拥有 <a href="https://trycassette.online">Cassette</a> 强大的视频剪辑能力。<br />
-  加个好友，聊聊就出片。
+  素材丢过去，聊聊就出片。
   </em>
 </h3>
+
+## ⚡ 30 秒安装
+
+```bash
+# Claude Code
+claude plugin marketplace add Cassette-Editor/oh-my-cassette
+claude plugin install oh-my-cassette@cassette-editor
+```
+
+```bash
+# Codex
+codex plugin marketplace add https://github.com/Cassette-Editor/oh-my-cassette.git
+codex plugin add oh-my-cassette@cassette-editor
+```
+
+重启 Agent，然后对它说：*"把 ./footage 里的素材剪成一支 30 秒的旅行 Vlog，音乐卡点。"*
+
+需要 Python 3.11–3.13、`ffmpeg` 和一个 [Cassette 账号](https://trycassette.online/signup/)。完整安装步骤（含 [OpenCode](#opencode)、[Hermes](#hermes) 及其他 MCP 宿主）见[快速开始](#-快速开始)。想先看看效果？[在浏览器里直接试用](#-无需安装试用)，免安装、免账号。
 
 # 🎥 项目概览
 
 **Oh My Cassette** 是一款开源的 AI 视频剪辑插件与本地 MCP 服务，支持 [Claude Code](https://claude.com/claude-code)、[Codex](https://github.com/openai/codex)、[Hermes Agent](https://github.com/nousresearch/hermes-agent) 和 [OpenCode](https://opencode.ai)。它把自然语言聊天变成 [Cassette](https://trycassette.online) 上的成片蒙太奇视频——卡点剪辑、智能配乐、字幕、转场、画中画——并尽可能减少 token 消耗。
 
-你随时可以在手机上发送视频或音频素材，并和 Agent 聊聊你的想法，Agent 就会与 Cassette 协作，理解你的创作意图，整理素材，规划剪辑流程，并通过强大的剪辑能力，帮你制作可以直接分享的成片。
-
-无需手动拉时间线，不用学剪辑，聊聊想法，**Oh My Cassette** 帮你记录灵感、直接成片。
+剪辑里最耗时的部分交给 Agent：它会看完每一段素材、挑镜头、编排结构、对齐节拍并渲染成片，而你全程只需要聊天。因为它跑在你的 Agent 里，这一切在手机上也能完成。
 
 <table>
   <tr>
     <td align="center" width="33%">
-      <h3>📱 随时记录</h3>
-      <p>看到什么、想到什么，随时把素材和想法发给你的 AI 剪辑师。</p>
-    </td>
-    <td align="center" width="33%">
       <h3>💬 聊天剪辑</h3>
-      <p>不用拉时间线，不用学复杂工具，用自然语言说出你想要的视频。</p>
+      <p>用大白话描述想要的视频，选镜、节奏和时间线都交给 Agent，你不用打开任何剪辑软件。</p>
     </td>
     <td align="center" width="33%">
       <h3>🎵 智能配乐</h3>
-      <p>根据素材氛围、视频节奏和故事情绪，音乐匹配到你心巴上。</p>
-    </td>
-    </tr>
-    <tr>
-    <td align="center" width="33%">
-      <h3>🌌 蒙太奇成片</h3>
-      <p>自动整理素材、编排故事，生成有节奏、有情绪、有记忆点的视频。</p>
+      <p>按素材的氛围与节奏找歌并对齐节拍，你一个卡点都不用手动标，画面自己落在鼓点上。</p>
     </td>
     <td align="center" width="33%">
-      <h3>✨ 高级剪辑能力</h3>
-      <p>支持标题字幕、画中画、音乐卡点、硬切转场、动效和风格化处理。</p>
-    </td>
-    <td align="center" width="33%">
-      <h3>✅ 分享即用</h3>
-      <p>支持预览、修改和导出，从零散片段快速变成可以发布的成片。</p>
+      <h3>👀 不确认就不渲染</h3>
+      <p>每一轮都返回时间线摘要和一张缩略图拼版，几秒就能看完；方案由你确认，之后才渲染。</p>
     </td>
   </tr>
 </table>
@@ -104,7 +109,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 
 <table width="100%">
 <tr><td>
-  <video src="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.4.1/workflow-showcase.mp4" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/7f747c99-7ecf-40ac-8854-857d4220ff4e" controls width="100%"></video>
 </td></tr>
 </table>
 
@@ -122,7 +127,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 
 <table align="center" width="70%">
 <tr><td>
-  <video src="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.4.1/kota-kinabalu-vlog-readme.mp4" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/34b966af-ef5f-41c6-94f9-a91285cc5f9f" controls width="100%"></video>
 </td></tr>
 </table>
 
@@ -135,17 +140,6 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 <table width="100%">
 <tr>
 <td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/ff19c37d-1eb4-4702-a2e1-eac704bdbae8" controls width="100%"></video>
-  <h3>日常碎片Vlog</h3>
-  <p>
-    <sub>🎞️ 输入：15 段视频 · 1 段音频</sub><br />
-    <sub>⏱️ 处理时间：10 分钟</sub>
-  </p>
-  <p><b>提示词</b><br />
-  根据我提供的音频素材进行卡点剪辑，从全部视频素材中挑选最合适的画面，与歌词内容和节奏匹配。每次歌词切换都更换不同镜头，画面要有旅行感、生活感和情绪递进，并在每个对应画面中间添加歌词字幕，整体卡点。</p>
-  <p><code>治愈</code> <code>日常</code> <code>轻松</code> <code>生活方式</code></p>
-</td>
-<td width="33%" valign="top">
   <video src="https://github.com/user-attachments/assets/b85285a9-30ed-4f9b-b314-538bfd9dbdd6" controls width="100%"></video>
   <h3>旅行Vlog</h3>
   <p>
@@ -156,19 +150,6 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
   帮我剪一个30秒的旅行vlog，使用全部素材，符合观看逻辑，开场和结尾需要添加标题字幕“KOTA KINABALU“。加入Vlog拍摄时间，人物视频叠加在相似风景镜头上做画中画效果，节奏轻快，有记忆点，转场以硬切和音乐卡点为主，清爽，有度假感</p>
   <p><code>旅行</code> <code>旅拍</code> <code>节奏卡点</code> <code>画中画</code></p>
 </td>
-<td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/73059786-246e-4808-b7cf-4deb35994ebc" controls width="100%"></video>
-  <h3>电影情绪短片</h3>
-  <p>
-    <sub>🎞️ 输入：15 段视频 · 1 段音频</sub><br />
-    <sub>⏱️ 处理时间：17 分钟</sub>
-  </p>
-  <p><b>提示词</b><br />
-  用我的素材剪一个40秒左右的歌词向情绪短片。空镜开场建立氛围，中段穿插人物独处、回忆和情绪特写，人物画面与空镜穿插使用，配合歌词字幕卡点推进，字幕单词采用不同大小分布排列，最后使用安静的停顿镜头收尾。</p>
-  <p><code>音乐</code> <code>音乐视频</code> <code>电影感</code></p>
-</td>
-</tr>
-<tr>
 <td width="33%" valign="top">
   <video src="https://github.com/user-attachments/assets/97fdfe3a-f420-4135-8c62-494bbb7ea436" controls width="100%"></video>
   <h3>美食教程</h3>
@@ -191,141 +172,34 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
   帮我用这些素材剪一个15秒产品广告，开头开瓶盖，中间加一些气泡、水花、冰块和产品细节，最后展示完整产品和品牌，整体要清爽解渴、有广告感。</p>
   <p><code>产品</code> <code>短片</code> <code>商业广告</code></p>
 </td>
-<td width="33%" valign="top">
-  <video src="https://github.com/user-attachments/assets/9374de93-c0ff-4bf2-b1ed-fe393579f0c2" controls width="100%"></video>
-  <h3>游戏高光视频</h3>
-  <p>
-    <sub>🎞️ 输入：5 段视频 · 1 段音频</sub><br />
-    <sub>⏱️ 处理时间：5 分钟</sub>
-  </p>
-  <p><b>提示词</b><br />
-  用我的游戏素材剪一个 20–30 秒的武侠战斗短片，整体质感为水墨风，气氛肃杀。做出孤身入局、杀出重围的电影感。</p>
-  <p><code>游戏</code> <code>高光</code> <code>节奏卡点</code></p>
-</td>
 </tr>
 </table>
 
 <p align="center">
-  <strong>★ 更多案例持续更新中，欢迎 Star 关注本项目。</strong>
+  <strong><a href="./docs/showcase.zh-cn.md">→ 查看全部六个案例</a>——日常 Vlog、电影情绪短片、游戏高光，每个都附完整提示词。</strong><br />
+  <sub>★ 更多案例持续更新中，欢迎 Star 关注本项目。</sub>
 </p>
 
 # 🏄 无需安装试用
 
-我们提供了一个公开网页演示入口，你可以直接在电脑或手机浏览器里体验 Oh My Cassette 的消息式剪辑流程，无需先在本地安装 Codex、Claude 或 Hermes：
+上传一段素材、输入一句剪辑指令，就能看到成片过程——电脑或手机浏览器都行，本地不用装任何 Agent。
 
-<a href="http://43.134.224.156:8080/"> 立即试用 </a>
+<h3><a href="http://43.134.224.156:8080/">▶ 打开在线演示</a></h3>
 
 > [!WARNING]
-> 该公开演示仅用于功能展示和评估。当前入口刻意不做登录鉴权，请不要上传任何敏感、私密、保密、违法、受版权限制、受监管或不适合公开处理的内容。
->
-> 你上传的素材、提示词、生成结果、任务状态、排障信息，以及 BGM 流程中涉及的音乐搜索信息，可能会被该演示服务器、Cassette、DeepSeek 以及相关第三方音乐/搜索服务处理。请把上传到公开演示的任何内容都视为演示维护者和工作流相关外部服务可见。
->
-> 该演示可能随时重置、限流、不可用或变更。我们不承诺数据保留或删除时效，不承诺保密性、生产可用性、输出质量、版权合规性或服务连续性。你需要自行确认上传内容的权利状态，并在分享任何生成结果前自行审核。
->
-> 浏览器刷新、关闭标签页或离开 Web Demo 页面时，会开启新的网页会话，并尽力清理上一个网页会话的临时上传、聊天历史和已结束任务文件。这个清理策略只属于演示网页服务。
->
-> 默认情况下，演示会使用服务器侧配置的 DeepSeek API Key（如果可用）。你也可以在网页右上角 **设置** 中填写自己的 DeepSeek API Key 进行测试。该 key 只会随请求发送到当前演示服务器，Web 应用不会把它写入仓库或服务端磁盘；但它仍会经过公开演示服务器，请使用可以随时轮换和监控的 key。
+> **评估用演示环境，公开且未鉴权。请勿上传任何敏感、私密或受版权限制的内容。**
 
 <details>
-<summary>本地部署 Web Demo</summary>
+<summary>完整演示条款——数据处理、第三方服务与可用性</summary>
 
-Web Demo 是一个单进程 FastAPI 服务：它保留 Oh My Cassette 现有 gateway 流程，只把用户入口换成浏览器网页。上传素材、任务状态、导出文件、截图和网页 outbox 等运行时数据会写入 `CASSETTE_ASSET_ROOT`，不会写入仓库。
+- 你上传的素材、提示词、生成结果、任务状态、排障信息，以及 BGM 流程中涉及的音乐搜索信息，可能会被该演示服务器、Cassette、DeepSeek 以及相关第三方音乐/搜索服务处理。请把上传到公开演示的任何内容都视为演示维护者和工作流相关外部服务可见。
+- 该演示可能随时重置、限流、不可用或变更。我们不承诺数据保留或删除时效，不承诺保密性、生产可用性、输出质量、版权合规性或服务连续性。你需要自行确认上传内容的权利状态，并在分享任何生成结果前自行审核。
+- 浏览器刷新、关闭标签页或离开演示页面时，会开启新的网页会话，并尽力清理上一个网页会话的临时上传、聊天历史和已结束任务文件。该清理策略只属于演示网页服务。
+- 默认情况下，演示会使用服务器侧配置的 DeepSeek API Key（如果可用）。你也可以在网页右上角 **设置** 中填写自己的 DeepSeek API Key 进行测试。该 key 只会随请求发送到当前演示服务器，Web 应用不会把它写入仓库或服务端磁盘；但它仍会经过公开演示服务器，请使用可以随时轮换和监控的 key。
 
-1. 克隆仓库并创建独立的网页演示环境：
-
-```bash
-git clone https://github.com/Cassette-Editor/oh-my-cassette.git
-cd oh-my-cassette
-
-python3 -m venv .venv-web
-. .venv-web/bin/activate
-pip install -U pip
-pip install -r requirements-web.txt
-python -m playwright install chromium
-```
-
-2. 通过进程环境变量配置 Cassette 和 DeepSeek。Web Demo 不要求安装 Hermes Agent，也不要求存在 `~/.hermes/.env`：
-
-```bash
-cp deploy/oh-my-cassette-web.env.example ./oh-my-cassette-web.env
-$EDITOR ./oh-my-cassette-web.env
-```
-
-至少需要设置：
-
-```dotenv
-CASSETTE_URL=https://sg.trycassette.online/agent
-CASSETTE_AUTH_EMAIL=you@example.com
-CASSETTE_AUTH_PASSWORD='your-cassette-password'
-CASSETTE_ASSET_ROOT=$HOME/.oh-my-cassette/cassette
-CASSETTE_BROWSER_TIMEOUT_SEC=1800
-
-DEEPSEEK_API_KEY='your_deepseek_api_key'
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-flash
-OMC_WEB_HOST=0.0.0.0
-OMC_WEB_PORT=8080
-OMC_WEB_LOG_DIR=./web_demo/logs
-```
-
-如果用 `. ./oh-my-cassette-web.env` 加载配置，包含 shell 特殊字符、空格或 `#` 的值请加引号；systemd 的 `EnvironmentFile` 同样支持带引号的值。
-Cassette 上传/分析等待默认继承 `CASSETTE_BROWSER_TIMEOUT_SEC`。只有需要单独设置上传超时时才配置 `CASSETTE_UPLOAD_TIMEOUT_SEC`；设为 `0` 表示无限等待。
-
-启动前加载这些变量：
-
-```bash
-set -a
-. ./oh-my-cassette-web.env
-set +a
-```
-
-如果不希望在服务器上保存 DeepSeek API Key，可以把 `DEEPSEEK_API_KEY` 留空，然后在网页 **设置** 面板里临时填写自己的 key。浏览器提供的 key 只会附加在当前会话的请求上，Web 应用不会持久化保存。
-
-Web Demo 服务日志和 Hermes Agent / OhMyCassette 插件日志是分开的。默认写入服务工作目录下的 `./web_demo/logs/web_demo.log`；如果设置了 `OMC_WEB_LOG_DIR`，则写入 `$OMC_WEB_LOG_DIR/web_demo.log`。
-如果按上面的方式设置了 `CASSETTE_ASSET_ROOT`，Web Demo 的 Cassette job 记录也会和 Hermes 分开：原始 job JSON 位于 `$CASSETTE_ASSET_ROOT/jobs/cassette_*.json`，网页任务卡片会为当前浏览器会话拥有的任务提供 **日志** 链接。
-
-3. 构建浏览器前端（Vite + React → `web_demo/frontend/dist`），仅在构建时需要 Node.js + npm：
-
-```bash
-./web_demo/build_frontend.sh
-```
-
-4. 启动网页演示：
-
-```bash
-. .venv-web/bin/activate
-python -m web_demo.server
-```
-
-> 服务端只提供构建产物 `web_demo/frontend/dist`。如果尚未构建，访问 `/` 会返回明确的 503 并提示先执行构建。拉取 `web_demo/frontend` 下的改动后，请重新运行 `web_demo/build_frontend.sh`。
-
-本机测试打开 `http://127.0.0.1:8080/`；如果要让手机或其他电脑访问，请打开 `http://<服务器 IP>:8080/`，并确认服务器防火墙或云安全组允许入站 TCP `8080`。
-
-4. 可选：使用 systemd 常驻运行：
-
-```bash
-sudo cp deploy/oh-my-cassette-web.service.example /etc/systemd/system/oh-my-cassette-web.service
-sudo cp deploy/oh-my-cassette-web.env.example /etc/oh-my-cassette-web.env
-sudo $EDITOR /etc/oh-my-cassette-web.env
-sudo systemctl daemon-reload
-sudo systemctl enable --now oh-my-cassette-web
-sudo systemctl status oh-my-cassette-web
-journalctl -u oh-my-cassette-web -f
-```
-
-启用前请检查 `/etc/systemd/system/oh-my-cassette-web.service`，如果你的仓库路径或虚拟环境路径与示例不同，需要先改成自己的实际路径。
-`journalctl` 用来看 uvicorn 标准输出和 access log；Web Demo 业务日志仍写到 `$OMC_WEB_LOG_DIR/web_demo.log`。
-
-5. 简单验收：
-
-```bash
-curl -fsS http://127.0.0.1:8080/ -o /dev/null
-python3 -m compileall -q web_demo tools.py notifier.py browser.py
-tail -f ./web_demo/logs/web_demo.log
-```
-
-然后在浏览器中上传一个小的视频文件，发送剪辑指令，观察事件流和任务卡片，直到出现导出下载入口。
 </details>
+
+想自己部署这个演示？见 [Web Demo — 本地部署](./docs/web-demo.zh-cn.md)。
 
 # 🚀 快速开始
 
@@ -398,6 +272,30 @@ claude plugin install oh-my-cassette@cassette-editor
 ```bash
 claude plugin details oh-my-cassette@cassette-editor
 ```
+
+### OpenCode
+
+OpenCode 没有面向 MCP 服务的插件市场，因此需要从检出目录添加 MCP 服务和 skill。克隆本仓库后，在项目的 `opencode.json` 中指向启动脚本（仓库根目录已提供一份副本）：
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "cassette": {
+      "type": "local",
+      "command": ["python3", "/absolute/path/to/oh-my-cassette/scripts/run_local_mcp.py"],
+      "enabled": true,
+      "environment": { "CASSETTE_MCP_HOST": "opencode" }
+    }
+  }
+}
+```
+
+OpenCode 会从仓库的 `.agents/skills/` 目录发现宿主无关的 `cassette-video-edit` skill；也可以把它复制到 `~/.config/opencode/skills/cassette-video-edit/` 全局使用。Windows 上请把 `command` 里的 `python3` 换成 `python`。
+
+### 其他 MCP 宿主
+
+运行时与宿主无关，因此任何能启动本地 stdio MCP 服务的客户端都可以使用。把客户端指向 `scripts/run_local_mcp.py`（用 `python3` 运行，Windows 上用 `python`），并设置 `CASSETTE_RUNTIME_ADAPTER=mcp`。服务会在 MCP `instructions` 中提供完整的流程说明，每个工具都会返回带类型的 `phase`/`next_action`，因此即使宿主没有装配套 skill 也能驱动整个流程。为获得最佳体验，建议同时安装 `cassette-video-edit` skill（或等效的系统提示词），以便遵循引导式选择和审核步骤。
 
 ### Hermes
 
@@ -652,194 +550,33 @@ hermes gateway restart
 
 ### Oh My Cassette 是免费开源的吗？
 
-插件基于 MIT 许可证开源。Cassette 本身是独立的托管服务，有自己的账号体系和服务条款。
+这个插件完全免费开源，基于 MIT 许可证——包括 MCP 服务、skill 和 Web Demo 在内的全部代码。
+
+渲染跑在 [Cassette](https://trycassette.online) 上，它是一个独立的托管服务，需要注册账号。账号的具体费用请以 Cassette 官网为准。你也可以完全不注册账号，直接用[网页演示](#-无需安装试用)体验整套流程。
 
 # 🔨 开发与排障
 
-> [!TIP]
-> 加入我们的Discord社区和`oh-my-cassette` 用户一起交流
->
-> [![Discord](https://img.shields.io/discord/1514649803626250452?style=for-the-badge&logo=discord&logoColor=white&label=Discord&labelColor=black&color=5865F2)](https://discord.gg/qd9NY4k8d7)
+贡献者环境搭建、完整配置参考、传输层细节、诊断脚本，以及常见运行问题的解答，
+全部整理在 **[docs/development.zh-cn.md](./docs/development.zh-cn.md)**。
 
-## 常见问答
-
-### 1. 为什么 Hermes Agent 在 QQ 或 Telegram 中没有响应？
-
-请检查 Hermes Agent 的模型配置、网络连接和 API 连通性。你也可以重启网关：
+出问题时先跑这条诊断命令：
 
 ```bash
-hermes gateway stop
-hermes gateway restart
+python3 scripts/diagnose_local_mcp.py   # Codex / Claude / OpenCode
+python3 scripts/diagnose_install.py     # Hermes
 ```
 
-### 2. 为什么连接 Cassette 时出现网络问题？
+两者都会报告运行时引导、配置、传输方式和媒体目录状态，且不会打印任何凭据。
 
-请检查是否可以访问 https://sg.trycassette.online/agent 或 https://trycassette.online/agent 。如果无法访问，请检查网络设置，确保可以打开 Cassette。
+# 💬 社区
 
-### 3. 为什么运行速度比较慢？
+- **[Discussions](https://github.com/Cassette-Editor/oh-my-cassette/discussions)**——提问、晒出你剪的片子、了解后续计划。
+- **[Discord](https://discord.gg/qd9NY4k8d7)**——和贡献者及其他用户交流。
+- **[Issues](https://github.com/Cassette-Editor/oh-my-cassette/issues)**——反馈 Bug 和功能需求。标了 `good first issue` 的适合上手。
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)**——如何提交改动。
 
-剪辑过程取决于 Hermes Agent 的 API 延迟和 Cassette 服务负载。根据任务复杂度、所选模型和思考等级不同，一次剪辑任务大约需要 5-20 分钟。
+用它剪出了满意的片子？欢迎发到 Discussions，我们会把优秀作品收进案例展示。
 
-如果 Hermes 或 Cassette 卡住，可以先发送 `/cut` 停止当前 Cassette 剪辑，再发送 `/stop` 停止 Hermes。之后可以在同一个会话中重试。
-
-## 诊断
-
-诊断 Codex 与 Claude 本地 MCP 插件：
-
-```bash
-python3 scripts/diagnose_local_mcp.py
-```
-
-它会检查运行时引导、受保护配置、传输方式、项目与媒体根目录，以及宿主无关的数据路径，并且不会输出凭据。常见 MCP 错误都带有可执行的说明：`auth_required` 会提供私人设置命令，`source_path_not_allowed` 会指出可信目录问题，`browser_session_lost` 会说明浏览器任务为何无法跨重启继续。
-
-诊断 Hermes：
-
-```bash
-python3 scripts/diagnose_install.py
-```
-
-诊断项包括：
-
-- 插件安装路径（符号链接安装和 `hermes plugins install` 的 git 克隆安装都能识别）；
-- 插件是否已在 Hermes 中启用；
-- `~/.hermes/.env` 中的配置值，并隐藏敏感信息；
-- `ffmpeg` 和 `ffprobe`；
-- Hermes Python 环境中的 Playwright；
-- Cassette 地址是否可访问；
-- 通过 Chromium 打开 Agent 页面检查 Cassette 登录凭据；
-- Hermes 网关状态。
-
-如果接收媒体时报错 `transcoder_missing`，请重新运行安装器，让它记录明确的 `CASSETTE_FFMPEG_BIN` 和 `CASSETTE_FFPROBE_BIN` 路径：
-
-```bash
-python3 scripts/install_plugin.py \
-  --skip-plugin-enable \
-  --skip-cassette-url \
-  --skip-cassette-auth \
-  --skip-jamendo-auth \
-  --skip-playwright-install
-```
-
-## 配置
-
-Codex 与 Claude 共用操作系统标准的 Oh My Cassette 配置和数据目录，其凭据与任务状态和 Hermes 相互独立。当前宿主项目会自动加入可信范围；其他媒体目录必须通过 `setup_local_mcp.py --allowed-root` 显式添加。网页演示只读取自身进程环境，不会使用任一插件保存的凭据。
-
-安装器会把常规运行时设置写入 `~/.hermes/.env`。你也可以手动编辑该文件。
-
-<details>
-<summary>展开配置详情</summary>
-
-最小可用配置示例：
-
-```bash
-CASSETTE_URL=https://sg.trycassette.online/agent
-CASSETTE_AUTH_EMAIL=you@example.com
-CASSETTE_AUTH_PASSWORD=your-generated-cassette-password
-CASSETTE_ASSET_ROOT=$HOME/.hermes/cassette
-CASSETTE_HEADLESS=true
-CASSETTE_FORCE_H264=true
-```
-
-默认媒体来源目录：
-
-```text
-~/.hermes/qqbot
-~/.hermes/telegram
-~/.hermes/weixin
-~/.hermes/cache
-~/.hermes/tmp
-```
-
-如果你的网关把媒体保存在其他位置：
-
-```bash
-CASSETTE_ALLOWED_SOURCE_ROOTS="$HOME/.hermes/qqbot:$HOME/.hermes/telegram:$HOME/.hermes/cache:$HOME/.hermes/tmp:/path/to/media"
-```
-
-可选的 Jamendo 智能配乐配置：
-
-```bash
-JAMENDO_CLIENT_ID=your_client_id
-JAMENDO_CLIENT_SECRET=your_client_secret
-```
-
-`JAMENDO_CLIENT_SECRET` 是为未来功能预留的字段。它不会被发送给 Jamendo，也不会写入任务元数据。
-</details>
-
-## 开发
-
-<details>
-<summary>展开开发详情</summary>
-
-创建本地测试环境：
-
-```bash
-uv venv .venv
-uv pip install --python .venv/bin/python pytest playwright
-.venv/bin/python -m playwright install chromium
-```
-
-运行检查：
-
-```bash
-python3 -m compileall -q .
-.venv/bin/python -m pytest -q
-```
-
-使用开发环境运行真实的 stdio MCP 进程：
-
-```bash
-CASSETTE_MCP_SKIP_BOOTSTRAP=1 \
-CASSETTE_MCP_PYTHON="$PWD/.venv/bin/python" \
-.venv/bin/python scripts/run_local_mcp.py
-```
-
-确定性测试会覆盖核心能力对齐、全部 11 个工具、真实 stdio 协议调用、长轮询、重启与续跑、状态转换、资源链接、身份验证和文件系统安全、两种插件清单、现有 Hermes 与网页演示测试，以及前端构建。由维护者手动触发的实时 E2E 会通过临时环境变量读取仓库 Secret；PR CI 本身不使用凭据。
-
-运行本地 Cassette 端到端测试工具：
-
-```bash
-.venv/bin/python scripts/e2e_local_cassette.py \
-  --media tests/fixtures/sample.mp4 \
-  --instruction "制作一个 10 秒以内、带字幕的短视频。"
-```
-
-运行网页演示服务：
-
-```bash
-uv venv .venv-web
-uv pip install --python .venv-web/bin/python -r requirements-web.txt
-.venv-web/bin/python -m playwright install chromium
-# 构建浏览器前端（Vite/React -> web_demo/frontend/dist）；需要 Node.js + npm。
-./web_demo/build_frontend.sh
-set -a
-. ./oh-my-cassette-web.env
-set +a
-.venv-web/bin/python -m web_demo.server
-```
-
-浏览器前端是位于 `web_demo/frontend` 的 Vite + React + TypeScript 应用；`web_demo/build_frontend.sh` 会将其编译到 `web_demo/frontend/dist`，由服务端在 `/static` 下提供。构建产物不会提交到仓库，因此每次部署都需要构建（拉取前端改动后也要重新构建）。如需实时调试前端，可运行 `cd web_demo/frontend && npm run dev`，Vite 会把 `/api` 代理到 `http://127.0.0.1:8088`，请同时运行 FastAPI 服务。
-
-网页演示会从进程环境变量读取 `CASSETTE_*`、`DEEPSEEK_*` 和 `OMC_WEB_*`。浏览器内也可以在“设置”里临时填写 DeepSeek API Key；该 key 只随请求发送到当前服务器，不会写入仓库或服务端磁盘。示例 systemd 文件在 `deploy/oh-my-cassette-web.service.example`，环境变量模板在 `deploy/oh-my-cassette-web.env.example`。
-
-真实网关端到端测试是可选项，默认会跳过：
-
-```bash
-RUN_CASSETTE_E2E=1 .venv/bin/python -m pytest -q -m e2e
-```
-
-## 公共仓库安全
-
-请不要提交：
-
-- `.env` 或 `.env.e2e`；
-- 真实网关令牌、账号 ID、聊天 ID 或原始 `wxid`；
-- Cassette 凭据；
-- Jamendo 凭据；
-- 下载的媒体、导出文件、任务状态、浏览器追踪记录或本地运行时缓存。
-
-Hermes 运行时状态应保存在 `~/.hermes/cassette`；Codex 与 Claude 的状态应保存在操作系统标准的 Oh My Cassette 数据目录。它们都不应写进这个仓库。
-</details>
 
 ## 许可证
 
