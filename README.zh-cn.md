@@ -98,6 +98,36 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
   </tr>
 </table>
 
+## 🖥️ 工作流程实录 —— 一次真实会话
+
+一次未经剪辑的 Claude Code 会话全过程：13 段旅行素材和一首配乐上传到 Cassette，Agent 分析每一段素材、剪辑并打磨时间线，把可读的时间线摘要连同可点击的缩略图拼版一并交还，只有在你明确确认后才开始渲染。
+
+<table width="100%">
+<tr><td>
+  <video src="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.4.1/workflow-showcase.mp4" controls width="100%"></video>
+</td></tr>
+</table>
+
+| 时间 | 画面内容 |
+| --- | --- |
+| 0:00 | 提示词——与下方旅行 Vlog 案例相同的提示词，输入 Claude Code |
+| 0:05 | 14 个文件上传到 Cassette，每段素材都会被分析画面内容 |
+| 0:13 | Agent 自主剪辑——选镜、标题、画中画、卡点硬切 |
+| 0:16 | 时间线以可读摘要的形式返回，并附带可点击的预览链接 |
+| 0:25 | `cmd+click` 打开真实的缩略图拼版——每段素材一帧，零渲染 |
+| 0:30 | 未经确认不会渲染；导出在你发话后才执行 |
+| 0:36 | 成片落到项目目录 |
+
+**这次会话产出的成片**
+
+<table align="center" width="70%">
+<tr><td>
+  <video src="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.4.1/kota-kinabalu-vlog-readme.mp4" controls width="100%"></video>
+</td></tr>
+</table>
+
+<sub>两段视频都经过大幅压缩以减轻页面体积，因此终端文字和画面看起来比本地实际效果更模糊。从提示词到成片的真实耗时约 13 分钟，上方视频为加速播放。</sub>
+
 ## 🎬 案例视频
 
 以下每个案例都由 AI Agent 通过 Oh My Cassette 按所示提示词端到端完成——真实素材、真实处理时长，成片即 Agent 交付的原始结果。

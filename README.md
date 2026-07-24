@@ -103,6 +103,36 @@ Be the director of your own story, effortlessly.
   </tr>
 </table>
 
+## 🖥️ How it works — one real session
+
+One unedited Claude Code session, start to finish: 13 travel clips and a soundtrack go up to Cassette, the agent analyzes every clip, cuts and refines the timeline, hands back a readable timeline digest with a clickable contact sheet, and renders only after an explicit go-ahead.
+
+<table width="100%">
+<tr><td>
+  <video src="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.4.1/workflow-showcase.mp4" controls width="100%"></video>
+</td></tr>
+</table>
+
+| Time | What happens |
+| --- | --- |
+| 0:00 | The brief — the same prompt as the Travel Vlog case below, typed into Claude Code |
+| 0:05 | 14 files upload to Cassette; every clip is analyzed for scene content |
+| 0:13 | The agent edits on its own — shot selection, titles, picture-in-picture, beat-synced cuts |
+| 0:16 | The timeline comes back as a readable digest, with a clickable preview link |
+| 0:25 | One `cmd+click` opens the real contact sheet — one frame per clip, zero render |
+| 0:30 | Nothing renders until you say so; the export runs on your go |
+| 0:36 | The finished cut lands in the project folder |
+
+**The video that session produced**
+
+<table align="center" width="70%">
+<tr><td>
+  <video src="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.4.1/kota-kinabalu-vlog-readme.mp4" controls width="100%"></video>
+</td></tr>
+</table>
+
+<sub>Both clips are compressed hard to keep this page light, so the terminal text and the footage look softer here than they do on your machine. Prompt to rendered file took about 13 minutes of real time, sped up above.</sub>
+
 ## 🎬 Case Videos
 
 Every case below was edited end-to-end by an AI agent through Oh My Cassette, from the exact prompt shown — real inputs, real processing times, and the output is what the agent delivered.
