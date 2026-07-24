@@ -61,7 +61,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 
 # 🎥 项目概览
 
-**Oh My Cassette** 是面向 Codex、Claude 和 Hermes 的视频剪辑插件与 skill。它基于 <a href="https://trycassette.online">Cassette</a> 构建，专为 Agent 协作与调度设计，并尽可能减少 token 消耗。
+**Oh My Cassette** 是一款开源的 AI 视频剪辑插件与本地 MCP 服务，支持 [Claude Code](https://claude.com/claude-code)、[Codex](https://github.com/openai/codex)、[Hermes Agent](https://github.com/nousresearch/hermes-agent) 和 [OpenCode](https://opencode.ai)。它把自然语言聊天变成 [Cassette](https://trycassette.online) 上的成片蒙太奇视频——卡点剪辑、智能配乐、字幕、转场、画中画——并尽可能减少 token 消耗。
 
 你随时可以在手机上发送视频或音频素材，并和 Agent 聊聊你的想法，Agent 就会与 Cassette 协作，理解你的创作意图，整理素材，规划剪辑流程，并通过强大的剪辑能力，帮你制作可以直接分享的成片。
 
@@ -99,6 +99,8 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 </table>
 
 ## 🎬 案例视频
+
+以下每个案例都由 AI Agent 通过 Oh My Cassette 按所示提示词端到端完成——真实素材、真实处理时长，成片即 Agent 交付的原始结果。
 
 <table width="100%">
 <tr>
@@ -591,6 +593,36 @@ hermes gateway restart
 `~/.hermes/.env` 中的凭据和插件的启用状态都会保留；已设置的值不会被再次询问。不要在符号链接上直接运行
 `hermes plugins install --force`——它会报一个令人困惑的错误，而不是替换链接。
 </details>
+
+# ❓ 常见问题
+
+### Oh My Cassette 支持哪些 AI Agent？
+
+开箱即用支持 Claude Code、Codex、OpenCode 和 Hermes Agent，其他任意 MCP 宿主也可以连接本地 `cassette` MCP 服务。会话数据存放在与宿主无关的数据目录中，可以在一个宿主里开始剪辑、换另一个宿主继续。
+
+### 剪辑是在本地还是云端进行？
+
+插件在本地运行，负责素材接入、剪辑规划和任务监督；实际的剪辑与渲染在 [Cassette](https://trycassette.online) 云端完成，因此不需要 GPU，也不需要安装任何剪辑软件。
+
+### 需要 Cassette 账号吗？
+
+需要。安装器会在首次运行时询问你的 Cassette 账号邮箱和密码并保存在本地，插件会代你完成 Cassette 身份验证。
+
+### 能剪出什么样的视频？
+
+蒙太奇与故事化剪辑——日常 Vlog、旅行视频、音乐情绪短片、烹饪教程、产品广告、游戏高光——支持卡点剪辑、字幕、画中画、转场和智能配乐。真实案例（含提示词与处理时长）见[案例视频](#-案例视频)。
+
+### 剪辑过程中能看到 Agent 在做什么吗？
+
+可以。每轮剪辑后都会收到时间线缩略图拼版、本轮预览和进入 Cassette 时间线的实时编辑器链接；剪辑执行前，Agent 会把剪辑方案渲染成分镜表（每个规划节拍对应一帧源素材）供你审阅。
+
+### 可以不安装直接试用吗？
+
+可以——[公开网页演示](http://43.134.224.156:8080/)在浏览器中运行完整流程。演示未鉴权、仅供评估，请勿上传敏感内容。
+
+### Oh My Cassette 是免费开源的吗？
+
+插件基于 MIT 许可证开源。Cassette 本身是独立的托管服务，有自己的账号体系和服务条款。
 
 # 🔨 开发与排障
 

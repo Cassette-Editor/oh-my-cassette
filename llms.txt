@@ -1,0 +1,20 @@
+# Oh My Cassette
+
+> Oh My Cassette is an open-source AI video editing plugin and local MCP server for Claude Code, Codex, Hermes Agent, and OpenCode. It turns natural-language chat into finished montage videos on Cassette (https://trycassette.online) — beat-synced cuts, auto-matched music, subtitles, transitions, and picture-in-picture.
+
+The plugin runs locally beside the agent and handles media ingestion, edit planning, and job supervision; editing and rendering happen on the Cassette cloud service. Each editing turn returns a timeline contact sheet, a per-turn preview, and a live editor deep link, and edit plans are surfaced as storyboard sheets for review before they run. MIT licensed. Requires a Cassette account.
+
+## Docs
+
+- [README](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.md): overview, case videos with prompts, and per-host install guides (Claude Code, Codex, OpenCode, Hermes, any MCP host)
+- [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md): release history
+- [Contributing](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CONTRIBUTING.md): development setup and guidelines
+
+## Try it
+
+- [Public web demo](http://43.134.224.156:8080/): the full workflow in a browser, no install (evaluation only)
+- [Cassette](https://trycassette.online): the AI video editing service the plugin drives
+
+## Optional
+
+- [简体中文 README](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.zh-cn.md)

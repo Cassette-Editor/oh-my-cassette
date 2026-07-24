@@ -63,7 +63,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Pocket AI Co-editor fo
 
 # 🎥 Overview
 
-**Oh My Cassette** is a video editing plugin and skill for Codex, Claude, and Hermes, built for agent-supervised workflows on <a href="https://trycassette.online">Cassette</a> with minimal token overhead.
+**Oh My Cassette** is an open-source AI video editing plugin and local MCP server for [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), [Hermes Agent](https://github.com/nousresearch/hermes-agent), and [OpenCode](https://opencode.ai). It turns natural-language chat into finished montage videos on [Cassette](https://trycassette.online) — beat-synced cuts, auto-matched music, subtitles, transitions, and picture-in-picture — with minimal token overhead.
 
 Just send your videos or audio files and chat with your agent from anywhere on your phone. Your agent will work with Cassette to understand your intent, organize your media, plan the edit, and turn your materials into a ready-to-share video with powerful montage capabilities.
 
@@ -104,6 +104,8 @@ Be the director of your own story, effortlessly.
 </table>
 
 ## 🎬 Case Videos
+
+Every case below was edited end-to-end by an AI agent through Oh My Cassette, from the exact prompt shown — real inputs, real processing times, and the output is what the agent delivered.
 
 <table width="100%">
 <tr>
@@ -639,6 +641,36 @@ already-set values are not prompted again. Don't run
 `hermes plugins install --force` on top of a symlink — it fails with a
 confusing error instead of replacing it.
 </details>
+
+# ❓ FAQ
+
+### Which AI agents does Oh My Cassette work with?
+
+Claude Code, Codex, OpenCode, and Hermes Agent are supported out of the box, and any other MCP host can connect to the local `cassette` MCP server. Sessions live in a host-agnostic data directory, so you can start an edit in one host and continue it in another.
+
+### Does it edit videos locally or in the cloud?
+
+The plugin runs locally beside your agent and handles media ingestion, edit planning, and job supervision. The actual editing and rendering happen on [Cassette](https://trycassette.online), so you don't need a GPU or any editing software installed.
+
+### Do I need a Cassette account?
+
+Yes. The installer asks for your Cassette account email and password on first run and stores them locally; the plugin authenticates with Cassette on your behalf.
+
+### What kinds of videos can it make?
+
+Montage and story edits — vlogs, travel videos, music-driven shorts, cooking tutorials, product commercials, and game highlights — with beat-synced cuts, subtitles, picture-in-picture, transitions, and auto-matched background music. See [Case Videos](#-case-videos) for real examples with prompts and processing times.
+
+### Can I see what the agent is doing mid-edit?
+
+Yes. After each editing turn you get a timeline contact sheet, a per-turn preview, and a live editor deep link into the Cassette timeline; before the edit runs, the agent surfaces the plan as a storyboard sheet (one source frame per planned beat) for review.
+
+### Can I try it without installing anything?
+
+Yes — the [public web demo](http://43.134.224.156:8080/) runs the full workflow in your browser. It is unauthenticated and for evaluation only, so don't upload sensitive content.
+
+### Is Oh My Cassette free and open source?
+
+The plugin is open source under the MIT license. Cassette itself is a separate hosted service with its own account and terms.
 
 # 🔨 Development & Troubleshooting
 
