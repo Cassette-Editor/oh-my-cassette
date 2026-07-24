@@ -145,8 +145,7 @@ def cassette_answer_question(a: dict, **kw) -> str:
                 {"job_id": job_id, "status": job.get("status") or ""},
             )
         is_completion_question = any(
-            str(q.get("reason") or "").startswith("hermes_completion_review")
-            for q in (job.get("questions") or [])
+            str(q.get("reason") or "").startswith("hermes_completion_review") for q in (job.get("questions") or [])
         )
         has_continuation = isinstance(job.get("continuation"), dict) and bool(job.get("continuation"))
         if is_completion_question and not has_continuation:
