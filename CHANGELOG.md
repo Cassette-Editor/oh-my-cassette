@@ -18,11 +18,6 @@ conventional commits.
 
 * post-review continuation starts a follow-up direct-line turn instead of dead-ending ([5ddcdc3](https://github.com/Cassette-Editor/oh-my-cassette/commit/5ddcdc321404d87bff455f9521d7a598a4beee19))
 
-
-### Miscellaneous Chores
-
-* release 0.4.2 ([94a781a](https://github.com/Cassette-Editor/oh-my-cassette/commit/94a781a3bac38f65b8bc0cc26266d7f50f938813))
-
 ## [0.4.1](https://github.com/Cassette-Editor/oh-my-cassette/compare/v0.4.0...v0.4.1) (2026-07-23)
 
 
