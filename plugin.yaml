@@ -1,5 +1,5 @@
 name: cassette
-version: 0.4.1 # x-release-please-version
+version: 0.4.2 # x-release-please-version
 manifest_version: 1
 description: Cassette video-editing automation for QQ/Telegram gateway media ingestion, manifest generation, prompt preparation, and browser-driven Cassette jobs.
 author: Oh My Cassette contributors
