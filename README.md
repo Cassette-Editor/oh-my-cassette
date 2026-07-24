@@ -105,7 +105,7 @@ Be the director of your own story, effortlessly.
 
 ## 🖥️ How it works
 
-Send your clips and describe the video you want. The agent uploads them to Cassette, analyzes every clip, cuts and refines the timeline, hands back a readable timeline digest with a clickable contact sheet, and renders only after you say go. The recording below is a full run in Claude Code, nothing staged.
+Upload your clips, describe the video you want, and the agent edits it.
 
 <table width="100%">
 <tr><td>

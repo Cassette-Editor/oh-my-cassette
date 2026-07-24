@@ -100,7 +100,7 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 
 ## 🖥️ 工作流程
 
-把素材发过来，再描述你想要的视频。Agent 会把素材上传到 Cassette、分析每一段画面、剪辑并打磨时间线，把可读的时间线摘要连同可点击的缩略图拼版一并交还，只有在你发话后才开始渲染。下面是一段完整的 Claude Code 实录，没有任何摆拍。
+上传素材，描述你想要的视频，Agent 就会把它剪出来。
 
 <table width="100%">
 <tr><td>
