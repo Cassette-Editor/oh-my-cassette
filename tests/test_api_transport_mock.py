@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from cassette import jobs, tools
-from cassette.api_transport import ApiTransport, ApiTransportError
+from cassette.core import jobs, tools
+from cassette.core.api_transport import ApiTransport, ApiTransportError
 
 EXPORT_BYTES = b"FAKE_MP4_BYTES"
 
@@ -907,7 +907,7 @@ def test_await_run_cancels_the_server_side_run(cassette_env, monkeypatch):
         # Simulate a cancel that arrives once the run loop is already polling.
         monkeypatch.setattr(t, "_cancelled", lambda job_id: True)
         import pytest as _pytest
-        from cassette.api_transport import _JobCancelled
+        from cassette.core.api_transport import _JobCancelled
 
         with _pytest.raises(_JobCancelled):
             t._await_run("th-1", "r-1", deadline=__import__("time").monotonic() + 30, job_id="job-x")
@@ -971,7 +971,7 @@ def test_editor_url_only_for_try_session_projects(cassette_env, mock_api):
 
 
 def test_editor_url_falls_back_to_cassette_url_origin(monkeypatch):
-    from cassette.api_transport import _editor_url
+    from cassette.core.api_transport import _editor_url
 
     monkeypatch.delenv("CASSETTE_WEB_URL", raising=False)
     url = _editor_url("try-session-h4sh", "aaaa-bbbb", {"url": "https://sg.trycassette.online/agent"})
@@ -1143,7 +1143,7 @@ class _StoryboardPlanReviewAPI(_PlanReviewAPI):
 
 
 def test_plan_review_storyboard_cells_and_sheet(cassette_env, monkeypatch):
-    from cassette import tools
+    from cassette.core import tools
 
     server = _serve(_StoryboardPlanReviewAPI, monkeypatch)
     try:
@@ -1193,7 +1193,7 @@ def test_plan_review_auto_approved_when_unattended(cassette_env, plan_review_api
 
 
 def test_plan_review_resume_mapping():
-    from cassette.api_transport import _plan_review_resume
+    from cassette.core.api_transport import _plan_review_resume
 
     assert _plan_review_resume("approve") == {"action": "approve"}
     assert _plan_review_resume("Approved!") == {"action": "approve"}
@@ -1209,7 +1209,7 @@ def test_plan_review_resume_mapping():
 
 
 def test_plan_review_mode_defaults(monkeypatch):
-    from cassette.api_transport import _plan_review_mode
+    from cassette.core.api_transport import _plan_review_mode
 
     monkeypatch.delenv("CASSETTE_PLAN_REVIEW", raising=False)
     monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "mcp")

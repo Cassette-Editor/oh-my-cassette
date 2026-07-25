@@ -8,8 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from cassette import browser, jobs
-from cassette import tools
+from cassette.core import browser, jobs
+from cassette.core import tools
 
 
 def test_fetch_cassette_model_options_does_not_wait_for_browser_worker(monkeypatch):

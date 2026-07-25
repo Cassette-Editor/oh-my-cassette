@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cassette import prompt
+from cassette.core import prompt
 
 
 def test_prompt_contains_non_blocking_rules():

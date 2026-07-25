@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from cassette import manifest
+from cassette.core import manifest
 
 
 def test_ingest_asset_deduplicates_and_hashes_ids(cassette_env):
@@ -129,7 +129,7 @@ def test_sweep_removes_stale_derived_artifacts_only(cassette_env, monkeypatch):
     import os
     import time
 
-    from cassette import manifest
+    from cassette.core import manifest
 
     root = manifest.get_asset_root()
     old = time.time() - 90 * 86400
@@ -157,7 +157,7 @@ def test_sweep_disabled_by_zero_ttl(cassette_env, monkeypatch):
     import os
     import time
 
-    from cassette import manifest
+    from cassette.core import manifest
 
     monkeypatch.setenv("CASSETTE_ARTIFACT_TTL_DAYS", "0")
     root = manifest.get_asset_root()

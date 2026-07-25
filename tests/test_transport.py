@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from cassette import jobs, notifier, tools
-from cassette.api_transport import ApiTransport
-from cassette.transport import BrowserTransport, Transport, get_transport, selected_transport
+from cassette.core import jobs, notifier, tools
+from cassette.core.api_transport import ApiTransport
+from cassette.core.transport import BrowserTransport, Transport, get_transport, selected_transport
 
 
 @pytest.fixture(autouse=True)
@@ -270,7 +270,7 @@ def test_api_model_label_maps_to_id(label, expected):
 
 
 def test_api_model_selection_required_fails_on_unmappable_label(monkeypatch):
-    from cassette.api_transport import ApiTransportError
+    from cassette.core.api_transport import ApiTransportError
 
     monkeypatch.delenv("CASSETTE_REQUIRE_MODEL_SELECTION", raising=False)  # default true
     monkeypatch.delenv("CASSETTE_API_MODEL_ID", raising=False)
@@ -299,7 +299,7 @@ def test_api_resume_value_classifies_and_records_interrupts():
 
 
 def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeypatch):
-    from cassette import worker
+    from cassette.core import worker
 
     monkeypatch.setenv("CASSETTE_TRANSPORT", "api")
     monkeypatch.setattr(worker.notifier, "notify_terminal_job", lambda job: {"delivered": False})
@@ -325,7 +325,7 @@ def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeyp
 
 
 def test_worker_detached_path_uses_browser_when_selected(cassette_env, monkeypatch):
-    from cassette import worker
+    from cassette.core import worker
 
     monkeypatch.setenv("CASSETTE_TRANSPORT", "browser")  # explicit opt-out of the api default
     monkeypatch.setattr(worker.notifier, "notify_terminal_job", lambda job: {})

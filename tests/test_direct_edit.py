@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from cassette import jobs, tools
+from cassette.core import jobs, tools
 from tests.test_api_transport_mock import _MockCassetteAPI, _serve
 
 _DOC = {
