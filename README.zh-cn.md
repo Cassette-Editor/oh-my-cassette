@@ -78,7 +78,7 @@ codex plugin add oh-my-cassette@cassette-editor
 
 重启 Agent，然后对它说：*"把 ./footage 里的素材剪成一支 30 秒的旅行 Vlog，音乐卡点。"*
 
-需要 Python 3.11–3.13、`ffmpeg` 和一个 [Cassette 账号](https://trycassette.online/signup/)。完整安装步骤（含 [OpenCode](#opencode)、[Hermes](#hermes) 及其他 MCP 宿主）见[快速开始](#-快速开始)。想先看看效果？[在浏览器里直接试用](#-无需安装试用)，免安装、免账号。
+需要 Python 3.11–3.13、`ffmpeg` 和一个 [Cassette 账号](https://trycassette.online/signup/)。完整安装步骤（含 [OpenCode](#opencode)、[Hermes](#hermes) 及其他 MCP 客户端）见[快速开始](#-快速开始)。想先看看效果？[在浏览器里直接试用](#-无需安装试用)，免安装、免账号。
 
 # 🎥 项目概览
 
@@ -258,7 +258,7 @@ codex plugin marketplace add https://github.com/Cassette-Editor/oh-my-cassette.g
 codex plugin add oh-my-cassette@cassette-editor
 ```
 
-安装后请新建一个 Codex 任务，让插件发现流程重新运行。插件会提供与宿主无关的 `cassette-video-edit` skill，以及名为 `cassette` 的本地 MCP 进程。
+安装后请新建一个 Codex 任务，让插件发现流程重新运行。插件会提供通用的 `cassette-video-edit` skill，以及名为 `cassette` 的本地 MCP 进程。
 
 ### Claude Code
 
@@ -275,26 +275,23 @@ claude plugin details oh-my-cassette@cassette-editor
 
 ### OpenCode
 
-OpenCode 的插件管理器只安装 npm 包，因此没有可添加的插件市场条目。克隆发布通道并运行安装脚本，它会把 MCP 服务和 skill 注册到 OpenCode 自己的全局目录：
+OpenCode 的插件管理器只安装 npm 包，而且它的插件无法注册 MCP 服务，因此没有可添加的插件市场条目。改用一条命令：
 
 ```bash
-git clone --branch release https://github.com/Cassette-Editor/oh-my-cassette.git ~/.oh-my-cassette
-python3 ~/.oh-my-cassette/scripts/install_opencode.py
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/release/scripts/install_opencode.py | python3 -
 ```
 
-脚本会把 `cassette` 服务写入 `~/.config/opencode/opencode.json`（与其中已有的服务和配置合并，不会覆盖），并把宿主无关的 `cassette-video-edit` skill 安装到 `~/.config/opencode/skills/`。完成后请重启 OpenCode。
+它会下载当前发布版本，把 `cassette` 服务写入 `~/.config/opencode/opencode.json`（与其中已有的服务和配置合并，不会覆盖），并把通用的 `cassette-video-edit` skill 安装到 `~/.config/opencode/skills/`。完成后请重启 OpenCode。
+
+**更新时重跑同一条命令即可。** 无需安装 `git`——发布包用 Python 标准库下载。
 
 凭据与 Codex、Claude 安装共用，如果已经配置过就无需重复操作；否则脚本会打印 `setup_local_mcp.py` 命令来完成认证。
 
-用 `--dry-run` 可以先预览改动，之后用以下命令更新：
+插件目录默认放在 `~/.oh-my-cassette`（可用 `OMC_HOME` 覆盖）。`--dry-run` 可以先预览改动。如果你更习惯用 git 检出，克隆后从该目录运行安装脚本即可——它会注册这份检出而不覆盖，`--sync` 则把它快进到发布通道。
 
-```bash
-python3 ~/.oh-my-cassette/scripts/install_opencode.py --sync
-```
+### 其他 MCP 客户端
 
-### 其他 MCP 宿主
-
-运行时与宿主无关，因此任何能启动本地 stdio MCP 服务的客户端都可以使用。把客户端指向 `scripts/run_local_mcp.py`（用 `python3` 运行，Windows 上用 `python`），并设置 `CASSETTE_RUNTIME_ADAPTER=mcp`。服务会在 MCP `instructions` 中提供完整的流程说明，每个工具都会返回带类型的 `phase`/`next_action`，因此即使宿主没有装配套 skill 也能驱动整个流程。为获得最佳体验，建议同时安装 `cassette-video-edit` skill（或等效的系统提示词），以便遵循引导式选择和审核步骤。
+运行时不绑定特定客户端，因此任何能启动本地 stdio MCP 服务的客户端都可以使用。把客户端指向 `scripts/run_local_mcp.py`（用 `python3` 运行，Windows 上用 `python`），并设置 `CASSETTE_RUNTIME_ADAPTER=mcp`。服务会在 MCP `instructions` 中提供完整的流程说明，每个工具都会返回带类型的 `phase`/`next_action`，因此即使客户端没有装配套 skill 也能驱动整个流程。为获得最佳体验，建议同时安装 `cassette-video-edit` skill（或等效的系统提示词），以便遵循引导式选择和审核步骤。
 
 ### Hermes
 
@@ -356,7 +353,7 @@ python3 scripts/install_plugin.py \
 
 ## 通过本地 MCP 在 Codex 或 Claude 中使用
 
-Codex 与 Claude 使用同一套自包含运行时。本文所说的 **MCP server** 是由宿主通过标准输入/输出连接的本地子进程：它不会监听端口，也不依赖 FastAPI 网页演示服务。独立的 Cassette 后端仍然是剪辑引擎，继续负责身份验证、素材处理、Agent 任务、项目状态和渲染。
+Codex 与 Claude 使用同一套自包含运行时。本文所说的 **MCP server** 是由客户端通过标准输入/输出连接的本地子进程：它不会监听端口，也不依赖 FastAPI 网页演示服务。独立的 Cassette 后端仍然是剪辑引擎，继续负责身份验证、素材处理、Agent 任务、项目状态和渲染。
 
 网页演示是另一条入口。浏览器仍然需要保留的 FastAPI 服务来处理上传、聊天会话和前端接口；改成本地 MCP 插件不会移除或改变这些能力。
 
@@ -383,12 +380,12 @@ python3 scripts/setup_local_mcp.py --import-hermes
 1. 让 Codex 或 Claude 剪辑当前项目中的一个或多个媒体文件。
 2. 插件只接收当前项目或显式信任目录中的素材，并会规范化路径、拒绝目录穿越和符号链接逃逸。
 3. 描述剪辑需求，完成必要的选项确认，然后启动任务。MCP 任务默认在后台运行。
-4. 宿主以最长 30 秒的长轮询查看状态。skill 最多持续监控 25 分钟，之后会返回仍在运行的任务 ID，方便稍后继续，而不是高频轮询。
-5. 如果 Cassette 确实需要用户决定，请用返回的任务 ID 回答。API 任务会保存私有续跑元数据，因此宿主重启后仍可继续。
+4. 客户端以最长 30 秒的长轮询查看状态。skill 最多持续监控 25 分钟，之后会返回仍在运行的任务 ID，方便稍后继续，而不是高频轮询。
+5. 如果 Cassette 确实需要用户决定，请用返回的任务 ID 回答。API 任务会保存私有续跑元数据，因此客户端重启后仍可继续。
 6. 剪辑完成后先审阅结果；只有明确选择 `export` 才会开始渲染。
 7. 导出结果会返回经过校验的绝对路径、文件 URI、MIME 类型、文件大小和 MCP 资源链接，不会把大体积媒体字节直接塞进工具响应。
 
-每个会话都使用密码学安全的随机 ID 隔离。Codex 与 Claude 共用宿主无关的数据目录，因此你可以主动把会话或任务 ID 交给另一个宿主继续处理；插件不会在未明确指定时共享会话。
+每个会话都使用密码学安全的随机 ID 隔离。Codex 与 Claude 共用同一套与客户端无关的数据目录，因此你可以主动把会话或任务 ID 交给另一个客户端继续处理；插件不会在未明确指定时共享会话。
 
 可以在设置时添加额外的可信素材目录：
 
@@ -408,7 +405,7 @@ python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
 python3 scripts/setup_local_mcp.py --with-browser
 ```
 
-只要 MCP 进程仍然存活，浏览器任务就可以继续回答问题；宿主重启后会返回 `browser_session_lost`，因为活动浏览器对象无法持久化。
+只要 MCP 进程仍然存活，浏览器任务就可以继续回答问题；客户端重启后会返回 `browser_session_lost`，因为活动浏览器对象无法持久化。
 
 ### MCP 工具
 
@@ -525,7 +522,7 @@ hermes gateway restart
 
 ### Oh My Cassette 支持哪些 AI Agent？
 
-开箱即用支持 Claude Code、Codex、OpenCode 和 Hermes Agent，其他任意 MCP 宿主也可以连接本地 `cassette` MCP 服务。会话数据存放在与宿主无关的数据目录中，可以在一个宿主里开始剪辑、换另一个宿主继续。
+开箱即用支持 Claude Code、Codex、OpenCode 和 Hermes Agent，其他任意 MCP 客户端也可以连接本地 `cassette` MCP 服务。会话数据存放在与客户端无关的数据目录中，可以在一个客户端里开始剪辑、换另一个客户端继续。
 
 ### 剪辑是在本地还是云端进行？
 
