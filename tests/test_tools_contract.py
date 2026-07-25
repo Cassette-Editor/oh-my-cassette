@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-from cassette import jobs, tools
+from cassette.core import jobs, tools
 
 
 HANDLERS = [

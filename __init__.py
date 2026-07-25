@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 if __package__:
-    from . import schemas, tools
+    from .core import schemas, tools
 else:  # Pytest may import this file as a bare module when the repo root is not named "cassette".
     schemas = None
     tools = None

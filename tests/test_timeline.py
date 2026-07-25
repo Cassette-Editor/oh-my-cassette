@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 
-from cassette import timeline
+from cassette.core import timeline
 
 
 def _doc(clips: list[dict], tracks: list[dict] | None = None, version: int = 42) -> dict:
@@ -231,7 +231,7 @@ def test_contact_sheet_from_data_uri_posters(tmp_path, monkeypatch):
 
     import pytest as _pytest
 
-    from cassette import tools
+    from cassette.core import tools
 
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -261,7 +261,7 @@ def test_contact_sheet_from_data_uri_posters(tmp_path, monkeypatch):
 
 
 def test_contact_sheet_skips_without_posters(tmp_path, monkeypatch):
-    from cassette import tools
+    from cassette.core import tools
 
     monkeypatch.setenv("CASSETTE_ASSET_ROOT", str(tmp_path))
     assert tools.build_contact_sheet(_sample_doc(), "try-session-abc") is None
@@ -275,7 +275,7 @@ def test_storyboard_sheet_from_local_media_with_placeholder(tmp_path, monkeypatc
 
     import pytest as _pytest
 
-    from cassette import tools
+    from cassette.core import tools
 
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -340,7 +340,7 @@ def test_storyboard_sheet_from_local_media_with_placeholder(tmp_path, monkeypatc
 
 
 def test_storyboard_sheet_requires_beats(tmp_path, monkeypatch):
-    from cassette import tools
+    from cassette.core import tools
 
     monkeypatch.setenv("CASSETTE_ASSET_ROOT", str(tmp_path))
     assert tools.build_storyboard_sheet("try-session-sb", []) is None
@@ -368,7 +368,7 @@ def test_contact_sheet_from_local_media(tmp_path, monkeypatch):
 
     import pytest as _pytest
 
-    from cassette import tools
+    from cassette.core import tools
 
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -391,7 +391,7 @@ def test_contact_sheet_from_local_media(tmp_path, monkeypatch):
 
 
 def test_clip_source_midpoint_seek():
-    from cassette.tools import _clip_source_midpoint_sec
+    from cassette.core.tools import _clip_source_midpoint_sec
 
     # 4s of timeline at speed 1.5 starting 2s into the source -> mid at 2 + 3 = 5s.
     clip = {"inSec": 2.0, "durationInFrames": 120, "speed": 1.5}

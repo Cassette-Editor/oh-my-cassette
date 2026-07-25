@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from cassette import jamendo, tools
-from cassette.errors import CassetteError
+from cassette.core import jamendo, tools
+from cassette.core.errors import CassetteError
 
 
 def _plan_dict(**strategy_overrides):

@@ -94,7 +94,7 @@ Before enabling the service, edit `/etc/systemd/system/oh-my-cassette-web.servic
 
 ```bash
 curl -fsS http://127.0.0.1:8080/ -o /dev/null
-python3 -m compileall -q web_demo tools.py notifier.py browser.py
+python3 -m compileall -q web_demo core
 tail -f ./web_demo/logs/web_demo.log
 ```
 
