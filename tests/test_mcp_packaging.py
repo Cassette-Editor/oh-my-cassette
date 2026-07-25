@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 from cassette import register
@@ -212,3 +213,50 @@ def test_opencode_installer_merge_seeds_an_empty_config():
     merged = installer.merge_server({}, installer.mcp_server_entry(ROOT))
     assert merged["$schema"] == installer.OPENCODE_SCHEMA
     assert set(merged["mcp"]) == {"cassette"}
+
+
+def test_opencode_installer_targets_an_existing_jsonc_config(tmp_path, monkeypatch):
+    # opencode reads opencode.json OR opencode.jsonc. Writing the .json variant
+    # blindly would leave a second, competing config beside the user's .jsonc.
+    installer = _load_opencode_installer()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("OPENCODE_CONFIG", raising=False)
+
+    home = tmp_path / "opencode"
+    home.mkdir(parents=True)
+    assert installer.opencode_config_path().name == "opencode.json"
+
+    (home / "opencode.jsonc").write_text("{}", encoding="utf-8")
+    assert installer.opencode_config_path().name == "opencode.jsonc"
+
+
+def test_opencode_installer_honors_the_opencode_config_env_var(tmp_path, monkeypatch):
+    installer = _load_opencode_installer()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    custom = tmp_path / "elsewhere" / "custom.json"
+    monkeypatch.setenv("OPENCODE_CONFIG", str(custom))
+
+    assert installer.opencode_config_path() == custom.resolve()
+    # Skills are only discovered under the global directory, so a redirected
+    # config file must not drag the skill install with it.
+    assert installer.skill_destination() == (tmp_path / "opencode" / "skills" / "cassette-video-edit" / "SKILL.md")
+
+
+def test_opencode_installer_refuses_to_rewrite_a_jsonc_config(tmp_path):
+    # Round-tripping through json.dumps would silently delete the comments.
+    installer = _load_opencode_installer()
+    config = tmp_path / "opencode.jsonc"
+    original = '{\n  // my notes\n  "theme": "dark"\n}\n'
+    config.write_text(original, encoding="utf-8")
+
+    with pytest.raises(installer.ManualStep, match="JSONC"):
+        installer.read_config(config)
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_opencode_installer_reads_a_plain_json_config(tmp_path):
+    installer = _load_opencode_installer()
+    config = tmp_path / "opencode.json"
+    config.write_text('{"theme": "dark"}', encoding="utf-8")
+    assert installer.read_config(config) == {"theme": "dark"}
+    assert installer.read_config(tmp_path / "missing.json") == {}
