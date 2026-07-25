@@ -254,6 +254,24 @@ def test_opencode_installer_refuses_to_rewrite_a_jsonc_config(tmp_path):
     assert config.read_text(encoding="utf-8") == original
 
 
+def test_opencode_installer_sync_refuses_to_discard_uncommitted_changes(tmp_path, monkeypatch):
+    # --sync runs `git reset --hard`; without this guard it eats local edits silently.
+    installer = _load_opencode_installer()
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+
+    monkeypatch.setattr(installer, "is_dirty", lambda _root: True)
+    reset_calls = []
+    monkeypatch.setattr(installer, "_git", lambda args, cwd: reset_calls.append(args))
+
+    assert installer.sync_checkout(checkout, "release", dry_run=False) is False
+    assert reset_calls == [], "a dirty checkout must never reach git reset --hard"
+
+    # --force is the documented opt-in, and a clean checkout proceeds normally.
+    monkeypatch.setattr(installer, "is_dirty", lambda _root: False)
+    assert installer.sync_checkout(checkout, "release", dry_run=True) is True
+
+
 def test_opencode_installer_reads_a_plain_json_config(tmp_path):
     installer = _load_opencode_installer()
     config = tmp_path / "opencode.json"

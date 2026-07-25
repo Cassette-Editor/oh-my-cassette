@@ -154,10 +154,20 @@ def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
 
 
-def sync_checkout(plugin_root: Path, ref: str, *, dry_run: bool) -> bool:
+def is_dirty(plugin_root: Path) -> bool:
+    status = _git(["status", "--porcelain"], plugin_root)
+    return status.returncode == 0 and bool(status.stdout.strip())
+
+
+def sync_checkout(plugin_root: Path, ref: str, *, dry_run: bool, force: bool = False) -> bool:
     """Fast-forward the checkout to the tip of `ref` on its own remote."""
     if not (plugin_root / ".git").exists():
         print(f"skip --sync; not a git checkout: {plugin_root}", file=sys.stderr)
+        return False
+    # `git reset --hard` below would discard local edits without a word.
+    if not force and is_dirty(plugin_root):
+        print(f"refusing to sync; {plugin_root} has uncommitted changes", file=sys.stderr)
+        print("commit or stash them, or rerun with --force to discard them.", file=sys.stderr)
         return False
     if dry_run:
         print(f"would sync {plugin_root} to origin/{ref}")
@@ -199,6 +209,7 @@ def main() -> int:
     parser.add_argument("--plugin-dir", help="plugin tree to register; defaults to this checkout")
     parser.add_argument("--ref", default=DEFAULT_REF, help=f"branch used by --sync (default: {DEFAULT_REF})")
     parser.add_argument("--sync", action="store_true", help="fast-forward the checkout to the release channel first")
+    parser.add_argument("--force", action="store_true", help="let --sync discard uncommitted changes in the checkout")
     parser.add_argument("--dry-run", action="store_true", help="show what would change without writing")
     args = parser.parse_args()
 
@@ -209,7 +220,7 @@ def main() -> int:
         return 2
 
     if args.sync:
-        sync_checkout(plugin_root, args.ref, dry_run=args.dry_run)
+        sync_checkout(plugin_root, args.ref, dry_run=args.dry_run, force=args.force)
 
     entry = mcp_server_entry(plugin_root)
     config_path = opencode_config_path(args.opencode_config)
