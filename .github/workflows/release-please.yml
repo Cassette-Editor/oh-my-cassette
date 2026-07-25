@@ -14,5 +14,14 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: googleapis/release-please-action@v5
+        id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Codex and Claude install from `release`, so it must always point at the
+      # newest tag. Hermes has no ref pinning and keeps tracking main.
+      - uses: actions/checkout@v7
+        if: ${{ steps.release.outputs.release_created }}
+      - name: Fast-forward the release channel to the new tag
+        if: ${{ steps.release.outputs.release_created }}
+        run: git push --force origin HEAD:release

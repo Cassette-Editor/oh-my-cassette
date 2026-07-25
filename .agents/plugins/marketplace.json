@@ -9,7 +9,7 @@
       "source": {
         "source": "url",
         "url": "https://github.com/Cassette-Editor/oh-my-cassette.git",
-        "ref": "main"
+        "ref": "release"
       },
       "policy": {
         "installation": "AVAILABLE",

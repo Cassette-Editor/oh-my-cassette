@@ -8,7 +8,21 @@ Releases are automated with [Release Please](https://github.com/googleapis/relea
 - `.claude-plugin/marketplace.json`; and
 - `mcp_plugin/__init__.py`.
 
-Merging the release PR creates `vX.Y.Z` and the GitHub Release. `main` is the marketplace and Hermes update channel, so keep it green.
+Merging the release PR creates `vX.Y.Z` and the GitHub Release.
+
+## Update channels
+
+| Channel | Tracks | Why |
+| --- | --- | --- |
+| Codex, Claude Code | `release` branch | Their marketplace entries pin `ref: release`; the release-please workflow force-pushes that branch to each new tag, so these hosts install exactly what was tested. |
+| Hermes | `main` | `hermes plugins install` clones the default branch and `update` pulls it. Hermes has no ref pinning, so this channel is rolling by nature. |
+| OpenCode | whatever the user cloned | `scripts/install_opencode.py` registers a checkout; the README clones `--branch release`. |
+
+Both marketplace *catalogs* are still read from `main`, so listings stay current while plugin code comes from the tag. Keep `main` green — Hermes users get it immediately.
+
+Do not enable branch protection on `release`; the workflow force-pushes it. Never commit to `release` directly — the next release overwrites it.
+
+Releases carry no uploaded assets on purpose. No host consumes an archive (Claude's plugin sources are git or npm, Codex and Hermes clone, OpenCode takes a command), and GitHub already serves auto-generated source zip/tar per tag.
 
 ## Release checklist
 
@@ -59,7 +73,13 @@ Merging the release PR creates `vX.Y.Z` and the GitHub Release. `main` is the ma
 
 7. Inspect the complete diff and staged files for credentials, private IDs, media, job state, and absolute acceptance paths. Rotate the live test password if it was ever shared outside the repository secret store.
 8. Ensure the release PR's required checks run. Release PRs created with `GITHUB_TOKEN` may need to be closed/reopened or have a new commit pushed before workflows trigger.
-9. Merge and verify the tag, GitHub Release, marketplace manifests, and `plugin.yaml` on `main`.
+9. Merge and verify the tag, GitHub Release, marketplace manifests, and `plugin.yaml` on `main`. Confirm the workflow advanced the release channel — these must print the same SHA:
+
+    ```bash
+    git fetch origin --tags
+    git rev-parse "vX.Y.Z^{}" origin/release
+    ```
+
 10. Spot-check update channels:
 
     ```bash
@@ -71,6 +91,8 @@ Merging the release PR creates `vX.Y.Z` and the GitHub Release. `main` is the ma
 
     hermes plugins update cassette
     hermes plugins list
+
+    python3 ~/.oh-my-cassette/scripts/install_opencode.py --sync
     ```
 
 The repository marketplaces are the supported Codex/Claude distribution channel. Do not submit the release to an external public plugin directory as part of this process.
