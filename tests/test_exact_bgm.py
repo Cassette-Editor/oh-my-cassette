@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cassette import exact_bgm, manifest
+from cassette.core import exact_bgm, manifest
 
 
 def _candidate(

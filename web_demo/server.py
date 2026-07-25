@@ -25,8 +25,8 @@ from . import deepseek_client, logging_utils, session_store
 
 load_cassette_package()
 
-from cassette import browser, jobs, manifest, security, tools, transport  # noqa: E402
-from cassette.errors import CassetteError  # noqa: E402
+from cassette.core import browser, jobs, manifest, security, tools, transport  # noqa: E402
+from cassette.core.errors import CassetteError  # noqa: E402
 
 
 # The web demo UI is the built Vite/React app under frontend/dist.

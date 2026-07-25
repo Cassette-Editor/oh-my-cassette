@@ -33,7 +33,7 @@ class LocalMcpRuntime:
 
     def __init__(self, config_errors: list[runtime_config.RuntimeConfigError] | None = None):
         load_core()
-        from cassette import jobs, tools
+        from cassette.core import jobs, tools
 
         self.jobs = jobs
         self.tools = tools

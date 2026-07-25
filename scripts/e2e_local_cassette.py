@@ -73,8 +73,8 @@ def main() -> int:
     os.environ.setdefault("CASSETTE_MAX_BYTES", "2147483648")
     load_cassette_package()
 
-    from cassette import manifest as cassette_manifest
-    from cassette import tools
+    from cassette.core import manifest as cassette_manifest
+    from cassette.core import tools
 
     ingest = _tool_payload(
         tools.cassette_ingest_media(

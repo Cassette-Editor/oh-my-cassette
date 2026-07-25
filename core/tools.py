@@ -3093,7 +3093,7 @@ def _prompt_optimization_doc_path() -> Path:
     override = os.getenv("CASSETTE_PROMPT_OPTIMIZER_DOC")
     if override:
         return Path(override).expanduser()
-    return Path(__file__).resolve().parent / "prompts" / "hermes-edit-brief-optimizer.md"
+    return Path(__file__).resolve().parents[1] / "prompts" / "hermes-edit-brief-optimizer.md"
 
 
 def _prompt_optimization_guard() -> str:

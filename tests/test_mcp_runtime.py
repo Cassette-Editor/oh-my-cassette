@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 
 import runtime_config
-from cassette import jobs, tools
-from cassette.transport import BrowserTransport
+from cassette.core import jobs, tools
+from cassette.core.transport import BrowserTransport
 from mcp_plugin.models import SessionPhase
 from mcp_plugin.runtime import LocalMcpRuntime
 

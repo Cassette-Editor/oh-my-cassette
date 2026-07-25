@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from cassette import jobs
-from cassette.errors import CassetteError
+from cassette.core import jobs
+from cassette.core.errors import CassetteError
 
 
 def test_job_create_status_cancel(cassette_env):

@@ -11,8 +11,8 @@ import json
 import threading
 import time
 
-from cassette import jobs
-from cassette.api_transport import ApiTransport, _stream_enabled
+from cassette.core import jobs
+from cassette.core.api_transport import ApiTransport, _stream_enabled
 
 
 def _sse(*frames: tuple[str, dict | str]) -> io.BytesIO:
@@ -98,7 +98,7 @@ def test_consume_run_stream_folds_delta_and_progress(cassette_env, monkeypatch):
         def __exit__(self, *args):
             return False
 
-    monkeypatch.setattr("cassette.api_transport.urlopen", lambda *a, **k: _Resp())
+    monkeypatch.setattr("cassette.core.api_transport.urlopen", lambda *a, **k: _Resp())
     transport._consume_run_stream("th-1", "r-1", job, threading.Event())
 
     saved = jobs.load_job(job["job_id"])
@@ -120,7 +120,7 @@ def test_consume_run_stream_survives_garbage(cassette_env, monkeypatch):
         def __exit__(self, *args):
             return False
 
-    monkeypatch.setattr("cassette.api_transport.urlopen", lambda *a, **k: _Resp())
+    monkeypatch.setattr("cassette.core.api_transport.urlopen", lambda *a, **k: _Resp())
     transport._consume_run_stream("th-1", "r-1", job, threading.Event())
     saved = jobs.load_job(job["job_id"])
     assert saved["timeline_delta"] is None

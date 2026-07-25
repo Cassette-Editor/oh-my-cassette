@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from cassette import jobs, notifier, tools
+from cassette.core import jobs, notifier, tools
 from web_demo import deepseek_client, session_store
 
 

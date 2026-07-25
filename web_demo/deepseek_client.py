@@ -12,8 +12,8 @@ from . import logging_utils, session_store
 
 load_cassette_package()
 
-from cassette import jobs, manifest, schemas, tools  # noqa: E402
-from cassette.errors import CassetteError  # noqa: E402
+from cassette.core import jobs, manifest, schemas, tools  # noqa: E402
+from cassette.core.errors import CassetteError  # noqa: E402
 
 
 ALLOWED_TOOLS: dict[str, tuple[dict[str, Any], Any]] = {

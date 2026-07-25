@@ -4,7 +4,7 @@ import sys
 import types
 from pathlib import Path
 
-from cassette import notifier
+from cassette.core import notifier
 
 
 def test_weixin_final_message_contains_status_without_delivery_target():
@@ -854,7 +854,7 @@ def test_gateway_notifications_keep_platform_routing_without_mcp_adapter(monkeyp
 
 
 def test_final_message_carries_live_link_and_delta():
-    from cassette import notifier
+    from cassette.core import notifier
 
     job = {
         "job_id": "cassette_x",
@@ -885,7 +885,7 @@ def test_final_message_carries_live_link_and_delta():
 
 
 def test_final_message_turn_done_without_render_headlines(tmp_path: Path):
-    from cassette import notifier
+    from cassette.core import notifier
 
     job = {
         "job_id": "cassette_turn",
@@ -914,7 +914,7 @@ def test_final_message_turn_done_without_render_headlines(tmp_path: Path):
 
 
 def test_terminal_notify_pushes_contact_sheet_at_turn_end(tmp_path: Path, monkeypatch):
-    from cassette import notifier
+    from cassette.core import notifier
 
     sheet = tmp_path / "sheet-v3.jpg"
     sheet.write_bytes(b"jpg")
@@ -941,7 +941,7 @@ def test_terminal_notify_pushes_contact_sheet_at_turn_end(tmp_path: Path, monkey
 
 
 def test_terminal_notify_prefers_storyboard_sheet_at_plan_review(tmp_path: Path, monkeypatch):
-    from cassette import notifier
+    from cassette.core import notifier
 
     contact = tmp_path / "sheet-v3.jpg"
     contact.write_bytes(b"jpg")

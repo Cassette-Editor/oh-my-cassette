@@ -9,7 +9,9 @@ from pathlib import Path
 if __package__:
     from . import browser, jobs, notifier, transport
 else:
-    root = Path(__file__).resolve().parent
+    # Detached subprocess: load the plugin root under the same `cassette` name the
+    # parent process used, so this worker sees one module identity, not a second.
+    root = Path(__file__).resolve().parents[1]
     spec = importlib.util.spec_from_file_location(
         "cassette", root / "__init__.py", submodule_search_locations=[str(root)]
     )
@@ -17,7 +19,7 @@ else:
     sys.modules["cassette"] = module
     assert spec.loader is not None
     spec.loader.exec_module(module)
-    from cassette import browser, jobs, notifier, transport
+    from cassette.core import browser, jobs, notifier, transport
 
 
 def run(job_id: str, action: str = "run") -> dict:

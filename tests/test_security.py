@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from cassette.errors import CassetteError
-from cassette import security
+from cassette.core.errors import CassetteError
+from cassette.core import security
 
 
 def test_allowed_path_passes(cassette_env):

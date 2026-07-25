@@ -18,7 +18,7 @@ from .errors import CassetteError
 
 
 JAMENDO_BASE_URL = "https://api.jamendo.com/v3.0"
-JAMENDO_PLAN_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "jamendo-search-plan.md"
+JAMENDO_PLAN_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "jamendo-search-plan.md"
 _AUDIO_FORMAT = "mp32"
 _VALID_VOCAL = {"vocal", "instrumental"}
 _VALID_ACOUSTIC = {"acoustic", "electric"}
