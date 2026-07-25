@@ -287,22 +287,19 @@ claude plugin details oh-my-cassette@cassette-editor
 
 ### OpenCode
 
-OpenCode's plugin manager installs npm packages only, so there is no marketplace entry to add. Clone the release channel and run the installer — it registers the MCP server and the skill in OpenCode's own global directories:
+OpenCode's plugin manager installs npm packages only, and its plugins cannot contribute MCP servers, so there is no marketplace entry to add. One command instead:
 
 ```bash
-git clone --branch release https://github.com/Cassette-Editor/oh-my-cassette.git ~/.oh-my-cassette
-python3 ~/.oh-my-cassette/scripts/install_opencode.py
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/release/scripts/install_opencode.py | python3 -
 ```
 
-That writes the `cassette` server into `~/.config/opencode/opencode.json` (merging with any servers and settings already there) and installs the host-neutral `cassette-video-edit` skill into `~/.config/opencode/skills/`. Restart OpenCode afterwards.
+That downloads the current release, writes the `cassette` server into `~/.config/opencode/opencode.json` (merging with any servers and settings already there), and installs the host-neutral `cassette-video-edit` skill into `~/.config/opencode/skills/`. Restart OpenCode afterwards.
+
+**Re-run the same command to update.** Only `git` is not required — the release tarball is fetched with Python's standard library.
 
 Credentials are shared with the Codex and Claude installs, so if you have already set those up there is nothing more to do. Otherwise the installer prints the `setup_local_mcp.py` command to finish authentication.
 
-Use `--dry-run` to preview the changes, and update later with:
-
-```bash
-python3 ~/.oh-my-cassette/scripts/install_opencode.py --sync
-```
+The plugin tree lands in `~/.oh-my-cassette` (override with `OMC_HOME`). `--dry-run` previews the changes. If you prefer a git checkout, clone it and run the installer from there — it registers that tree and leaves it alone, and `--sync` fast-forwards it to the release channel.
 
 ### Any other MCP host
 

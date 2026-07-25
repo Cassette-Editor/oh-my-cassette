@@ -1,39 +1,158 @@
 #!/usr/bin/env python3
-"""Register this checkout with opencode's native MCP and skill directories.
+"""Install Oh My Cassette into opencode's native MCP and skill directories.
 
-opencode has no git-based plugin manager — its ``plugin`` array installs npm
-packages only — so the native surfaces are the global config file and the
-global skills directory.  This script writes both and leaves the checkout it
-runs from as the installed plugin tree, the same shape as the Hermes installer.
+opencode has no plugin manager that can install an MCP server — its ``plugin``
+array takes npm packages only, and plugins cannot contribute MCP servers — so
+the native surfaces are the global config file and the global skills directory.
+This script writes both.
+
+It runs two ways. From a checkout it registers that tree. Piped straight from
+the network it has no tree to register, so it downloads the release tarball
+first::
+
+    curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/release/scripts/install_opencode.py | python3 -
+
+Re-running is how you update; the same command serves both.
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Any
-
-
-PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-if str(PLUGIN_ROOT) not in sys.path:
-    sys.path.insert(0, str(PLUGIN_ROOT))
-if str(PLUGIN_ROOT / "scripts") not in sys.path:
-    sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
-
-import runtime_config  # noqa: E402
-from install_plugin import remove_existing  # noqa: E402
 
 
 DEFAULT_REF = "release"
 SERVER_NAME = "cassette"
 SKILL_NAME = "cassette-video-edit"
 OPENCODE_SCHEMA = "https://opencode.ai/config.json"
+REPO = "Cassette-Editor/oh-my-cassette"
+TARBALL_URL = "https://codeload.github.com/{repo}/tar.gz/refs/heads/{ref}"
+DOWNLOAD_TIMEOUT_SEC = 120
+
+# Populated by _load_repo_modules once a plugin tree exists on disk. They live in
+# the repo, so they cannot be imported until a checkout has been resolved.
+runtime_config: Any = None
+remove_existing: Any = None
+
+
+def _self_path() -> Path | None:
+    """This file's location, or None when piped through stdin."""
+    try:
+        return Path(__file__).resolve()
+    except NameError:
+        return None
+
+
+def default_plugin_dir() -> Path:
+    return Path(os.getenv("OMC_HOME") or "~/.oh-my-cassette").expanduser().resolve()
+
+
+def _is_checkout(path: Path) -> bool:
+    return (path / "scripts" / "run_local_mcp.py").is_file()
+
+
+def _load_repo_modules(root: Path) -> None:
+    global runtime_config, remove_existing
+    for entry in (str(root), str(root / "scripts")):
+        if entry not in sys.path:
+            sys.path.insert(0, entry)
+    import runtime_config as _runtime_config
+    from install_plugin import remove_existing as _remove_existing
+
+    runtime_config = _runtime_config
+    remove_existing = _remove_existing
+
+
+def _safe_extract(archive: tarfile.TarFile, dest: Path) -> str:
+    """Extract a downloaded archive, rejecting traversal and link members.
+
+    tarfile's ``filter="data"`` only exists on newer patch releases, so the
+    check is done here to behave the same on every supported interpreter.
+    """
+    root = dest.resolve()
+    top: set[str] = set()
+    members = []
+    for member in archive.getmembers():
+        if member.issym() or member.islnk() or member.isdev():
+            continue
+        target = (root / member.name).resolve()
+        if target != root and root not in target.parents:
+            raise SystemExit(f"refusing to extract outside the destination: {member.name}")
+        top.add(Path(member.name).parts[0])
+        members.append(member)
+    if len(top) != 1:
+        raise SystemExit(f"unexpected archive layout: {sorted(top)}")
+    try:
+        # Belt and braces with the checks above, and 3.14 makes this the default.
+        archive.extractall(dest, members=members, filter="data")
+    except TypeError:
+        archive.extractall(dest, members=members)
+    return top.pop()
+
+
+def download_plugin_tree(dest: Path, ref: str, *, dry_run: bool) -> Path:
+    """Fetch the release tarball into `dest`. Stdlib only — no git required."""
+    url = TARBALL_URL.format(repo=REPO, ref=ref)
+    if dry_run:
+        print(f"would download {url} -> {dest}")
+        return dest
+    if (dest / ".git").exists():
+        raise SystemExit(
+            f"{dest} is a git checkout; refusing to overwrite it with a tarball.\n"
+            f"update it with: python3 {dest / 'scripts' / 'install_opencode.py'} --sync"
+        )
+    print(f"downloading {url}")
+    try:
+        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT_SEC) as response:  # noqa: S310 — fixed https URL
+            payload = response.read()
+    except OSError as exc:
+        raise SystemExit(f"could not download the plugin tree: {exc}") from exc
+
+    staging = Path(tempfile.mkdtemp(prefix=".omc-install-", dir=str(dest.parent if dest.parent.exists() else None)))
+    try:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+            top = _safe_extract(archive, staging)
+        unpacked = staging / top
+        if not _is_checkout(unpacked):
+            raise SystemExit("downloaded archive does not look like an Oh My Cassette tree")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        previous = dest.with_name(dest.name + ".previous")
+        shutil.rmtree(previous, ignore_errors=True)
+        if dest.exists():
+            os.replace(dest, previous)
+        os.replace(unpacked, dest)
+        shutil.rmtree(previous, ignore_errors=True)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    print(f"installed plugin tree: {dest}")
+    return dest
+
+
+def resolve_plugin_root(args: argparse.Namespace) -> Path:
+    """Find a plugin tree to register, downloading one when there is none."""
+    if args.plugin_dir:
+        explicit = Path(args.plugin_dir).expanduser().resolve()
+        if _is_checkout(explicit):
+            return explicit
+        return download_plugin_tree(explicit, args.ref, dry_run=args.dry_run)
+
+    here = _self_path()
+    if here and _is_checkout(here.parents[1]):
+        return here.parents[1]
+
+    # Piped from the network: fetch every time, so re-running the one-liner is
+    # how you update. Running the script from a tree on disk uses that tree.
+    return download_plugin_tree(default_plugin_dir(), args.ref, dry_run=args.dry_run)
 
 
 def opencode_home() -> Path:
@@ -206,18 +325,22 @@ def main() -> int:
         help="opencode config file; defaults to $OPENCODE_CONFIG, else the existing "
         "~/.config/opencode/opencode.jsonc, else opencode.json",
     )
-    parser.add_argument("--plugin-dir", help="plugin tree to register; defaults to this checkout")
-    parser.add_argument("--ref", default=DEFAULT_REF, help=f"branch used by --sync (default: {DEFAULT_REF})")
-    parser.add_argument("--sync", action="store_true", help="fast-forward the checkout to the release channel first")
+    parser.add_argument(
+        "--plugin-dir",
+        help=f"plugin tree to register; defaults to this checkout, else {default_plugin_dir()}",
+    )
+    parser.add_argument("--ref", default=DEFAULT_REF, help=f"release channel to install (default: {DEFAULT_REF})")
+    parser.add_argument("--sync", action="store_true", help="fast-forward a git checkout to the release channel first")
     parser.add_argument("--force", action="store_true", help="let --sync discard uncommitted changes in the checkout")
     parser.add_argument("--dry-run", action="store_true", help="show what would change without writing")
     args = parser.parse_args()
 
-    plugin_root = Path(args.plugin_dir).expanduser().resolve() if args.plugin_dir else PLUGIN_ROOT
-    launcher = plugin_root / "scripts" / "run_local_mcp.py"
-    if not launcher.is_file():
-        print(f"not an Oh My Cassette checkout: {plugin_root}", file=sys.stderr)
-        return 2
+    plugin_root = resolve_plugin_root(args)
+    if args.dry_run and not _is_checkout(plugin_root):
+        # Nothing was downloaded, so there is no tree to read the rest from.
+        print(f"would register {plugin_root} with opencode")
+        return 0
+    _load_repo_modules(plugin_root)
 
     if args.sync:
         sync_checkout(plugin_root, args.ref, dry_run=args.dry_run, force=args.force)
@@ -249,6 +372,8 @@ def main() -> int:
     )
 
     if not args.dry_run:
+        version = (plugin_root / "version.txt").read_text(encoding="utf-8").strip()
+        print(f"Oh My Cassette {version} installed at {plugin_root}")
         report_credentials(plugin_root)
         print("restart opencode so it reloads the MCP server and skills.")
     return 1 if manual else 0

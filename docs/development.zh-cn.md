@@ -36,7 +36,7 @@ hermes gateway restart
 python3 scripts/diagnose_local_mcp.py
 ```
 
-它会检查运行时引导、受保护配置、传输方式、项目与媒体根目录，以及宿主无关的数据路径，并且不会输出凭据。常见 MCP 错误都带有可执行的说明：`auth_required` 会提供私人设置命令，`source_path_not_allowed` 会指出可信目录问题，`browser_session_lost` 会说明浏览器任务为何无法跨重启继续。
+它会检查运行时引导、受保护配置、传输方式、项目与媒体根目录，以及与客户端无关的数据路径，并且不会输出凭据。常见 MCP 错误都带有可执行的说明：`auth_required` 会提供私人设置命令，`source_path_not_allowed` 会指出可信目录问题，`browser_session_lost` 会说明浏览器任务为何无法跨重启继续。
 
 诊断 Hermes：
 
@@ -68,7 +68,7 @@ python3 scripts/install_plugin.py \
 
 ## 配置
 
-Codex 与 Claude 共用操作系统标准的 Oh My Cassette 配置和数据目录，其凭据与任务状态和 Hermes 相互独立。当前宿主项目会自动加入可信范围；其他媒体目录必须通过 `setup_local_mcp.py --allowed-root` 显式添加。网页演示只读取自身进程环境，不会使用任一插件保存的凭据。
+Codex 与 Claude 共用操作系统标准的 Oh My Cassette 配置和数据目录，其凭据与任务状态和 Hermes 相互独立。当前客户端打开的项目会自动加入可信范围；其他媒体目录必须通过 `setup_local_mcp.py --allowed-root` 显式添加。网页演示只读取自身进程环境，不会使用任一插件保存的凭据。
 
 安装器会把常规运行时设置写入 `~/.hermes/.env`。你也可以手动编辑该文件。
 
