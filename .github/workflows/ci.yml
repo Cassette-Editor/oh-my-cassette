@@ -247,6 +247,12 @@ jobs:
           smoke_root="$(mktemp -d)"
           mkdir -p "$smoke_root/home"
           cp -R "$GITHUB_WORKSPACE" "$smoke_root/repo"
+          # The marketplace pins the plugin to the `release` branch, so installing
+          # it verbatim would clone a published tag from GitHub instead of testing
+          # this checkout. Rewrite to a relative source, mirroring the Codex step.
+          jq '.plugins[0].source="./"' \
+            "$smoke_root/repo/.claude-plugin/marketplace.json" > "$smoke_root/marketplace.json"
+          mv "$smoke_root/marketplace.json" "$smoke_root/repo/.claude-plugin/marketplace.json"
           HOME="$smoke_root/home" claude plugin marketplace add "$smoke_root/repo" --scope user
           HOME="$smoke_root/home" claude plugin install oh-my-cassette@cassette-editor --scope user
           HOME="$smoke_root/home" claude plugin details oh-my-cassette@cassette-editor | tee "$smoke_root/claude-details.txt"

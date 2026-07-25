@@ -275,23 +275,22 @@ claude plugin details oh-my-cassette@cassette-editor
 
 ### OpenCode
 
-OpenCode 没有面向 MCP 服务的插件市场，因此需要从检出目录添加 MCP 服务和 skill。克隆本仓库后，在项目的 `opencode.json` 中指向启动脚本（仓库根目录已提供一份副本）：
+OpenCode 的插件管理器只安装 npm 包，因此没有可添加的插件市场条目。克隆发布通道并运行安装脚本，它会把 MCP 服务和 skill 注册到 OpenCode 自己的全局目录：
 
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "cassette": {
-      "type": "local",
-      "command": ["python3", "/absolute/path/to/oh-my-cassette/scripts/run_local_mcp.py"],
-      "enabled": true,
-      "environment": { "CASSETTE_MCP_HOST": "opencode" }
-    }
-  }
-}
+```bash
+git clone --branch release https://github.com/Cassette-Editor/oh-my-cassette.git ~/.oh-my-cassette
+python3 ~/.oh-my-cassette/scripts/install_opencode.py
 ```
 
-OpenCode 会从仓库的 `.agents/skills/` 目录发现宿主无关的 `cassette-video-edit` skill；也可以把它复制到 `~/.config/opencode/skills/cassette-video-edit/` 全局使用。Windows 上请把 `command` 里的 `python3` 换成 `python`。
+脚本会把 `cassette` 服务写入 `~/.config/opencode/opencode.json`（与其中已有的服务和配置合并，不会覆盖），并把宿主无关的 `cassette-video-edit` skill 安装到 `~/.config/opencode/skills/`。完成后请重启 OpenCode。
+
+凭据与 Codex、Claude 安装共用，如果已经配置过就无需重复操作；否则脚本会打印 `setup_local_mcp.py` 命令来完成认证。
+
+用 `--dry-run` 可以先预览改动，之后用以下命令更新：
+
+```bash
+python3 ~/.oh-my-cassette/scripts/install_opencode.py --sync
+```
 
 ### 其他 MCP 宿主
 

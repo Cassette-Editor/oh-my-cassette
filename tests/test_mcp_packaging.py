@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 from cassette import register
@@ -11,9 +13,19 @@ from cassette import register
 
 ROOT = Path(__file__).resolve().parents[1]
 
+RELEASE_CHANNEL_REF = "release"
+
 
 def _json(path: str) -> dict:
     return json.loads((ROOT / path).read_text("utf-8"))
+
+
+def _load_opencode_installer():
+    spec = importlib.util.spec_from_file_location("install_opencode", ROOT / "scripts" / "install_opencode.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_dual_manifests_and_marketplaces_have_matching_identity_and_version():
@@ -116,3 +128,153 @@ def test_opencode_project_config_and_agents_skill_copy_stay_in_sync():
     neutral = (ROOT / "skills" / "cassette-video-edit" / "SKILL.md").read_text("utf-8")
     agents_copy = (ROOT / ".agents" / "skills" / "cassette-video-edit" / "SKILL.md").read_text("utf-8")
     assert agents_copy == neutral
+
+
+def test_codex_and_claude_install_from_the_release_channel_not_main():
+    # Both hosts clone the plugin tree themselves, so an unpinned ref silently
+    # ships main-HEAD under whatever version the manifests happen to declare.
+    codex_source = _json(".agents/plugins/marketplace.json")["plugins"][0]["source"]
+    assert codex_source["source"] == "url"
+    assert codex_source["ref"] == RELEASE_CHANNEL_REF
+
+    claude_source = _json(".claude-plugin/marketplace.json")["plugins"][0]["source"]
+    # A relative "./" source would resolve against the marketplace clone, which
+    # tracks the default branch — it cannot be pinned.
+    assert isinstance(claude_source, dict), "relative plugin sources cannot pin a ref"
+    assert claude_source["source"] == "github"
+    assert claude_source["repo"] == "Cassette-Editor/oh-my-cassette"
+    assert claude_source["ref"] == RELEASE_CHANNEL_REF
+
+
+def test_release_workflow_fast_forwards_the_release_channel():
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "release-please.yml").read_text("utf-8"))
+    steps = workflow["jobs"]["release-please"]["steps"]
+    release_step = next(step for step in steps if str(step.get("uses", "")).startswith("googleapis/release-please"))
+    assert release_step["id"] == "release", "the push step keys off this step id"
+
+    pushes = [step for step in steps if RELEASE_CHANNEL_REF in str(step.get("run", ""))]
+    assert pushes, "no step advances the release channel; Codex/Claude would pin to a stale tag forever"
+    for step in pushes:
+        assert "steps.release.outputs.release_created" in str(step.get("if", ""))
+    assert workflow["permissions"]["contents"] == "write"
+
+
+def test_native_smoke_install_rewrites_both_pinned_marketplace_sources():
+    # Both marketplaces pin the plugin to the release channel, so a verbatim
+    # install fetches a published tag. Without a rewrite the smoke jobs would
+    # silently stop testing the checkout and still report green.
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8")
+    steps = yaml.safe_load(ci)["jobs"]["native-packaging"]["steps"]
+    scripts = {str(step.get("name", "")): str(step.get("run", "")) for step in steps}
+
+    codex = next(body for name, body in scripts.items() if "Codex" in name and "Smoke-install" in name)
+    assert ".agents/plugins/marketplace.json" in codex
+    assert '"source":"local"' in codex.replace(" ", "")
+
+    claude = next(body for name, body in scripts.items() if "Claude" in name and "Smoke-install" in name)
+    assert ".claude-plugin/marketplace.json" in claude
+    assert '.plugins[0].source="./"' in claude
+
+
+def test_opencode_installer_entry_matches_the_project_config_contract():
+    installer = _load_opencode_installer()
+    entry = installer.mcp_server_entry(ROOT)
+    project = _json("opencode.json")["mcp"]["cassette"]
+
+    assert entry["type"] == project["type"]
+    assert entry["environment"] == project["environment"]
+    assert entry["enabled"] is True
+    # The project config uses a repo-relative launcher; the installed one is
+    # absolute, so only the tail is comparable across the two.
+    assert entry["command"][-1] == str(ROOT / "scripts" / "run_local_mcp.py")
+    assert Path(entry["command"][-1]).name == Path(project["command"][-1]).name
+
+
+def test_opencode_installer_merge_preserves_unrelated_user_config():
+    installer = _load_opencode_installer()
+    existing = {
+        "$schema": "https://opencode.ai/config.json",
+        "theme": "dark",
+        "model": "anthropic/claude-opus-5",
+        "mcp": {"jira": {"type": "remote", "url": "https://jira.example.com/mcp"}},
+    }
+    merged = installer.merge_server(existing, installer.mcp_server_entry(ROOT))
+
+    assert merged["theme"] == "dark"
+    assert merged["model"] == "anthropic/claude-opus-5"
+    assert merged["mcp"]["jira"] == existing["mcp"]["jira"]
+    assert merged["mcp"]["cassette"]["environment"]["CASSETTE_MCP_HOST"] == "opencode"
+    # The caller's dicts must not be mutated in place.
+    assert set(existing["mcp"]) == {"jira"}
+
+
+def test_opencode_installer_merge_seeds_an_empty_config():
+    installer = _load_opencode_installer()
+    merged = installer.merge_server({}, installer.mcp_server_entry(ROOT))
+    assert merged["$schema"] == installer.OPENCODE_SCHEMA
+    assert set(merged["mcp"]) == {"cassette"}
+
+
+def test_opencode_installer_targets_an_existing_jsonc_config(tmp_path, monkeypatch):
+    # opencode reads opencode.json OR opencode.jsonc. Writing the .json variant
+    # blindly would leave a second, competing config beside the user's .jsonc.
+    installer = _load_opencode_installer()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("OPENCODE_CONFIG", raising=False)
+
+    home = tmp_path / "opencode"
+    home.mkdir(parents=True)
+    assert installer.opencode_config_path().name == "opencode.json"
+
+    (home / "opencode.jsonc").write_text("{}", encoding="utf-8")
+    assert installer.opencode_config_path().name == "opencode.jsonc"
+
+
+def test_opencode_installer_honors_the_opencode_config_env_var(tmp_path, monkeypatch):
+    installer = _load_opencode_installer()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    custom = tmp_path / "elsewhere" / "custom.json"
+    monkeypatch.setenv("OPENCODE_CONFIG", str(custom))
+
+    assert installer.opencode_config_path() == custom.resolve()
+    # Skills are only discovered under the global directory, so a redirected
+    # config file must not drag the skill install with it.
+    assert installer.skill_destination() == (tmp_path / "opencode" / "skills" / "cassette-video-edit" / "SKILL.md")
+
+
+def test_opencode_installer_refuses_to_rewrite_a_jsonc_config(tmp_path):
+    # Round-tripping through json.dumps would silently delete the comments.
+    installer = _load_opencode_installer()
+    config = tmp_path / "opencode.jsonc"
+    original = '{\n  // my notes\n  "theme": "dark"\n}\n'
+    config.write_text(original, encoding="utf-8")
+
+    with pytest.raises(installer.ManualStep, match="JSONC"):
+        installer.read_config(config)
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_opencode_installer_sync_refuses_to_discard_uncommitted_changes(tmp_path, monkeypatch):
+    # --sync runs `git reset --hard`; without this guard it eats local edits silently.
+    installer = _load_opencode_installer()
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+
+    monkeypatch.setattr(installer, "is_dirty", lambda _root: True)
+    reset_calls = []
+    monkeypatch.setattr(installer, "_git", lambda args, cwd: reset_calls.append(args))
+
+    assert installer.sync_checkout(checkout, "release", dry_run=False) is False
+    assert reset_calls == [], "a dirty checkout must never reach git reset --hard"
+
+    # --force is the documented opt-in, and a clean checkout proceeds normally.
+    monkeypatch.setattr(installer, "is_dirty", lambda _root: False)
+    assert installer.sync_checkout(checkout, "release", dry_run=True) is True
+
+
+def test_opencode_installer_reads_a_plain_json_config(tmp_path):
+    installer = _load_opencode_installer()
+    config = tmp_path / "opencode.json"
+    config.write_text('{"theme": "dark"}', encoding="utf-8")
+    assert installer.read_config(config) == {"theme": "dark"}
+    assert installer.read_config(tmp_path / "missing.json") == {}

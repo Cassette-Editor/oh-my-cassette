@@ -287,23 +287,22 @@ claude plugin details oh-my-cassette@cassette-editor
 
 ### OpenCode
 
-OpenCode has no plugin marketplace for MCP servers, so add the server and skill from a checkout. Clone the repository, then point OpenCode at the launcher from your project's `opencode.json` (a copy is committed at the repo root):
+OpenCode's plugin manager installs npm packages only, so there is no marketplace entry to add. Clone the release channel and run the installer — it registers the MCP server and the skill in OpenCode's own global directories:
 
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "cassette": {
-      "type": "local",
-      "command": ["python3", "/absolute/path/to/oh-my-cassette/scripts/run_local_mcp.py"],
-      "enabled": true,
-      "environment": { "CASSETTE_MCP_HOST": "opencode" }
-    }
-  }
-}
+```bash
+git clone --branch release https://github.com/Cassette-Editor/oh-my-cassette.git ~/.oh-my-cassette
+python3 ~/.oh-my-cassette/scripts/install_opencode.py
 ```
 
-OpenCode discovers the host-neutral `cassette-video-edit` skill from the repository's `.agents/skills/` directory, or copy it to `~/.config/opencode/skills/cassette-video-edit/` for global use. On Windows, use `"python"` instead of `"python3"` in `command`.
+That writes the `cassette` server into `~/.config/opencode/opencode.json` (merging with any servers and settings already there) and installs the host-neutral `cassette-video-edit` skill into `~/.config/opencode/skills/`. Restart OpenCode afterwards.
+
+Credentials are shared with the Codex and Claude installs, so if you have already set those up there is nothing more to do. Otherwise the installer prints the `setup_local_mcp.py` command to finish authentication.
+
+Use `--dry-run` to preview the changes, and update later with:
+
+```bash
+python3 ~/.oh-my-cassette/scripts/install_opencode.py --sync
+```
 
 ### Any other MCP host
 
