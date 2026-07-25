@@ -25,7 +25,7 @@ from . import deepseek_client, logging_utils, session_store
 
 load_cassette_package()
 
-from cassette.core import browser, jobs, manifest, security, tools, transport  # noqa: E402
+from cassette.core import browser, gateway, jobs, manifest, security, tools, transport  # noqa: E402
 from cassette.core.errors import CassetteError  # noqa: E402
 
 
@@ -393,7 +393,7 @@ def _set_web_language(session_id: str, language: str) -> str:
     normalized = tools._normalize_cassette_language(language)
     if normalized not in {"zh", "en"}:
         raise HTTPException(status_code=400, detail="language must be zh or en")
-    tools._save_cassette_language_preference(session_id, normalized, "web")
+    gateway._save_cassette_language_preference(session_id, normalized, "web")
     return normalized
 
 
@@ -589,14 +589,14 @@ def _request_web_job_cancel(job_id: str, reason: str) -> dict:
 
 def _is_cut_command(text: str) -> bool:
     try:
-        return tools._forced_cut_instruction(text) is not None
+        return gateway._forced_cut_instruction(text) is not None
     except Exception:
         return str(text or "").strip().lower() in {"/cut", "／cut"}
 
 
 def _handle_web_cut(session_id: str) -> dict[str, Any]:
     flow_cancelled = session_store.cancel_flow(session_id)
-    pending_cancelled = bool(tools._load_pending_edit(session_id))
+    pending_cancelled = bool(gateway._load_pending_edit(session_id))
     if pending_cancelled:
         tools._clear_pending_edit(session_id)
     active_job = _active_web_job_for_session(session_id)
@@ -1008,10 +1008,10 @@ def upload_media(
             kind="upload",
             text=_localized(session_id, f"上传素材：{filename}", f"Uploaded asset: {filename}"),
             attachment_path=str(target),
-            attachment_type=tools._mime_to_media_type(media_types[-1], str(target)),
+            attachment_type=gateway._mime_to_media_type(media_types[-1], str(target)),
             extra={"client_event_id": client_event_id} if client_event_id else None,
         )
-    result = tools.ingest_gateway_media(
+    result = gateway.ingest_gateway_media(
         event=_make_event(session_id, media_paths=saved_paths, media_types=media_types),
         gateway=_web_gateway(),
     )
@@ -1089,7 +1089,7 @@ def send_message(
                 "job_id": str(active_job.get("job_id") or ""),
             },
         }
-    result = tools.ingest_gateway_media(event=_make_event(session_id, text=text), gateway=_web_gateway())
+    result = gateway.ingest_gateway_media(event=_make_event(session_id, text=text), gateway=_web_gateway())
     logging_utils.log_event(
         "web_message_gateway_result",
         session_id=session_id,

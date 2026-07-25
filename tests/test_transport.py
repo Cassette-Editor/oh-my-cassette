@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from cassette.core import jobs, notifier, tools
+from cassette.core import browser, jobs, notifier, tools
 from cassette.core.api_transport import ApiTransport
 from cassette.core.transport import BrowserTransport, Transport, get_transport, selected_transport
 
@@ -49,19 +49,17 @@ def test_both_transports_satisfy_protocol():
 def test_browser_transport_is_pure_passthrough(monkeypatch):
     calls: dict = {}
     monkeypatch.setattr(
-        tools.browser,
+        browser,
         "run_cassette_browser_job_threaded",
         lambda job: {"status": "succeeded", "_via": "browser-run", "job_id": job.get("job_id")},
     )
     monkeypatch.setattr(
-        tools.browser,
+        browser,
         "export_reviewed_completion_job_threaded",
         lambda job, decision: {"status": "succeeded", "_via": "browser-export", "decision": decision},
     )
-    monkeypatch.setattr(
-        tools.browser, "close_browser_sessions_threaded", lambda key=None: calls.__setitem__("close", key)
-    )
-    monkeypatch.setattr(tools.browser, "check_playwright", lambda: True)
+    monkeypatch.setattr(browser, "close_browser_sessions_threaded", lambda key=None: calls.__setitem__("close", key))
+    monkeypatch.setattr(browser, "check_playwright", lambda: True)
 
     bt = BrowserTransport()
     assert bt.run_job({"job_id": "j1"}) == {"status": "succeeded", "_via": "browser-run", "job_id": "j1"}

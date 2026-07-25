@@ -7,7 +7,8 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-from cassette.core import jobs, tools
+from cassette.core import browser, jobs, tools
+from cassette.core import gateway as gateway_mod
 
 
 HANDLERS = [
@@ -131,7 +132,7 @@ def test_ingest_gateway_media_saves_authorized_video_without_running_job(cassett
         adapters={"weixin": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
 
-    result = tools.ingest_gateway_media(event=event, gateway=gateway)
+    result = gateway_mod.ingest_gateway_media(event=event, gateway=gateway)
 
     assert result is not None
     assert result["action"] == "skip"
@@ -166,7 +167,7 @@ def test_ingest_gateway_media_binds_followup_instruction_to_saved_assets(cassett
         text="",
         message_id="raw_message_id",
     )
-    tools.ingest_gateway_media(event=media_event, gateway=gateway)
+    gateway_mod.ingest_gateway_media(event=media_event, gateway=gateway)
     instruction_event = SimpleNamespace(
         source=source,
         media_urls=[],
@@ -175,7 +176,7 @@ def test_ingest_gateway_media_binds_followup_instruction_to_saved_assets(cassett
         message_id="raw_text_message_id",
     )
 
-    result = tools.ingest_gateway_media(event=instruction_event, gateway=gateway)
+    result = gateway_mod.ingest_gateway_media(event=instruction_event, gateway=gateway)
 
     _assert_semantic_edit_gate(result, "剪成 10 秒短视频，加中文字幕")
     assert "wxid_chat_raw" not in result["text"]
@@ -184,7 +185,7 @@ def test_ingest_gateway_media_binds_followup_instruction_to_saved_assets(cassett
 def test_ingest_gateway_media_pings_cassette_before_prompt_choice(cassette_env, monkeypatch):
     monkeypatch.setenv("CASSETTE_PING_ON_GATEWAY_INSTRUCTION", "1")
     monkeypatch.setattr(
-        tools.browser,
+        browser,
         "check_cassette_connectivity",
         lambda: {"ok": False, "code": "cassette_unreachable"},
     )
@@ -201,7 +202,7 @@ def test_ingest_gateway_media_pings_cassette_before_prompt_choice(cassette_env, 
         _is_user_authorized=lambda _: True,
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -212,7 +213,7 @@ def test_ingest_gateway_media_pings_cassette_before_prompt_choice(cassette_env, 
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -244,7 +245,7 @@ def test_ingest_gateway_media_reports_saved_asset_status_without_llm(cassette_en
         _is_user_authorized=lambda _: True,
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -255,7 +256,7 @@ def test_ingest_gateway_media_reports_saved_asset_status_without_llm(cassette_en
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -290,7 +291,7 @@ def test_ingest_gateway_media_does_not_treat_receive_complaint_as_asset_check(ca
         _is_user_authorized=lambda _: True,
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -301,7 +302,7 @@ def test_ingest_gateway_media_does_not_treat_receive_complaint_as_asset_check(ca
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -332,7 +333,7 @@ def test_ingest_gateway_media_loads_prompt_optimizer_document(cassette_env, monk
         user_id="wxid_user_raw",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -343,7 +344,7 @@ def test_ingest_gateway_media_loads_prompt_optimizer_document(cassette_env, monk
         gateway=gateway,
     )
 
-    plain = tools.ingest_gateway_media(
+    plain = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -356,7 +357,7 @@ def test_ingest_gateway_media_loads_prompt_optimizer_document(cassette_env, monk
     _assert_semantic_edit_gate(plain, "剪成 10 秒短视频，加中文字幕")
     assert "CUSTOM OPTIMIZER DOC" not in plain["text"]
 
-    refined = tools.ingest_gateway_media(
+    refined = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -375,7 +376,7 @@ def test_ingest_gateway_media_loads_prompt_optimizer_document(cassette_env, monk
 
 
 def test_smart_bgm_recommendation_menu_requires_five_english_options(cassette_env):
-    result = tools._request_exact_bgm_recommendations(
+    result = gateway_mod._request_exact_bgm_recommendations(
         "gateway_media_telegram_chat_session",
         "add a cute popular song to this cat video",
         1,
@@ -400,13 +401,13 @@ def test_exact_bgm_selection_choice_calls_exact_tool(cassette_env):
         user_id="wxid_user_raw",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
         ),
         gateway=gateway,
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
     tools._save_pending_edit(
         session_id,
         "剪成燃一点的运动短视频",
@@ -416,7 +417,7 @@ def test_exact_bgm_selection_choice_calls_exact_tool(cassette_env):
         continue_after_match=True,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="2", message_id="choice_message_id"),
         gateway=gateway,
     )
@@ -429,7 +430,7 @@ def test_exact_bgm_selection_choice_calls_exact_tool(cassette_env):
     assert "exact numbered line `2.`" in result["text"]
     assert "cannot unambiguously extract both title and artist" in result["text"]
     assert "jamendo_music_matcher" in result["text"] or "cassette_match_bgm" in result["text"]
-    assert tools._load_pending_edit(session_id) is None
+    assert gateway_mod._load_pending_edit(session_id) is None
 
 
 def test_cassette_match_exact_bgm_sanitizes_numbered_menu_line(cassette_env, monkeypatch):
@@ -542,13 +543,13 @@ def test_exact_bgm_selection_can_request_new_batch(cassette_env):
         platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm"
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
         ),
         gateway=gateway,
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
     tools._save_pending_edit(
         session_id,
         "做成安静未来感菜单背景",
@@ -559,7 +560,7 @@ def test_exact_bgm_selection_can_request_new_batch(cassette_env):
         recommendation_round=1,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="4", message_id="change_batch"),
         gateway=gateway,
     )
@@ -568,7 +569,7 @@ def test_exact_bgm_selection_can_request_new_batch(cassette_env):
     assert result["action"] == "rewrite"
     assert "recommend exactly 3 real songs" in result["text"]
     assert "This is recommendation batch 2" in result["text"]
-    assert tools._load_pending_edit(session_id)["recommendation_round"] == 2
+    assert gateway_mod._load_pending_edit(session_id)["recommendation_round"] == 2
 
 
 def test_exact_bgm_selection_random_uses_plugin_selected_provider(cassette_env, monkeypatch):
@@ -578,13 +579,13 @@ def test_exact_bgm_selection_random_uses_plugin_selected_provider(cassette_env, 
         platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm"
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
         ),
         gateway=gateway,
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
     tools._save_pending_edit(
         session_id,
         "做成安静未来感菜单背景",
@@ -595,7 +596,7 @@ def test_exact_bgm_selection_random_uses_plugin_selected_provider(cassette_env, 
     )
     monkeypatch.setattr(tools.random, "choice", lambda items: "exact_song")
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="5", message_id="random_choice"),
         gateway=gateway,
     )
@@ -604,7 +605,7 @@ def test_exact_bgm_selection_random_uses_plugin_selected_provider(cassette_env, 
     assert result["action"] == "rewrite"
     assert "selected `exact_song` as the primary provider" in result["text"]
     assert "cassette_match_exact_bgm" in result["text"]
-    assert tools._load_pending_edit(session_id) is None
+    assert gateway_mod._load_pending_edit(session_id) is None
 
 
 def test_exact_bgm_selection_text_supplements_requirements_and_recommends_new_batch(cassette_env):
@@ -614,13 +615,13 @@ def test_exact_bgm_selection_text_supplements_requirements_and_recommends_new_ba
         platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm"
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
         ),
         gateway=gateway,
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
     tools._save_pending_edit(
         session_id,
         "做成暗黑反差剪辑",
@@ -631,7 +632,7 @@ def test_exact_bgm_selection_text_supplements_requirements_and_recommends_new_ba
         recommendation_round=1,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[], media_types=[], text="想要更复古一点的灵魂乐男声", message_id="bgm_supplement"
         ),
@@ -642,7 +643,7 @@ def test_exact_bgm_selection_text_supplements_requirements_and_recommends_new_ba
     assert result["action"] == "rewrite"
     assert "用户补充的 BGM 需求：想要更复古一点的灵魂乐男声" in result["text"]
     assert "This is recommendation batch 2" in result["text"]
-    pending = tools._load_pending_edit(session_id)
+    pending = gateway_mod._load_pending_edit(session_id)
     assert pending is not None
     assert "想要更复古一点的灵魂乐男声" in pending["instruction"]
     assert pending["recommendation_round"] == 2
@@ -709,7 +710,7 @@ def test_cassette_match_bgm_retries_empty_search_and_registers_audio_asset(casse
         user_id="wxid_user_raw",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    saved = tools.ingest_gateway_media(
+    saved = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -782,7 +783,7 @@ def test_smart_bgm_network_failure_does_not_block_direct_flow(cassette_env, monk
         user_id="wxid_user_raw",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    saved = tools.ingest_gateway_media(
+    saved = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -838,7 +839,7 @@ def test_cassette_match_bgm_uses_telegram_default_language_from_manifest(cassett
         user_id="telegram_user_raw",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    saved = tools.ingest_gateway_media(
+    saved = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -892,7 +893,7 @@ def test_cassette_match_bgm_reports_exact_song_fallback(cassette_env, monkeypatc
         user_id="qq_user_raw",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    saved = tools.ingest_gateway_media(
+    saved = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -974,7 +975,7 @@ def test_ingest_gateway_media_binds_confirmation_to_confirmed_optimized_prompt(c
         user_id="wxid_user_raw",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -984,7 +985,7 @@ def test_ingest_gateway_media_binds_confirmation_to_confirmed_optimized_prompt(c
         ),
         gateway=gateway,
     )
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1028,7 +1029,7 @@ def test_ingest_gateway_media_supports_qq_delivery_target(cassette_env):
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
 
-    result = tools.ingest_gateway_media(event=event, gateway=gateway)
+    result = gateway_mod.ingest_gateway_media(event=event, gateway=gateway)
 
     assert result is not None
     assert result["action"] == "skip"
@@ -1062,7 +1063,7 @@ def test_ingest_gateway_media_supports_telegram_delivery_target_and_english_defa
         adapters={"telegram": SimpleNamespace(send=send)},
     )
 
-    saved = tools.ingest_gateway_media(
+    saved = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -1090,7 +1091,7 @@ def test_ingest_gateway_media_supports_telegram_delivery_target_and_english_defa
     assert manifest_data["delivery"]["chat_id"] == "telegram_chat_raw"
     assert manifest_data["delivery"]["thread_id"] == "telegram_thread_raw"
 
-    instruction = tools.ingest_gateway_media(
+    instruction = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1124,7 +1125,7 @@ def test_ingest_gateway_media_reads_telegram_raw_cached_attachment(cassette_env)
         adapters={"telegram": SimpleNamespace(send=send)},
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1166,7 +1167,7 @@ def test_gateway_language_command_overrides_qq_default_for_session(cassette_env)
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
 
-    set_language = tools.ingest_gateway_media(
+    set_language = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1183,7 +1184,7 @@ def test_gateway_language_command_overrides_qq_default_for_session(cassette_env)
     assert set_language["cassette_language"] == "en"
     assert "Cassette language set to English" in sent[-1][1]
 
-    saved = tools.ingest_gateway_media(
+    saved = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -1200,9 +1201,9 @@ def test_gateway_language_command_overrides_qq_default_for_session(cassette_env)
 
 
 def test_handle_cassette_command_language_help():
-    assert "language [zh|en]" in tools.handle_cassette_command("help")
-    assert "/cassette language en" in tools.handle_cassette_command("language en")
-    assert "Unsupported Cassette language" in tools.handle_cassette_command("language fr")
+    assert "language [zh|en]" in gateway_mod.handle_cassette_command("help")
+    assert "/cassette language en" in gateway_mod.handle_cassette_command("language en")
+    assert "Unsupported Cassette language" in gateway_mod.handle_cassette_command("language fr")
 
 
 def test_ingest_gateway_media_downloads_qq_raw_video_attachment_in_plugin(cassette_env, monkeypatch):
@@ -1214,7 +1215,7 @@ def test_ingest_gateway_media_downloads_qq_raw_video_attachment_in_plugin(casset
         calls.append((att, gateway, event))
         return str(downloaded), "video/mp4"
 
-    monkeypatch.setattr(tools, "_download_qq_attachment_to_cache", fake_download)
+    monkeypatch.setattr(gateway_mod, "_download_qq_attachment_to_cache", fake_download)
     source = SimpleNamespace(
         platform=SimpleNamespace(value="qqbot"),
         chat_id="qq_openid_raw",
@@ -1239,7 +1240,7 @@ def test_ingest_gateway_media_downloads_qq_raw_video_attachment_in_plugin(casset
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
 
-    result = tools.ingest_gateway_media(event=event, gateway=gateway)
+    result = gateway_mod.ingest_gateway_media(event=event, gateway=gateway)
 
     assert result is not None
     assert result["action"] == "skip"
@@ -1271,7 +1272,7 @@ def test_ingest_gateway_media_treats_qq_placeholder_text_as_media_only(cassette_
     )
 
     for text in ("[视频]", "视频", "[CQ:video,file=mac-qq-video.mp4]", "mac-qq-video.mp4"):
-        result = tools.ingest_gateway_media(
+        result = gateway_mod.ingest_gateway_media(
             event=SimpleNamespace(
                 source=source,
                 media_urls=[str(media)],
@@ -1305,7 +1306,7 @@ def test_ingest_gateway_media_with_real_edit_caption_still_requests_optimization
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -1334,7 +1335,7 @@ def test_ingest_gateway_media_ignores_placeholder_without_new_media(cassette_env
         _is_user_authorized=lambda _: True,
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -1345,7 +1346,7 @@ def test_ingest_gateway_media_ignores_placeholder_without_new_media(cassette_env
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1378,7 +1379,7 @@ def test_ingest_gateway_media_saves_multiple_qq_raw_media_then_binds_instruction
         mime, path = files[att["filename"]]
         return str(path), mime
 
-    monkeypatch.setattr(tools, "_download_qq_attachment_to_cache", fake_download)
+    monkeypatch.setattr(gateway_mod, "_download_qq_attachment_to_cache", fake_download)
     source = SimpleNamespace(
         platform=SimpleNamespace(value="qqbot"),
         chat_id="qq_openid_raw",
@@ -1406,7 +1407,7 @@ def test_ingest_gateway_media_saves_multiple_qq_raw_media_then_binds_instruction
         },
     )
 
-    saved = tools.ingest_gateway_media(event=media_event, gateway=gateway)
+    saved = gateway_mod.ingest_gateway_media(event=media_event, gateway=gateway)
 
     assert saved is not None
     assert saved["action"] == "skip"
@@ -1420,7 +1421,7 @@ def test_ingest_gateway_media_saves_multiple_qq_raw_media_then_binds_instruction
     assert media_types.count("audio") == 1
     assert media_types.count("image") == 1
 
-    instruction = tools.ingest_gateway_media(
+    instruction = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1440,7 +1441,7 @@ def test_ingest_gateway_media_reports_qq_raw_download_failure_without_raw_url(ca
     def fake_download(att, gateway, event):
         raise tools.CassetteError("qq_attachment_download_failed", "failed")
 
-    monkeypatch.setattr(tools, "_download_qq_attachment_to_cache", fake_download)
+    monkeypatch.setattr(gateway_mod, "_download_qq_attachment_to_cache", fake_download)
     source = SimpleNamespace(
         platform=SimpleNamespace(value="qqbot"),
         chat_id="qq_openid_raw",
@@ -1464,7 +1465,7 @@ def test_ingest_gateway_media_reports_qq_raw_download_failure_without_raw_url(ca
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
 
-    result = tools.ingest_gateway_media(event=event, gateway=gateway)
+    result = gateway_mod.ingest_gateway_media(event=event, gateway=gateway)
 
     assert result is not None
     assert result["action"] == "skip"
@@ -1494,7 +1495,7 @@ def test_ingest_gateway_media_is_scoped_to_hermes_session_after_new(cassette_env
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
     session_store = FakeSessionStore()
 
-    first = tools.ingest_gateway_media(
+    first = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media_a)],
@@ -1508,7 +1509,7 @@ def test_ingest_gateway_media_is_scoped_to_hermes_session_after_new(cassette_env
     old_cassette_session_id = first["session_id"]
 
     session_store.session_id = "20260512_122211_3b9877d1"
-    second = tools.ingest_gateway_media(
+    second = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media_b)],
@@ -1528,7 +1529,7 @@ def test_ingest_gateway_media_is_scoped_to_hermes_session_after_new(cassette_env
     assert len(new_assets["data"]["manifest"]["assets"]) == 1
     assert new_assets["data"]["manifest"]["assets"][0]["original_name"] == "new.mp4"
 
-    instruction = tools.ingest_gateway_media(
+    instruction = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1557,7 +1558,7 @@ def test_ingest_gateway_media_does_not_bind_greeting_to_saved_assets(cassette_en
         user_id="wxid_user_raw",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -1575,7 +1576,7 @@ def test_ingest_gateway_media_does_not_bind_greeting_to_saved_assets(cassette_en
         message_id="raw_text_message_id",
     )
 
-    assert tools.ingest_gateway_media(event=greeting_event, gateway=gateway) is None
+    assert gateway_mod.ingest_gateway_media(event=greeting_event, gateway=gateway) is None
 
 
 def test_ingest_gateway_media_asks_hermes_to_classify_ambiguous_followup(cassette_env):
@@ -1587,7 +1588,7 @@ def test_ingest_gateway_media_asks_hermes_to_classify_ambiguous_followup(cassett
         user_id="wxid_user_raw",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -1597,9 +1598,9 @@ def test_ingest_gateway_media_asks_hermes_to_classify_ambiguous_followup(cassett
         ),
         gateway=gateway,
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1613,7 +1614,7 @@ def test_ingest_gateway_media_asks_hermes_to_classify_ambiguous_followup(cassett
     assert result is not None
     _assert_semantic_edit_gate(result, "按这个感觉来")
     # No pending funnel state is saved any more — the gate routes verbatim in one hop.
-    assert tools._load_pending_edit(session_id) is None
+    assert gateway_mod._load_pending_edit(session_id) is None
 
 
 def test_ingest_gateway_media_clears_semantic_gate_on_unrelated_followup(cassette_env):
@@ -1625,21 +1626,21 @@ def test_ingest_gateway_media_clears_semantic_gate_on_unrelated_followup(cassett
         user_id="wxid_user_raw",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
         ),
         gateway=gateway,
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
-    tools.ingest_gateway_media(
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[], media_types=[], text="按这个感觉来", message_id="ambiguous_text_message_id"
         ),
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[], media_types=[], text="谢谢", message_id="thanks_message_id"
         ),
@@ -1647,13 +1648,13 @@ def test_ingest_gateway_media_clears_semantic_gate_on_unrelated_followup(cassett
     )
 
     assert result is None
-    assert tools._load_pending_edit(session_id) is None
+    assert gateway_mod._load_pending_edit(session_id) is None
 
 
 def test_asset_status_query_detection():
-    assert tools._looks_like_asset_status_query("Did you receive the video files?") is False
-    assert tools._looks_like_asset_status_query("/check_assets") is True
-    assert tools._looks_like_asset_status_query("/check_assets@CassetteBot") is True
+    assert gateway_mod._looks_like_asset_status_query("Did you receive the video files?") is False
+    assert gateway_mod._looks_like_asset_status_query("/check_assets") is True
+    assert gateway_mod._looks_like_asset_status_query("/check_assets@CassetteBot") is True
 
 
 def test_gateway_bgm_replacement_instruction_uses_saved_assets(cassette_env):
@@ -1666,7 +1667,7 @@ def test_gateway_bgm_replacement_instruction_uses_saved_assets(cassette_env):
         chat_type="dm",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -1677,7 +1678,7 @@ def test_gateway_bgm_replacement_instruction_uses_saved_assets(cassette_env):
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1702,7 +1703,7 @@ def test_gateway_edit_slash_command_forces_saved_asset_edit_flow(cassette_env):
         chat_type="dm",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -1713,7 +1714,7 @@ def test_gateway_edit_slash_command_forces_saved_asset_edit_flow(cassette_env):
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1747,7 +1748,7 @@ def test_gateway_edit_slash_command_without_assets_gets_fixed_reply(cassette_env
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1779,21 +1780,21 @@ def test_gateway_model_choice_rejects_non_choice_without_semantic_fallback(casse
         _is_user_authorized=lambda _: True,
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
         ),
         gateway=gateway,
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
-    tools.ingest_gateway_media(
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[], media_types=[], text="/cassette_model", message_id="model_command"
         ),
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[], media_types=[], text="匹配一个大气的音乐", message_id="bad_choice"
         ),
@@ -1803,7 +1804,7 @@ def test_gateway_model_choice_rejects_non_choice_without_semantic_fallback(casse
     assert result is not None
     assert result["reason"] == "cassette_model_choice_busy_rejected"
     assert sent[-1][1] == "请使用/cut命令终止当前流程或剪辑任务后再尝试开始新的剪辑任务"
-    assert tools._load_pending_edit(session_id)["state"] == "awaiting_model_choice"
+    assert gateway_mod._load_pending_edit(session_id)["state"] == "awaiting_model_choice"
 
 
 def test_gateway_cut_slash_command_clears_pending_model_choice(cassette_env):
@@ -1817,22 +1818,22 @@ def test_gateway_cut_slash_command_clears_pending_model_choice(cassette_env):
         _is_user_authorized=lambda _: True,
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
         ),
         gateway=gateway,
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
-    tools.ingest_gateway_media(
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[], media_types=[], text="/cassette_model", message_id="model_command"
         ),
         gateway=gateway,
     )
-    assert tools._load_pending_edit(session_id)["state"] == "awaiting_model_choice"
+    assert gateway_mod._load_pending_edit(session_id)["state"] == "awaiting_model_choice"
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="/cut", message_id="cut_message_id"),
         gateway=gateway,
     )
@@ -1840,7 +1841,7 @@ def test_gateway_cut_slash_command_clears_pending_model_choice(cassette_env):
     assert result is not None
     assert result["reason"] == "cassette_cut_requested"
     assert result["pending_state"] == "awaiting_model_choice"
-    assert tools._load_pending_edit(session_id) is None
+    assert gateway_mod._load_pending_edit(session_id) is None
     assert "已请求停止当前 Cassette 操作" in sent[-1][1]
 
 
@@ -1853,9 +1854,9 @@ def test_gateway_cassette_model_command_sets_preference_without_assets(cassette_
         _is_user_authorized=lambda _: True,
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[], media_types=[], text="/cassette_model", message_id="model_command"
         ),
@@ -1865,11 +1866,11 @@ def test_gateway_cassette_model_command_sets_preference_without_assets(cassette_
     assert result["reason"] == "cassette_model_choice_requested"
     assert "DeepSeek V4 Pro" in sent[-1][1]
 
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="2", message_id="model_choice"),
         gateway=gateway,
     )
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="2", message_id="thinking_choice"),
         gateway=gateway,
     )
@@ -1901,8 +1902,8 @@ def test_gateway_cut_slash_command_requests_active_job_cancel(cassette_env):
         text="",
         message_id="raw_message_id",
     )
-    tools.ingest_gateway_media(event=media_event, gateway=gateway)
-    session_id = tools._gateway_session_id(media_event)
+    gateway_mod.ingest_gateway_media(event=media_event, gateway=gateway)
+    session_id = gateway_mod._gateway_session_id(media_event)
     sess_hash = tools.manifest.resolve_session_hash(session_id=session_id)
     job = jobs.create_job(
         sess_hash,
@@ -1916,7 +1917,7 @@ def test_gateway_cut_slash_command_requests_active_job_cancel(cassette_env):
     job["current_stage"] = "agent"
     jobs.save_job(job)
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -1957,8 +1958,8 @@ def test_gateway_active_job_rejects_new_text_instruction(cassette_env):
         text="",
         message_id="raw_message_id",
     )
-    tools.ingest_gateway_media(event=media_event, gateway=gateway)
-    session_id = tools._gateway_session_id(media_event)
+    gateway_mod.ingest_gateway_media(event=media_event, gateway=gateway)
+    session_id = gateway_mod._gateway_session_id(media_event)
     sess_hash = tools.manifest.resolve_session_hash(session_id=session_id)
     job = jobs.create_job(
         sess_hash,
@@ -1971,7 +1972,7 @@ def test_gateway_active_job_rejects_new_text_instruction(cassette_env):
     job["started_at"] = jobs.now_iso()
     jobs.save_job(job)
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2000,7 +2001,7 @@ def test_gateway_cut_slash_command_without_active_job_pauses_session(cassette_en
         adapters={"qqbot": SimpleNamespace(send=lambda chat_id, text: sent.append((chat_id, text)))},
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2037,7 +2038,7 @@ def test_gateway_cut_matches_active_job_when_session_store_missing(cassette_env)
         text="/cut",
         message_id="raw_cut_message_id",
     )
-    base_session_id = tools._gateway_session_id(cut_event)
+    base_session_id = gateway_mod._gateway_session_id(cut_event)
     live_session_id = f"{base_session_id}_0123456789abcdef"
     sess_hash = tools.manifest.resolve_session_hash(session_id=live_session_id)
     job = jobs.create_job(
@@ -2052,7 +2053,7 @@ def test_gateway_cut_matches_active_job_when_session_store_missing(cassette_env)
     job["current_stage"] = "agent"
     jobs.save_job(job)
 
-    result = tools.ingest_gateway_media(event=cut_event, gateway=gateway)
+    result = gateway_mod.ingest_gateway_media(event=cut_event, gateway=gateway)
 
     assert result is not None
     assert result["action"] == "skip"
@@ -2078,7 +2079,7 @@ def test_gateway_cut_accepts_telegram_bot_command_suffix(cassette_env):
         _is_user_authorized=lambda _: True,
         adapters={"telegram": SimpleNamespace(send=send)},
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source))
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source))
     sess_hash = tools.manifest.resolve_session_hash(session_id=session_id)
     job = jobs.create_job(
         sess_hash,
@@ -2099,7 +2100,7 @@ def test_gateway_cut_accepts_telegram_bot_command_suffix(cassette_env):
     job["current_stage"] = "agent"
     jobs.save_job(job)
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2155,7 +2156,7 @@ def test_gateway_cut_matches_active_telegram_job_by_delivery_when_session_id_cha
     job["current_stage"] = "agent"
     jobs.save_job(job)
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2184,7 +2185,7 @@ def test_cut_plugin_command_requests_latest_active_job_cancel(cassette_env):
     job["status"] = "running"
     jobs.save_job(job)
 
-    result = tools.handle_cut_command("")
+    result = gateway_mod.handle_cut_command("")
 
     assert "已请求停止当前 Cassette 操作" in result
     assert jobs.load_job(job["job_id"])["status"] == "cancel_requested"
@@ -2209,7 +2210,7 @@ def test_gateway_cassette_cut_subcommand_requests_active_job_cancel(cassette_env
         text="/cassette cut",
         message_id="raw_cut_message_id",
     )
-    session_id = tools._gateway_session_id(cut_event)
+    session_id = gateway_mod._gateway_session_id(cut_event)
     sess_hash = tools.manifest.resolve_session_hash(session_id=session_id)
     job = jobs.create_job(
         sess_hash,
@@ -2221,7 +2222,7 @@ def test_gateway_cassette_cut_subcommand_requests_active_job_cancel(cassette_env
     job["status"] = "running"
     jobs.save_job(job)
 
-    result = tools.ingest_gateway_media(event=cut_event, gateway=gateway)
+    result = gateway_mod.ingest_gateway_media(event=cut_event, gateway=gateway)
 
     assert result is not None
     assert result["reason"] == "cassette_cut_requested"
@@ -2240,7 +2241,7 @@ def test_gateway_followup_edit_skips_initial_choice_questions(cassette_env):
         chat_type="dm",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -2251,7 +2252,7 @@ def test_gateway_followup_edit_skips_initial_choice_questions(cassette_env):
         gateway=gateway,
     )
 
-    first = tools.ingest_gateway_media(
+    first = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2264,7 +2265,7 @@ def test_gateway_followup_edit_skips_initial_choice_questions(cassette_env):
     _assert_semantic_edit_gate(first, "剪成 10 秒短视频，加中文字幕")
 
     followup_instruction = "请把字幕换成黄色并重新导出"
-    followup = tools.ingest_gateway_media(
+    followup = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2289,7 +2290,7 @@ def test_gateway_retry_after_exact_bgm_selection_does_not_reask_or_rematch_bgm(c
         chat_type="dm",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -2301,7 +2302,7 @@ def test_gateway_retry_after_exact_bgm_selection_does_not_reask_or_rematch_bgm(c
     )
 
     first_instruction = "给我的视频配上一个流行歌要温柔男声"
-    bgm_accepted = tools.ingest_gateway_media(
+    bgm_accepted = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2315,7 +2316,7 @@ def test_gateway_retry_after_exact_bgm_selection_does_not_reask_or_rematch_bgm(c
     assert "recommend exactly 3 real songs" in bgm_accepted["text"]
     assert "cassette_match_exact_bgm" in bgm_accepted["text"]
 
-    selected = tools.ingest_gateway_media(
+    selected = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2331,7 +2332,7 @@ def test_gateway_retry_after_exact_bgm_selection_does_not_reask_or_rematch_bgm(c
     assert 'fallback_from="exact_bgm"' in selected["text"]
     assert "fallback_reason set to the exact-song tool error code" in selected["text"]
 
-    retry = tools.ingest_gateway_media(
+    retry = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2365,7 +2366,7 @@ def test_stale_funnel_pending_state_is_cleared_and_routed_verbatim(cassette_env)
         chat_type="dm",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -2375,11 +2376,11 @@ def test_stale_funnel_pending_state_is_cleared_and_routed_verbatim(cassette_env)
         ),
         gateway=gateway,
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
     for stale_state in ("awaiting_optimization_choice", "awaiting_bgm_choice"):
         tools._save_pending_edit(session_id, "旧的剪辑指令", 1, stale_state)
 
-        result = tools.ingest_gateway_media(
+        result = gateway_mod.ingest_gateway_media(
             event=SimpleNamespace(
                 source=source,
                 media_urls=[],
@@ -2391,7 +2392,7 @@ def test_stale_funnel_pending_state_is_cleared_and_routed_verbatim(cassette_env)
         )
 
         _assert_semantic_edit_gate(result, "剪成 10 秒短视频")
-        assert tools._load_pending_edit(session_id) is None
+        assert gateway_mod._load_pending_edit(session_id) is None
 
 
 def test_gateway_reserved_slash_command_does_not_satisfy_pending_choice(cassette_env):
@@ -2404,7 +2405,7 @@ def test_gateway_reserved_slash_command_does_not_satisfy_pending_choice(cassette
         chat_type="dm",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -2414,7 +2415,7 @@ def test_gateway_reserved_slash_command_does_not_satisfy_pending_choice(cassette
         ),
         gateway=gateway,
     )
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2425,7 +2426,7 @@ def test_gateway_reserved_slash_command_does_not_satisfy_pending_choice(cassette
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2449,7 +2450,7 @@ def test_gateway_refine_slash_command_forces_prompt_optimization(cassette_env):
         chat_type="dm",
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[str(media)],
@@ -2460,7 +2461,7 @@ def test_gateway_refine_slash_command_forces_prompt_optimization(cassette_env):
         gateway=gateway,
     )
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2481,7 +2482,7 @@ def test_gateway_refine_slash_command_forces_prompt_optimization(cassette_env):
 
 def test_gateway_music_slash_command_only_adds_bgm_material(cassette_env, monkeypatch):
     monkeypatch.setattr(
-        tools,
+        gateway_mod,
         "_freetouse_category_summary",
         lambda: "- Travel (Video); related tags: sunny, uplifting",
     )
@@ -2493,7 +2494,7 @@ def test_gateway_music_slash_command_only_adds_bgm_material(cassette_env, monkey
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: True)
 
-    result = tools.ingest_gateway_media(
+    result = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source,
             media_urls=[],
@@ -2518,11 +2519,11 @@ def test_gateway_music_slash_command_only_adds_bgm_material(cassette_env, monkey
 def test_smart_bgm_uses_jamendo_first_when_configured(cassette_env, monkeypatch):
     monkeypatch.setenv("JAMENDO_CLIENT_ID", "configured-client-id")
     monkeypatch.setattr(
-        tools, "_safe_freetouse_category_summary", lambda: "- Travel (Video); related tags: sunny, uplifting"
+        gateway_mod, "_safe_freetouse_category_summary", lambda: "- Travel (Video); related tags: sunny, uplifting"
     )
     tools._JAMENDO_DISABLED_CODE = None
 
-    result = tools._rewrite_smart_bgm_keyword_selection(
+    result = gateway_mod._rewrite_smart_bgm_keyword_selection(
         "jamendo-session",
         "安静、未来感、适合游戏菜单的背景音乐",
         2,
@@ -2571,8 +2572,10 @@ def test_jamendo_api_error_disables_jamendo_bgm_fallback(cassette_env, monkeypat
     assert payload["error"]["code"] == "jamendo_api_error"
     assert tools._JAMENDO_DISABLED_CODE == "jamendo_api_error"
 
-    monkeypatch.setattr(tools, "_safe_freetouse_category_summary", lambda: "- Chill (Genre); related tags: mellow")
-    result = tools._rewrite_smart_bgm_keyword_selection(
+    monkeypatch.setattr(
+        gateway_mod, "_safe_freetouse_category_summary", lambda: "- Chill (Genre); related tags: mellow"
+    )
+    result = gateway_mod._rewrite_smart_bgm_keyword_selection(
         "jamendo-session",
         "安静背景音乐",
         1,
@@ -2629,7 +2632,7 @@ def test_run_job_wait_true_persists_running_before_browser_finishes(cassette_env
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
 
     payload = json.loads(tools.cassette_run_job({"prompt": "Make a short edit", "session_id": "sync"}))
 
@@ -2653,7 +2656,7 @@ def test_run_job_chat_message_only_uses_normal_job_path(cassette_env, monkeypatc
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     payload = json.loads(tools.cassette_run_job({"chat_message": "请剪成 10 秒", "session_id": "sync"}))
 
     assert payload["ok"] is True
@@ -2689,7 +2692,7 @@ def test_gateway_run_job_forces_inprocess_background_to_keep_cut_responsive(cass
         raise AssertionError("gateway jobs must not block in synchronous browser automation")
 
     monkeypatch.setattr(tools, "_start_inprocess_cassette_job", fake_start)
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fail_sync_browser)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fail_sync_browser)
 
     payload = json.loads(
         tools.cassette_run_job(
@@ -2754,7 +2757,7 @@ def test_completion_review_context_injected_for_hermes_supervisor(cassette_env):
     ]
     jobs.save_job(job)
 
-    context = tools.inject_cassette_context()
+    context = gateway_mod.inject_cassette_context()
 
     assert context is not None
     assert "Cassette completion review required" in context
@@ -2788,7 +2791,7 @@ def test_completion_review_export_uses_browser_session(cassette_env, monkeypatch
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "export_reviewed_completion_job_threaded", fake_export)
+    monkeypatch.setattr(browser, "export_reviewed_completion_job_threaded", fake_export)
     monkeypatch.setattr(tools.notifier, "notify_terminal_job", lambda job: {"status": "skipped"})
 
     payload = json.loads(
@@ -2916,7 +2919,7 @@ def test_run_job_browser_automation_uses_dedicated_thread(cassette_env, monkeypa
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
 
     async def run_inside_event_loop():
         return json.loads(tools.cassette_run_job({"prompt": "internal", "session_id": "async-loop"}))
@@ -2943,7 +2946,7 @@ def test_run_job_reuses_same_browser_worker_across_caller_threads(cassette_env, 
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
 
     def call_tool(index):
         return json.loads(
@@ -2993,7 +2996,7 @@ def test_run_job_defaults_to_thirty_minute_timeout(cassette_env, monkeypatch):
         }
 
     monkeypatch.delenv("CASSETTE_BROWSER_TIMEOUT_SEC", raising=False)
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     payload = json.loads(tools.cassette_run_job({"prompt": "Make a short edit", "session_id": "default-timeout"}))
 
     assert payload["ok"] is True
@@ -3015,7 +3018,7 @@ def test_run_job_clamps_short_timeout_to_runtime_minimum(cassette_env, monkeypat
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     payload = json.loads(
         tools.cassette_run_job({"prompt": "Make a short edit", "session_id": "sync", "timeout_sec": 600})
     )
@@ -3046,7 +3049,7 @@ def test_run_job_preserves_browser_progress_events(cassette_env, monkeypatch):
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     payload = json.loads(tools.cassette_run_job({"prompt": "Make a short edit", "session_id": "sync"}))
     job = jobs.load_job(payload["job_id"])
 
@@ -3066,7 +3069,7 @@ def test_job_status_includes_user_report(cassette_env, monkeypatch):
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     payload = json.loads(
         tools.cassette_run_job({"prompt": "internal", "chat_message": "请剪成 10 秒", "session_id": "report"})
     )
@@ -3093,7 +3096,7 @@ def test_run_job_does_not_hardcode_default_model(cassette_env, monkeypatch):
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     payload = json.loads(
         tools.cassette_run_job({"prompt": "internal", "chat_message": "请剪成 10 秒", "session_id": "model-default"})
     )
@@ -3118,7 +3121,7 @@ def test_run_job_accepts_user_specified_cassette_model(cassette_env, monkeypatch
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     json.loads(
         tools.cassette_run_job(
             {
@@ -3148,7 +3151,7 @@ def test_run_job_does_not_treat_editing_words_as_thinking_level(cassette_env, mo
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     json.loads(
         tools.cassette_run_job(
             {
@@ -3169,13 +3172,13 @@ def test_gateway_run_job_uses_session_model_preference_over_prompt_text(cassette
     source = SimpleNamespace(
         platform=SimpleNamespace(value="qqbot"), chat_id="qq_openid_raw", user_id="qq_user_raw", chat_type="dm"
     )
-    tools.ingest_gateway_media(
+    gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
             source=source, media_urls=[str(media)], media_types=["video/mp4"], text="", message_id="raw_message_id"
         ),
         gateway=SimpleNamespace(_is_user_authorized=lambda _: True),
     )
-    session_id = tools._gateway_session_id(SimpleNamespace(source=source), None)
+    session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
     tools._save_cassette_model_preference(session_id, "Kimi K2.6", "Medium", source="test")
 
     def fake_browser_run(job):
@@ -3190,7 +3193,7 @@ def test_gateway_run_job_uses_session_model_preference_over_prompt_text(cassette
         }
 
     monkeypatch.setenv("CASSETTE_GATEWAY_BACKGROUND_JOBS", "false")
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     json.loads(
         tools.cassette_run_job(
             {
@@ -3231,7 +3234,7 @@ def test_job_status_scrubs_raw_delivery_target(cassette_env, monkeypatch):
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     payload = json.loads(
         tools.cassette_run_job({"prompt": "internal", "chat_message": "请剪成 10 秒", "session_id": "delivery"})
     )
@@ -3263,7 +3266,7 @@ def test_run_job_accepts_manifest_session_hash_from_list_assets(cassette_env, mo
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     payload = json.loads(tools.cassette_run_job({"prompt": "internal", "session_id": manifest_hash}))
 
     assert payload["ok"] is True
@@ -3287,7 +3290,7 @@ def test_ingest_gateway_media_skips_unauthorized_video(cassette_env):
     )
     gateway = SimpleNamespace(_is_user_authorized=lambda _: False)
 
-    assert tools.ingest_gateway_media(event=event, gateway=gateway) is None
+    assert gateway_mod.ingest_gateway_media(event=event, gateway=gateway) is None
     assert not cassette_env["asset_root"].exists()
 
 
@@ -3305,7 +3308,7 @@ def test_run_job_message_only_is_verbatim_and_sufficient(cassette_env, monkeypat
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     payload = json.loads(tools.cassette_run_job({"message": "把开头两秒剪掉", "session_id": "verbatim"}))
 
     assert payload["ok"] is True
@@ -3328,7 +3331,7 @@ def test_run_job_export_flag_sets_per_turn_export_intent(cassette_env, monkeypat
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(tools.browser, "run_cassette_browser_job", fake_browser_run)
+    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
     assert json.loads(tools.cassette_run_job({"message": "导出", "export": True, "session_id": "exp1"}))["ok"]
     assert observed["job"]["export_on_complete"] == "true"
     assert json.loads(tools.cassette_run_job({"message": "继续", "export": False, "session_id": "exp2"}))["ok"]
