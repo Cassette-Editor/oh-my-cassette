@@ -6,6 +6,7 @@ import time
 import pytest
 
 from cassette.core import jobs, notifier, tools
+from cassette.core import gateway as gateway_mod
 from web_demo import deepseek_client, session_store
 
 
@@ -293,7 +294,7 @@ def test_web_api_rewrite_runs_deepseek_in_background(cassette_env, monkeypatch):
         session_store.add_event(session_id, role="assistant", text="background done", kind="message")
         return {"content": "background done", "tool_call_count": 0}
 
-    monkeypatch.setattr(tools, "ingest_gateway_media", fake_ingest)
+    monkeypatch.setattr(gateway_mod, "ingest_gateway_media", fake_ingest)
     monkeypatch.setattr(deepseek_client, "run_turn", fake_run_turn)
 
     response = client.post("/api/messages", json={"session_id": session_id, "text": "/edit add captions"})
@@ -322,7 +323,7 @@ def test_web_rejects_message_while_llm_flow_active(cassette_env, monkeypatch):
     session_id = client.post("/api/sessions").json()["session_id"]
 
     monkeypatch.setattr(
-        tools,
+        gateway_mod,
         "ingest_gateway_media",
         lambda event, gateway: {"action": "rewrite", "reason": "test", "text": "internal"},
     )
@@ -354,7 +355,7 @@ def test_web_cut_clears_pending_llm_flow(cassette_env, monkeypatch):
     session_id = client.post("/api/sessions").json()["session_id"]
 
     monkeypatch.setattr(
-        tools,
+        gateway_mod,
         "ingest_gateway_media",
         lambda event, gateway: {"action": "rewrite", "reason": "test", "text": "internal"},
     )
@@ -451,7 +452,7 @@ def test_web_skip_choice_reply_is_bridged_to_llm_history(cassette_env, monkeypat
         )
         return {"action": "skip", "reason": "cassette_model_thinking_choice_requested", "reply_sent": True}
 
-    monkeypatch.setattr(tools, "ingest_gateway_media", fake_ingest)
+    monkeypatch.setattr(gateway_mod, "ingest_gateway_media", fake_ingest)
 
     response = client.post("/api/messages", json={"session_id": session_id, "text": "1"})
 
