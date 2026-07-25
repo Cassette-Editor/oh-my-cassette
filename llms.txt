@@ -8,7 +8,10 @@ The plugin runs locally beside the agent and handles media ingestion, edit plann
 
 - [README](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.md): overview, case videos with prompts, and per-host install guides (Claude Code, Codex, OpenCode, Hermes, any MCP host)
 - [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md): release history
+- [Showcase](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/showcase.md): six real case videos with the exact prompt, inputs, and processing time for each
+- [Support and scope](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SUPPORT.md): what this plugin covers versus the hosted Cassette service, and where to report what
 - [Contributing](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CONTRIBUTING.md): development setup and guidelines
+- [Development and troubleshooting](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/development.md): configuration reference, transports, diagnostics, common runtime problems
 
 ## Try it
 
