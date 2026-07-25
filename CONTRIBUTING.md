@@ -53,8 +53,14 @@ To exercise the MCP inside real hosts locally:
 claude mcp list           # run inside the repo; expect "cassette: … ✔ Connected"
 
 # Claude plugin: install from this checkout into an isolated HOME, then health-check.
+# The marketplace pins the plugin to the `release` branch, so the source must be
+# rewritten to a relative path first or Claude clones a published tag instead.
 tmp_home="$(mktemp -d)"
-HOME="$tmp_home" claude plugin marketplace add "$PWD" --scope user
+tmp_repo="$(mktemp -d)/repo"
+cp -R "$PWD" "$tmp_repo"
+jq '.plugins[0].source="./"' "$tmp_repo/.claude-plugin/marketplace.json" > "$tmp_repo/m.json"
+mv "$tmp_repo/m.json" "$tmp_repo/.claude-plugin/marketplace.json"
+HOME="$tmp_home" claude plugin marketplace add "$tmp_repo" --scope user
 HOME="$tmp_home" claude plugin install oh-my-cassette@cassette-editor --scope user
 (cd "$(mktemp -d)" && HOME="$tmp_home" claude mcp list)
 

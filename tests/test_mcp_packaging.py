@@ -158,6 +158,23 @@ def test_release_workflow_fast_forwards_the_release_channel():
     assert workflow["permissions"]["contents"] == "write"
 
 
+def test_native_smoke_install_rewrites_both_pinned_marketplace_sources():
+    # Both marketplaces pin the plugin to the release channel, so a verbatim
+    # install fetches a published tag. Without a rewrite the smoke jobs would
+    # silently stop testing the checkout and still report green.
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8")
+    steps = yaml.safe_load(ci)["jobs"]["native-packaging"]["steps"]
+    scripts = {str(step.get("name", "")): str(step.get("run", "")) for step in steps}
+
+    codex = next(body for name, body in scripts.items() if "Codex" in name and "Smoke-install" in name)
+    assert ".agents/plugins/marketplace.json" in codex
+    assert '"source":"local"' in codex.replace(" ", "")
+
+    claude = next(body for name, body in scripts.items() if "Claude" in name and "Smoke-install" in name)
+    assert ".claude-plugin/marketplace.json" in claude
+    assert '.plugins[0].source="./"' in claude
+
+
 def test_opencode_installer_entry_matches_the_project_config_contract():
     installer = _load_opencode_installer()
     entry = installer.mcp_server_entry(ROOT)
