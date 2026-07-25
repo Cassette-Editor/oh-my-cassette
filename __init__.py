@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 if __package__:
-    from .core import schemas, tools
+    from .core import gateway, schemas, tools
 else:  # Pytest may import this file as a bare module when the repo root is not named "cassette".
     schemas = None
     tools = None
@@ -40,27 +40,27 @@ def register(ctx) -> None:
 
     ctx.register_command(
         "cassette",
-        handler=tools.handle_cassette_command,
+        handler=gateway.handle_cassette_command,
         description="Cassette video-editing automation status and cancellation",
         args_hint="help|status <job_id>|cancel <job_id>|cut [job_id]|language [zh|en]|recent [limit]",
     )
     ctx.register_command(
         "cut",
-        handler=tools.handle_cut_command,
+        handler=gateway.handle_cut_command,
         description="Pause the active Cassette browser operation without closing the live session",
         args_hint="[job_id]",
     )
     ctx.register_command(
         "cassette_model",
-        handler=tools.handle_cassette_model_command,
+        handler=gateway.handle_cassette_model_command,
         description="Choose the Cassette model for the current QQ/Telegram gateway session",
         args_hint="",
     )
-    ctx.register_hook("pre_gateway_dispatch", tools.ingest_gateway_media)
-    ctx.register_hook("pre_llm_call", tools.inject_cassette_context)
-    ctx.register_hook("post_tool_call", tools.log_cassette_tool_call)
-    ctx.register_hook("on_session_finalize", tools.close_cassette_browser_sessions)
-    ctx.register_hook("on_session_reset", tools.close_cassette_browser_sessions)
+    ctx.register_hook("pre_gateway_dispatch", gateway.ingest_gateway_media)
+    ctx.register_hook("pre_llm_call", gateway.inject_cassette_context)
+    ctx.register_hook("post_tool_call", gateway.log_cassette_tool_call)
+    ctx.register_hook("on_session_finalize", gateway.close_cassette_browser_sessions)
+    ctx.register_hook("on_session_reset", gateway.close_cassette_browser_sessions)
 
     # Keep the gateway-specific Hermes workflow out of the native Codex/Claude plugin skill path.
     skill_path = Path(__file__).parent / "hermes" / "skills" / "cassette-video-edit" / "SKILL.md"
