@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 from pathlib import Path
@@ -11,9 +12,19 @@ from cassette import register
 
 ROOT = Path(__file__).resolve().parents[1]
 
+RELEASE_CHANNEL_REF = "release"
+
 
 def _json(path: str) -> dict:
     return json.loads((ROOT / path).read_text("utf-8"))
+
+
+def _load_opencode_installer():
+    spec = importlib.util.spec_from_file_location("install_opencode", ROOT / "scripts" / "install_opencode.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_dual_manifests_and_marketplaces_have_matching_identity_and_version():
@@ -116,3 +127,71 @@ def test_opencode_project_config_and_agents_skill_copy_stay_in_sync():
     neutral = (ROOT / "skills" / "cassette-video-edit" / "SKILL.md").read_text("utf-8")
     agents_copy = (ROOT / ".agents" / "skills" / "cassette-video-edit" / "SKILL.md").read_text("utf-8")
     assert agents_copy == neutral
+
+
+def test_codex_and_claude_install_from_the_release_channel_not_main():
+    # Both hosts clone the plugin tree themselves, so an unpinned ref silently
+    # ships main-HEAD under whatever version the manifests happen to declare.
+    codex_source = _json(".agents/plugins/marketplace.json")["plugins"][0]["source"]
+    assert codex_source["source"] == "url"
+    assert codex_source["ref"] == RELEASE_CHANNEL_REF
+
+    claude_source = _json(".claude-plugin/marketplace.json")["plugins"][0]["source"]
+    # A relative "./" source would resolve against the marketplace clone, which
+    # tracks the default branch — it cannot be pinned.
+    assert isinstance(claude_source, dict), "relative plugin sources cannot pin a ref"
+    assert claude_source["source"] == "github"
+    assert claude_source["repo"] == "Cassette-Editor/oh-my-cassette"
+    assert claude_source["ref"] == RELEASE_CHANNEL_REF
+
+
+def test_release_workflow_fast_forwards_the_release_channel():
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "release-please.yml").read_text("utf-8"))
+    steps = workflow["jobs"]["release-please"]["steps"]
+    release_step = next(step for step in steps if str(step.get("uses", "")).startswith("googleapis/release-please"))
+    assert release_step["id"] == "release", "the push step keys off this step id"
+
+    pushes = [step for step in steps if RELEASE_CHANNEL_REF in str(step.get("run", ""))]
+    assert pushes, "no step advances the release channel; Codex/Claude would pin to a stale tag forever"
+    for step in pushes:
+        assert "steps.release.outputs.release_created" in str(step.get("if", ""))
+    assert workflow["permissions"]["contents"] == "write"
+
+
+def test_opencode_installer_entry_matches_the_project_config_contract():
+    installer = _load_opencode_installer()
+    entry = installer.mcp_server_entry(ROOT)
+    project = _json("opencode.json")["mcp"]["cassette"]
+
+    assert entry["type"] == project["type"]
+    assert entry["environment"] == project["environment"]
+    assert entry["enabled"] is True
+    # The project config uses a repo-relative launcher; the installed one is
+    # absolute, so only the tail is comparable across the two.
+    assert entry["command"][-1] == str(ROOT / "scripts" / "run_local_mcp.py")
+    assert Path(entry["command"][-1]).name == Path(project["command"][-1]).name
+
+
+def test_opencode_installer_merge_preserves_unrelated_user_config():
+    installer = _load_opencode_installer()
+    existing = {
+        "$schema": "https://opencode.ai/config.json",
+        "theme": "dark",
+        "model": "anthropic/claude-opus-5",
+        "mcp": {"jira": {"type": "remote", "url": "https://jira.example.com/mcp"}},
+    }
+    merged = installer.merge_server(existing, installer.mcp_server_entry(ROOT))
+
+    assert merged["theme"] == "dark"
+    assert merged["model"] == "anthropic/claude-opus-5"
+    assert merged["mcp"]["jira"] == existing["mcp"]["jira"]
+    assert merged["mcp"]["cassette"]["environment"]["CASSETTE_MCP_HOST"] == "opencode"
+    # The caller's dicts must not be mutated in place.
+    assert set(existing["mcp"]) == {"jira"}
+
+
+def test_opencode_installer_merge_seeds_an_empty_config():
+    installer = _load_opencode_installer()
+    merged = installer.merge_server({}, installer.mcp_server_entry(ROOT))
+    assert merged["$schema"] == installer.OPENCODE_SCHEMA
+    assert set(merged["mcp"]) == {"cassette"}

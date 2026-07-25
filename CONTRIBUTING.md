@@ -13,6 +13,8 @@ Release Please derives versions and changelog entries from commits on `main`:
 
 PRs are squash-merged using the PR title, so the title must itself be a conventional commit line.
 
+Branch from `main` and target `main`. The `release` branch is machine-owned — the release workflow force-pushes it to each new tag so Codex and Claude install a tested release rather than `main`. Anything committed there is lost at the next release. See [RELEASING.md](RELEASING.md) for the channel map.
+
 ## Development setup
 
 ```bash
