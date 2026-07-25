@@ -1,0 +1,127 @@
+name: 🐛 Plugin bug
+description: Something in the plugin itself is broken — install, auth, MCP tools, transport, or file handling.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        This form is for the **plugin** — the part in this repository. The editing
+        engine that decides shots, pacing, music, and rendering is the separate
+        Cassette service, and problems with the *result* of an edit can't be fixed
+        here. See [SUPPORT.md](../blob/main/SUPPORT.md) if you're unsure which one
+        you have.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: >-
+            This is about the plugin — install, authentication, MCP tools,
+            transport, file handling, or host integration. It is not about the
+            quality of the edit the AI produced.
+          required: true
+        - label: I searched existing issues and discussions for this problem.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        1. Ran `claude plugin install oh-my-cassette@cassette-editor`
+        2. Asked the agent to edit ./footage
+        3. Expected the ingest to start; got `source_path_not_allowed` instead
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options:
+        - Claude Code
+        - Codex
+        - OpenCode
+        - Hermes Agent
+        - Other MCP host
+        - Web demo
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      description: The default is `api`. Pick "not sure" if you never changed it.
+      options:
+        - api (default)
+        - browser
+        - not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it was installed
+      options:
+        - Plugin marketplace (claude/codex plugin install)
+        - Hermes plugin manager
+        - Git checkout / install_plugin.py
+        - Web demo
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version
+      description: >-
+        From `claude plugin details oh-my-cassette@cassette-editor`, or the
+        contents of `version.txt` in a checkout.
+      placeholder: "0.4.2"
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: OS and Python version
+      placeholder: "macOS 15.3, Python 3.13.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnose
+    attributes:
+      label: Diagnostic output
+      description: >-
+        Run the diagnostic for your host and paste the whole output. It reports
+        bootstrap, config, transport, and media-root state, and it does not print
+        credentials.
+
+
+        - Claude Code / Codex / OpenCode: `python3 scripts/diagnose_local_mcp.py`
+
+        - Hermes: `python3 scripts/diagnose_install.py`
+
+
+        Installed through a plugin marketplace and don't have the scripts? Say so
+        here and paste whatever error text you have instead.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error text
+      description: >-
+        Optional. Please redact emails, passwords, tokens, and absolute paths you
+        would rather not share.
+      render: text
+    validations:
+      required: false

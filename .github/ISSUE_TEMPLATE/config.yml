@@ -1,0 +1,23 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🎬 Editing quality — bad cut, odd pacing, wrong music, poor shot choice
+    url: https://github.com/Cassette-Editor/oh-my-cassette/discussions
+    about: >-
+      The editing engine is the Cassette service, not this plugin, so these
+      aren't fixable in this repo. Post the prompt, the inputs, and what you
+      expected in Discussions — that feedback does reach the people tuning it.
+  - name: 🔑 Cassette account, access, or billing
+    url: https://trycassette.online/signup/
+    about: >-
+      Accounts are handled on the Cassette side. This repo only ships the
+      client that talks to it.
+  - name: 💬 Questions, ideas, and showing off your cuts
+    url: https://github.com/Cassette-Editor/oh-my-cassette/discussions
+    about: >-
+      Ask anything here — it's the fastest way to get an answer, and the right
+      place if you're unsure whether something is a bug.
+  - name: 🔒 Security vulnerability
+    url: https://github.com/Cassette-Editor/oh-my-cassette/security/advisories/new
+    about: >-
+      Report privately through a GitHub security advisory. Please don't open a
+      public issue for anything security-sensitive.
