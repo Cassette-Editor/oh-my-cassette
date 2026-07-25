@@ -31,7 +31,6 @@ from .security import redact_for_log, safe_hash_id
 from .tools import (
     _cassette_language_for_session,
     _cassette_model_options,
-    _cassette_model_preference_for_session,
     _cassette_run_job_tool_chain_guard,
     _clear_pending_edit,
     _default_cassette_language_for_platform,
@@ -2448,36 +2447,3 @@ def log_cassette_tool_call(**kwargs) -> None:
             fh.write(line)
     except Exception:
         return None
-
-
-def _cassette_model_selection_completed(session_id: str) -> bool:
-    return bool(_cassette_model_preference_for_session(session_id))
-
-
-def _looks_like_prompt_optimization_accept(text: str) -> bool:
-    normalized = (text or "").strip().lower()
-    normalized = normalized.strip("。.!！ ")
-    if not normalized:
-        return False
-    if _looks_like_prompt_optimization_decline(normalized):
-        return False
-    accept_terms = (
-        "是",
-        "用",
-        "使用",
-        "需要",
-        "优化",
-        "帮我优化",
-        "先优化",
-        "可以",
-        "确认",
-        "好的",
-        "好",
-        "yes",
-        "y",
-        "ok",
-        "okay",
-        "optimize",
-        "use optimization",
-    )
-    return any(term in normalized for term in accept_terms)
