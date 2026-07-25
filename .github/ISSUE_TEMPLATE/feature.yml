@@ -1,0 +1,56 @@
+name: ✨ Plugin feature request
+description: Something the plugin should do — a new tool, a host integration, better ergonomics.
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Requests for **editing capabilities** — new effects, better shot
+        selection, different music behaviour, smarter pacing — are decided by the
+        Cassette service rather than this repository. Those belong in
+        [Discussions](https://github.com/Cassette-Editor/oh-my-cassette/discussions),
+        where they actually reach the right people. This form is for the plugin
+        surface: tools, hosts, config, ergonomics, docs, packaging.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: >-
+            This is about the plugin surface (tools, hosts, config, packaging,
+            ergonomics), not about what the AI editor is capable of producing.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem
+      description: >-
+        Describe the situation you're in, not the solution you have in mind. What
+        are you trying to do, and where does the plugin get in the way?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like instead
+      description: Optional. If you have a concrete shape in mind, sketch it here.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Which host does this affect
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - OpenCode
+        - Hermes Agent
+        - Any MCP host
+        - Web demo
+    validations:
+      required: true

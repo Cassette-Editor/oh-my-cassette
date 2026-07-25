@@ -1,0 +1,41 @@
+name: 📖 Documentation problem
+description: Something in the README or docs is wrong, missing, outdated, or confusing.
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Docs fixes are the easiest contribution to get merged — if you already
+        know what it should say, a pull request is very welcome instead of an
+        issue.
+
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: File and section, or a link to the line.
+      placeholder: "README.md → Quick Start → Requirements"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's wrong
+      description: >-
+        What it says now, and what it should say. If a command didn't work,
+        include the command and the error.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Which version
+      options:
+        - English (README.md)
+        - 简体中文 (README.zh-cn.md)
+        - Both
+        - Other docs
+    validations:
+      required: true

@@ -1,0 +1,17 @@
+# Default owners for everything in this repository.
+* @epc314 @Crimson725
+
+# Packaging and host manifests — breaking these breaks every install path.
+/.claude-plugin/     @epc314 @Crimson725
+/.codex-plugin/      @epc314 @Crimson725
+/plugin.yaml         @epc314 @Crimson725
+/.mcp.json           @epc314 @Crimson725
+/opencode.json       @epc314 @Crimson725
+
+# Release automation and CI.
+/.github/workflows/  @epc314 @Crimson725
+/release-please-config.json    @epc314 @Crimson725
+
+# Security-sensitive surfaces.
+/security.py         @epc314 @Crimson725
+/SECURITY.md         @epc314 @Crimson725
