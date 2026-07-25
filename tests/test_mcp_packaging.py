@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import re
@@ -25,6 +26,9 @@ def _load_opencode_installer():
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
+    # The installer defers its repo imports until a plugin tree is resolved, so
+    # that the script also runs when piped straight from the network.
+    module._load_repo_modules(ROOT)
     return module
 
 
@@ -252,6 +256,77 @@ def test_opencode_installer_refuses_to_rewrite_a_jsonc_config(tmp_path):
     with pytest.raises(installer.ManualStep, match="JSONC"):
         installer.read_config(config)
     assert config.read_text(encoding="utf-8") == original
+
+
+def _tar_with(tmp_path, names, *, symlink_to=None):
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name in names:
+            info = tarfile.TarInfo(name)
+            info.size = 0
+            archive.addfile(info, io.BytesIO(b""))
+        if symlink_to:
+            link = tarfile.TarInfo(symlink_to[0])
+            link.type = tarfile.SYMTYPE
+            link.linkname = symlink_to[1]
+            archive.addfile(link)
+    buffer.seek(0)
+    return tarfile.open(fileobj=buffer, mode="r:gz")
+
+
+def test_opencode_installer_rejects_path_traversal_in_the_downloaded_archive(tmp_path):
+    # The tarball comes off the network, so a traversal member must never land
+    # outside the destination.
+    installer = _load_opencode_installer()
+    dest = tmp_path / "unpack"
+    dest.mkdir()
+    with _tar_with(tmp_path, ["repo/ok.txt", "../escaped.txt"]) as archive:
+        with pytest.raises(SystemExit, match="outside the destination"):
+            installer._safe_extract(archive, dest)
+    assert not (tmp_path / "escaped.txt").exists()
+
+
+def test_opencode_installer_archive_must_have_a_single_root(tmp_path):
+    installer = _load_opencode_installer()
+    dest = tmp_path / "unpack"
+    dest.mkdir()
+    with _tar_with(tmp_path, ["one/a.txt", "two/b.txt"]) as archive:
+        with pytest.raises(SystemExit, match="unexpected archive layout"):
+            installer._safe_extract(archive, dest)
+
+
+def test_opencode_installer_drops_link_members_and_returns_the_root(tmp_path):
+    installer = _load_opencode_installer()
+    dest = tmp_path / "unpack"
+    dest.mkdir()
+    with _tar_with(tmp_path, ["repo/a.txt"], symlink_to=("repo/evil", "/etc/passwd")) as archive:
+        assert installer._safe_extract(archive, dest) == "repo"
+    assert (dest / "repo" / "a.txt").exists()
+    assert not (dest / "repo" / "evil").exists(), "symlink members must be skipped"
+
+
+def test_opencode_installer_refuses_to_overwrite_a_git_checkout(tmp_path):
+    # A tarball unpack over a developer's clone would destroy their work.
+    installer = _load_opencode_installer()
+    checkout = tmp_path / "clone"
+    (checkout / ".git").mkdir(parents=True)
+    with pytest.raises(SystemExit, match="refusing to overwrite"):
+        installer.download_plugin_tree(checkout, "release", dry_run=False)
+    assert (checkout / ".git").exists()
+
+
+def test_opencode_installer_prefers_its_own_checkout_over_downloading(monkeypatch):
+    # Run from a real tree, the installer must register that tree and never
+    # reach the network.
+    installer = _load_opencode_installer()
+    monkeypatch.setattr(
+        installer, "download_plugin_tree", lambda *a, **k: pytest.fail("must not download from a checkout")
+    )
+    args = argparse.Namespace(plugin_dir=None, ref="release", dry_run=False)
+    assert installer.resolve_plugin_root(args) == ROOT
 
 
 def test_opencode_installer_sync_refuses_to_discard_uncommitted_changes(tmp_path, monkeypatch):
