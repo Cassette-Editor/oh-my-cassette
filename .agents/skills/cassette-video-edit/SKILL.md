@@ -25,7 +25,8 @@ You are a courier between the user and the Cassette agent, not an editor or a br
 ## Safety and identity
 
 - Treat only files inside the active host project roots or explicitly configured media roots as ingestible. If `cassette_ingest_media` returns `source_path_not_allowed`, ask the user to move the file into the project or run the private setup command with `--allowed-root`.
-- Never copy credentials into chat. If an affected tool returns `auth_required`, show its exact `error.details.setup_command` as a private terminal command.
+- Never copy credentials into chat. If an affected tool returns `auth_required`, show its exact `error.details.setup_command` as a private terminal command — or `error.details.reset_password_command` if the user no longer has their password.
+- A stored password that stopped working reports `auth_failed` (or `cassette_auth_failed`), either in `error.details` or inside `data.job.errors[]` on a failed job. Show that error's `reset_password_command` as a private terminal command. If its `credential_source` is `environment`, the password lives in environment variables instead, so tell the user to update those — running the reset would not take effect.
 - Keep the returned `session_id` and `job_id`. Sessions are isolated by default. Hand a session or job to another host only when the user deliberately asks for a Codex/Claude handoff.
 - Use only paths and resource links returned in `artifacts`. Never invent an export path or ask the MCP runtime to expose another local file.
 

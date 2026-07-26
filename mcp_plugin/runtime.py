@@ -19,6 +19,11 @@ from .state import InvalidTransition, StateStore, next_action_for, phase_from_jo
 
 WAIT_TICK_SEC = 5.0
 
+# A stored password that no longer works. The API transport raises auth_failed off
+# /api/agent-auth/verify; the browser transport raises cassette_auth_failed off its login
+# timeout. Both mean the same thing to the user, and neither is fixed by re-running setup.
+STALE_AUTH_CODES = frozenset({"auth_failed", "cassette_auth_failed"})
+
 
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
@@ -69,11 +74,15 @@ class LocalMcpRuntime:
                 session_id=session_id,
             )
         if not credentials.get("email") or not credentials.get("password"):
-            command = runtime_config.setup_command(PLUGIN_ROOT)
+            # Two ways out, and the user knows which applies: run setup if they still have
+            # their password, reset if they do not. Offering only setup strands the second.
             return self._failure(
                 "auth_required",
                 "Cassette authentication is required for this operation.",
-                details={"setup_command": command},
+                details={
+                    "setup_command": runtime_config.setup_command(PLUGIN_ROOT),
+                    "reset_password_command": runtime_config.reset_password_command(PLUGIN_ROOT),
+                },
                 session_id=session_id,
             )
         selected = str(os.getenv("CASSETTE_TRANSPORT", "api") or "api").strip().lower()
@@ -138,6 +147,45 @@ class LocalMcpRuntime:
             return SessionPhase.NEW
         return self.state.load(session_id).phase
 
+    def _stale_auth_hint(self) -> dict[str, str]:
+        """How to recover from a stored password that no longer works.
+
+        credential_source rides along because the setup script cannot see it: it runs in the
+        user's terminal, the MCP host runs with its own environment. If the host resolves
+        credentials from env vars, rewriting the private config would leave those env vars
+        shadowing the new password, so only this side can tell the user which one to fix.
+        """
+        hint = {"reset_password_command": runtime_config.reset_password_command(PLUGIN_ROOT)}
+        try:
+            hint["credential_source"] = str(runtime_config.load_credentials().get("source") or "")
+        except runtime_config.RuntimeConfigError:
+            pass
+        return hint
+
+    def _annotate_stale_auth_errors(self, data: dict[str, Any]) -> None:
+        """Attach the recovery hint to stale-auth errors reported inside a job payload.
+
+        cassette_run_job defaults to wait=False and cassette_job_status reports even a failed
+        job as ok=True with the failure sitting in data.job.errors, so _failure never runs for
+        the ordinary run_job path. Without this the most common way to hit a dead password is
+        also the one way that offers no way out.
+        """
+        job = data.get("job")
+        errors = job.get("errors") if isinstance(job, dict) else None
+        if not isinstance(errors, list):
+            return
+        hint: dict[str, str] | None = None
+        for error in errors:
+            if not isinstance(error, dict) or str(error.get("code") or "") not in STALE_AUTH_CODES:
+                continue
+            if hint is None:  # only read the credential file when there is something to annotate
+                hint = self._stale_auth_hint()
+            details = error.get("details")
+            if not isinstance(details, dict):
+                details = {}
+                error["details"] = details
+            details.update(hint)
+
     def _failure(
         self,
         code: str,
@@ -150,12 +198,15 @@ class LocalMcpRuntime:
         phase: SessionPhase | None = None,
     ) -> ToolEnvelope:
         selected_phase = phase or self._load_state_phase(session_id)
+        merged_details = dict(details or {})
+        if code in STALE_AUTH_CODES:
+            merged_details.update(self._stale_auth_hint())
         return ToolEnvelope(
             ok=False,
             error=ToolErrorInfo(
                 code=code,
                 message=str(self._redact(message)),
-                details=self._redact(details or {}),
+                details=self._redact(merged_details),
                 recoverable=recoverable,
             ),
             session_id=session_id,
@@ -288,6 +339,7 @@ class LocalMcpRuntime:
                 phase=selected_phase,
             )
         data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        self._annotate_stale_auth_errors(data)
         editor_url = data.get("editor_url") if isinstance(data.get("editor_url"), str) else None
         return ToolEnvelope(
             ok=True,

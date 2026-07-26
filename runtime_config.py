@@ -324,6 +324,10 @@ def browser_setup_command(plugin_root: Path | None = None) -> str:
     return setup_command(plugin_root) + " --with-browser"
 
 
+def reset_password_command(plugin_root: Path | None = None) -> str:
+    return setup_command(plugin_root) + " --reset-password"
+
+
 def configure_mcp_process_environment() -> list[RuntimeConfigError]:
     """Set MCP-only process defaults without preventing server initialization.
 
