@@ -109,7 +109,7 @@ codex plugin add oh-my-cassette@cassette-editor
 
 <table width="100%">
 <tr><td>
-  <video src="https://github.com/user-attachments/assets/7f747c99-7ecf-40ac-8854-857d4220ff4e" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/59ea9038-0cec-4d95-beef-6d871a663292" controls width="100%"></video>
 </td></tr>
 </table>
 
@@ -127,7 +127,7 @@ codex plugin add oh-my-cassette@cassette-editor
 
 <table align="center" width="70%">
 <tr><td>
-  <video src="https://github.com/user-attachments/assets/34b966af-ef5f-41c6-94f9-a91285cc5f9f" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/e43783d6-7b14-4ff9-a530-c9a12d3a6afa" controls width="100%"></video>
 </td></tr>
 </table>
 
