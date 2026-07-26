@@ -176,3 +176,173 @@ def test_windows_skips_posix_permission_enforcement(tmp_path, monkeypatch):
     os.chmod(runtime_config.credentials_path(), 0o666)
     os.chmod(config, 0o777)
     assert runtime_config.load_credentials()["email"] == "a"
+
+
+def _reset_args(**overrides) -> argparse.Namespace:
+    base = dict(
+        email=None,
+        api_url=None,
+        transport="api",
+        allowed_root=[],
+        import_hermes=None,
+        with_browser=False,
+        use_environment=False,
+        reset_password=True,
+    )
+    base.update(overrides)
+    return argparse.Namespace(**base)
+
+
+def _seed_credentials(password: str = "stored-secret", *, full_api_access: bool = False) -> None:
+    runtime_config.write_protected_json(
+        runtime_config.credentials_path(),
+        {
+            "email": "person@example.test",
+            "password": password,
+            "full_api_access": full_api_access,
+            "verified_at": "2026-01-01T00:00:00Z",
+            "api_url": "https://stale.test",
+        },
+    )
+
+
+def _explode(*_args, **_kwargs):
+    raise AssertionError("must not be reached")
+
+
+def test_reset_password_refuses_environment_sourced_credentials(local_config, monkeypatch):
+    # The setup script sees the terminal env; the MCP host has its own. Writing the private
+    # config here would leave these variables shadowing the new password, so refuse before
+    # anything destructive happens.
+    monkeypatch.setenv("CASSETTE_AUTH_EMAIL", "person@example.test")
+    monkeypatch.setenv("CASSETTE_AUTH_PASSWORD", "from-env")
+    monkeypatch.setattr(setup_local_mcp, "_post_json", _explode)
+    monkeypatch.setattr(setup_local_mcp, "verify_credentials", _explode)
+
+    with pytest.raises(setup_local_mcp.SetupError) as excinfo:
+        setup_local_mcp.reset_password(_reset_args())
+
+    assert "CASSETTE_AUTH_PASSWORD" in str(excinfo.value)
+    assert not runtime_config.credentials_path().exists()
+
+
+def test_reset_password_rotates_in_place_without_prompting(local_config, monkeypatch):
+    _seed_credentials("still-works", full_api_access=False)
+    monkeypatch.setattr(
+        setup_local_mcp,
+        "verify_credentials",
+        lambda *_a, **_k: {"full_api_access": True, "access_token": "tok-123"},
+    )
+    calls = []
+
+    def post(api_url, path, payload, *, token=None, **_kwargs):
+        calls.append((path, token))
+        return 200, {"password": "  rotated-secret  ", "email": "person@example.test"}, None
+
+    monkeypatch.setattr(setup_local_mcp, "_post_json", post)
+    monkeypatch.setattr(setup_local_mcp.getpass, "getpass", _explode)
+
+    result = setup_local_mcp.reset_password(_reset_args())
+
+    assert result == "rotated"
+    assert calls == [("/api/agent-auth/rotate-password", "tok-123")]
+    stored = runtime_config.read_protected_json(runtime_config.credentials_path())
+    assert stored["password"] == "rotated-secret"
+    # Entitlement is re-read rather than carried forward, so an upgraded account is repaired.
+    assert stored["full_api_access"] is True
+
+
+def test_reset_password_falls_back_to_email_when_the_stored_password_is_dead(local_config, monkeypatch):
+    _seed_credentials("already-rotated-elsewhere")
+
+    def verify(_api_url, _email, password, **_kwargs):
+        if password == "already-rotated-elsewhere":
+            raise setup_local_mcp.CredentialsRejected("nope")
+        return {"full_api_access": True, "access_token": "tok-456"}
+
+    monkeypatch.setattr(setup_local_mcp, "verify_credentials", verify)
+    paths = []
+
+    def post(_api_url, path, _payload, **_kwargs):
+        paths.append(path)
+        return 200, {"sent": True}, None
+
+    monkeypatch.setattr(setup_local_mcp, "_post_json", post)
+    monkeypatch.setattr(setup_local_mcp.getpass, "getpass", lambda _prompt: "  emailed-secret  ")
+
+    result = setup_local_mcp.reset_password(_reset_args())
+
+    assert result == "emailed"
+    # The rotate route needs a session the dead password cannot mint, so it is never tried.
+    assert paths == ["/api/agent-auth/request-code"]
+    stored = runtime_config.read_protected_json(runtime_config.credentials_path())
+    assert stored["password"] == "emailed-secret"
+
+
+def test_reset_password_does_not_fall_back_when_the_api_is_unreachable(local_config, monkeypatch):
+    # A transport failure must not be read as "password is dead" — that would replace a
+    # perfectly good account password because the network blipped.
+    _seed_credentials("still-works")
+
+    def verify(*_a, **_k):
+        raise setup_local_mcp.SetupError("Could not reach the Cassette API (URLError).")
+
+    monkeypatch.setattr(setup_local_mcp, "verify_credentials", verify)
+    monkeypatch.setattr(setup_local_mcp, "_post_json", _explode)
+    monkeypatch.setattr(setup_local_mcp.getpass, "getpass", _explode)
+
+    with pytest.raises(setup_local_mcp.SetupError):
+        setup_local_mcp.reset_password(_reset_args())
+
+    assert runtime_config.load_credentials()["password"] == "still-works"
+
+
+def test_reset_password_stops_when_the_email_is_not_allowlisted(local_config, monkeypatch):
+    _seed_credentials("")
+    monkeypatch.setattr(setup_local_mcp, "verify_credentials", _explode)
+    # The server answers 200 with sent=false so it never confirms who holds an account.
+    monkeypatch.setattr(
+        setup_local_mcp, "_post_json", lambda *_a, **_k: (200, {"sent": False, "reason": "not_allowed"}, None)
+    )
+    monkeypatch.setattr(setup_local_mcp.getpass, "getpass", _explode)
+
+    with pytest.raises(setup_local_mcp.SetupError, match="not authorised"):
+        setup_local_mcp.reset_password(_reset_args())
+
+
+def test_reset_password_stores_no_session_tokens(local_config, monkeypatch):
+    _seed_credentials("still-works")
+    monkeypatch.setattr(
+        setup_local_mcp,
+        "verify_credentials",
+        lambda *_a, **_k: {"full_api_access": True, "access_token": "tok-123"},
+    )
+    monkeypatch.setattr(setup_local_mcp, "_post_json", lambda *_a, **_k: (200, {"password": "rotated-secret"}, None))
+
+    setup_local_mcp.reset_password(_reset_args())
+
+    stored = runtime_config.read_protected_json(runtime_config.credentials_path())
+    # An exact key set, not two `not in` checks: this also fails if some future field starts
+    # smuggling a secret onto disk.
+    assert set(stored) == {"email", "password", "full_api_access", "verified_at", "api_url"}
+
+
+def test_reset_password_uses_the_settings_api_url_not_the_stored_copy(local_config, monkeypatch):
+    _seed_credentials("still-works")  # carries api_url https://stale.test
+    runtime_config.write_protected_json(
+        runtime_config.settings_path(), {"transport": "browser", "api_url": "https://settings.test"}
+    )
+    seen = {}
+
+    def verify(api_url, *_a, **_k):
+        seen["api_url"] = api_url
+        return {"full_api_access": True, "access_token": "tok-123"}
+
+    monkeypatch.setattr(setup_local_mcp, "verify_credentials", verify)
+    monkeypatch.setattr(setup_local_mcp, "_post_json", lambda *_a, **_k: (200, {"password": "rotated-secret"}, None))
+
+    setup_local_mcp.reset_password(_reset_args())
+
+    assert seen["api_url"] == "https://settings.test"
+    # A reset replaces a password; it must not flip the user's transport back to api.
+    assert runtime_config.load_settings()["transport"] == "browser"
