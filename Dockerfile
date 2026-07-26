@@ -1,4 +1,3 @@
-# Glama inspection image: must start and answer initialize + tools/list offline.
 FROM python:3.13-slim
 
 RUN apt-get update \
@@ -8,10 +7,18 @@ RUN apt-get update \
 WORKDIR /app
 COPY . .
 
-# The bootstrapped runtime lands under $HOME, so build and run must agree on it.
-ENV HOME=/root
+# Install the locked runtime into the image's own Python. The launcher's
+# default path builds a venv under $HOME instead, which needs network on
+# first start and breaks in an offline inspection sandbox.
+RUN pip install --no-cache-dir --requirement requirements-mcp.lock
 
-# ponytail: bake the locked runtime at build time so first start needs no network
-RUN python scripts/run_local_mcp.py --bootstrap-only
+ENV CASSETTE_MCP_SKIP_BOOTSTRAP=1
+
+# The server creates a private 0700 config dir under $HOME at startup and
+# requires it to be owned by the running user, so leave it uncreated and
+# only guarantee a writable parent. Sticky-writable like /tmp, so the image
+# works whether the sandbox runs it as root or as an arbitrary UID.
+RUN mkdir -p /data && chmod 1777 /data
+ENV HOME=/data
 
 CMD ["python", "scripts/run_local_mcp.py"]
