@@ -277,7 +277,7 @@ def reset_password(args: argparse.Namespace) -> dict:
                     full_api_access=bool(verification["full_api_access"]),
                     api_url=api_url,
                 )
-                return {"credential_path": str(runtime_config.credentials_path()), "delivery": "rotated"}
+                return {"config_path": str(runtime_config.credentials_path()), "delivery": "rotated"}
             # A deployment without the rotate route (or one that refused) still resets by email.
 
     print(f"Sending a new password to {email}. This replaces it everywhere, including other machines.")
@@ -295,7 +295,7 @@ def reset_password(args: argparse.Namespace) -> dict:
         full_api_access=bool(verification["full_api_access"]),
         api_url=api_url,
     )
-    return {"credential_path": str(runtime_config.credentials_path()), "delivery": "emailed"}
+    return {"config_path": str(runtime_config.credentials_path()), "delivery": "emailed"}
 
 
 def configure(args: argparse.Namespace) -> dict:
@@ -362,7 +362,7 @@ def configure(args: argparse.Namespace) -> dict:
             raise SetupError(f"Credentials were saved, but optional browser setup failed: {exc}") from exc
 
     return {
-        "credential_path": str(runtime_config.credentials_path()),
+        "config_path": str(runtime_config.credentials_path()),
         "transport": settings["transport"],
         "full_api_access": verification["full_api_access"],
     }
@@ -437,11 +437,11 @@ def main() -> None:
         raise SystemExit(1) from exc
     if args.reset_password:
         if result["delivery"] == "rotated":
-            print(f"Password rotated. Updated credentials saved privately at {result['credential_path']}.")
+            print(f"Password rotated. Updated credentials saved privately at {result['config_path']}.")
         else:
-            print(f"New password stored privately at {result['credential_path']}.")
+            print(f"New password stored privately at {result['config_path']}.")
         return
-    print(f"Verified credentials saved privately at {result['credential_path']}.")
+    print(f"Verified credentials saved privately at {result['config_path']}.")
     print(f"Selected transport: {result['transport']}.")
     if not result["full_api_access"] and result["transport"] == "api":
         print("This account lacks full API access. Run this command again with --with-browser.")
