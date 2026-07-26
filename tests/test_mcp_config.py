@@ -244,7 +244,7 @@ def test_reset_password_rotates_in_place_without_prompting(local_config, monkeyp
 
     result = setup_local_mcp.reset_password(_reset_args())
 
-    assert result["delivery"] == "rotated"
+    assert result == "rotated"
     assert calls == [("/api/agent-auth/rotate-password", "tok-123")]
     stored = runtime_config.read_protected_json(runtime_config.credentials_path())
     assert stored["password"] == "rotated-secret"
@@ -272,7 +272,7 @@ def test_reset_password_falls_back_to_email_when_the_stored_password_is_dead(loc
 
     result = setup_local_mcp.reset_password(_reset_args())
 
-    assert result["delivery"] == "emailed"
+    assert result == "emailed"
     # The rotate route needs a session the dead password cannot mint, so it is never tried.
     assert paths == ["/api/agent-auth/request-code"]
     stored = runtime_config.read_protected_json(runtime_config.credentials_path())

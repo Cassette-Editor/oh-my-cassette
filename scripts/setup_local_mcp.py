@@ -228,7 +228,7 @@ def _request_new_password(api_url: str, email: str) -> None:
         )
 
 
-def reset_password(args: argparse.Namespace) -> dict:
+def reset_password(args: argparse.Namespace) -> str:
     """Replace the account password and store the new one privately.
 
     Two routes. If the stored password still works, the account is rotated through an
@@ -277,7 +277,7 @@ def reset_password(args: argparse.Namespace) -> dict:
                     full_api_access=bool(verification["full_api_access"]),
                     api_url=api_url,
                 )
-                return {"config_path": str(runtime_config.credentials_path()), "delivery": "rotated"}
+                return "rotated"
             # A deployment without the rotate route (or one that refused) still resets by email.
 
     print(f"Sending a new password to {email}. This replaces it everywhere, including other machines.")
@@ -295,7 +295,7 @@ def reset_password(args: argparse.Namespace) -> dict:
         full_api_access=bool(verification["full_api_access"]),
         api_url=api_url,
     )
-    return {"config_path": str(runtime_config.credentials_path()), "delivery": "emailed"}
+    return "emailed"
 
 
 def configure(args: argparse.Namespace) -> dict:
@@ -362,7 +362,6 @@ def configure(args: argparse.Namespace) -> dict:
             raise SetupError(f"Credentials were saved, but optional browser setup failed: {exc}") from exc
 
     return {
-        "config_path": str(runtime_config.credentials_path()),
         "transport": settings["transport"],
         "full_api_access": verification["full_api_access"],
     }
@@ -424,26 +423,25 @@ def _reject_reset_password_conflicts(args: argparse.Namespace) -> None:
 
 def main() -> None:
     args = parse_args()
+    # The two paths keep separate result variables. Sharing one made every read of it a read
+    # of a value that had passed through the password flow, which is both harder to follow
+    # and what CodeQL's clear-text-logging rule objected to.
     try:
         if args.reset_password:
             _reject_reset_password_conflicts(args)
-            result = reset_password(args)
-        else:
-            result = configure(args)
+            delivery = reset_password(args)
+            print("Password rotated." if delivery == "rotated" else "New password stored.")
+            print(f"Saved at {runtime_config.credentials_path()}.")
+            return
+        setup = configure(args)
     except (SetupError, runtime_config.RuntimeConfigError) as exc:
         path = getattr(exc, "path", None)
         location = f" ({path})" if path else ""
         print(f"oh-my-cassette setup: {exc}{location}", file=sys.stderr)
         raise SystemExit(1) from exc
-    if args.reset_password:
-        if result["delivery"] == "rotated":
-            print(f"Password rotated. Updated credentials saved privately at {result['config_path']}.")
-        else:
-            print(f"New password stored privately at {result['config_path']}.")
-        return
-    print(f"Verified credentials saved privately at {result['config_path']}.")
-    print(f"Selected transport: {result['transport']}.")
-    if not result["full_api_access"] and result["transport"] == "api":
+    print(f"Verified credentials saved privately at {runtime_config.credentials_path()}.")
+    print(f"Selected transport: {setup['transport']}.")
+    if not setup["full_api_access"] and setup["transport"] == "api":
         print("This account lacks full API access. Run this command again with --with-browser.")
 
 
