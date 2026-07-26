@@ -387,6 +387,20 @@ python3 scripts/setup_local_mcp.py --import-hermes
 
 The setup command creates config directories with mode `0700` and credential files with mode `0600`, rejects symlinks and permissive files, and never persists access or refresh tokens. If the account does not have full API access, setup reports the optional browser path instead of silently changing transports.
 
+### Resetting the password
+
+If the stored password stops working, `auth_required` and `auth_failed` both carry the command that resets it:
+
+```bash
+python3 scripts/setup_local_mcp.py --reset-password
+```
+
+This replaces the account password everywhere, including other machines, and saves the new one to `credentials.json`:
+
+- macOS: `~/Library/Application Support/Oh My Cassette/credentials.json`
+- Linux: `~/.config/oh-my-cassette/credentials.json` (or under `XDG_CONFIG_HOME` when set)
+- Windows: `%APPDATA%\Oh My Cassette\credentials.json`
+
 ### Guided editing flow
 
 1. Ask Codex or Claude to edit one or more media files in the current project.

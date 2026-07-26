@@ -300,3 +300,67 @@ def test_run_job_multi_turn_phase_gating(tmp_path, monkeypatch):
     blocked = runtime.run_job({"message": "turn", "session_id": "session4", "wait": False})
     assert blocked.ok is False
     assert blocked.error.code == "invalid_transition"
+
+
+def test_stale_password_failure_carries_the_reset_password_command(tmp_path, monkeypatch):
+    runtime = _runtime(tmp_path, monkeypatch)
+    result = runtime._envelope_from_core(
+        {"ok": False, "error": {"code": "auth_failed", "message": "Cassette sign-in failed (HTTP 401)"}},
+        session_id="session",
+    )
+    assert result.ok is False
+    assert result.error.details["reset_password_command"].endswith("setup_local_mcp.py --reset-password")
+    # The setup script cannot see the host's environment, so only this side can tell the user
+    # whether to rewrite the private config or fix env vars.
+    assert result.error.details["credential_source"] == "local_config"
+
+
+def test_browser_auth_failure_also_carries_the_reset_password_command(tmp_path, monkeypatch):
+    runtime = _runtime(tmp_path, monkeypatch)
+    result = runtime._envelope_from_core(
+        {"ok": False, "error": {"code": "cassette_auth_failed", "message": "login timed out"}},
+        session_id="session",
+    )
+    assert result.error.details["reset_password_command"].endswith("--reset-password")
+
+
+def test_failed_job_status_surfaces_the_reset_password_command(tmp_path, monkeypatch):
+    # cassette_run_job defaults to wait=False and cassette_job_status reports even a failed job
+    # as ok=True, so _failure never runs here. This is the ordinary way a user meets a dead
+    # password, and without the annotation it is the one path offering no way out.
+    runtime = _runtime(tmp_path, monkeypatch)
+    job = jobs.create_job(
+        session_hash="hash",
+        prompt="edit",
+        instruction=None,
+        asset_paths=[],
+        options={"cassette_session_id": "session"},
+    )
+    jobs.update_job(
+        job["job_id"],
+        status="failed",
+        errors=[{"code": "auth_failed", "message": "Cassette sign-in failed (HTTP 401)"}],
+    )
+
+    result = runtime.job_status({"job_id": job["job_id"], "limit": 10})
+
+    assert result.ok is True
+    errors = result.data["job"]["errors"]
+    assert errors[-1]["details"]["reset_password_command"].endswith("--reset-password")
+
+
+def test_successful_job_status_is_not_annotated(tmp_path, monkeypatch):
+    runtime = _runtime(tmp_path, monkeypatch)
+    job = jobs.create_job(
+        session_hash="hash",
+        prompt="edit",
+        instruction=None,
+        asset_paths=[],
+        options={"cassette_session_id": "session"},
+    )
+    jobs.update_job(job["job_id"], status="running")
+
+    result = runtime.job_status({"job_id": job["job_id"], "limit": 10})
+
+    assert result.ok is True
+    assert result.data["job"].get("errors") in (None, [])

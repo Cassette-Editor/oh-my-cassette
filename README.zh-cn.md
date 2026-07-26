@@ -375,6 +375,20 @@ python3 scripts/setup_local_mcp.py --import-hermes
 
 设置命令会以 `0700` 权限创建配置目录、以 `0600` 权限保存凭据文件，并拒绝符号链接或权限过宽的文件。访问令牌和刷新令牌只缓存在内存中，不会持久化。如果账号没有完整 API 权限，设置程序会提示可选的浏览器方案，而不是静默切换传输方式。
 
+### 重置密码
+
+如果保存的密码失效，`auth_required` 与 `auth_failed` 都会附带重置命令：
+
+```bash
+python3 scripts/setup_local_mcp.py --reset-password
+```
+
+该命令会在所有设备上替换账号密码，并把新密码保存到 `credentials.json`：
+
+- macOS：`~/Library/Application Support/Oh My Cassette/credentials.json`
+- Linux：`~/.config/oh-my-cassette/credentials.json`（设置了 `XDG_CONFIG_HOME` 时以该目录为准）
+- Windows：`%APPDATA%\Oh My Cassette\credentials.json`
+
 ### 引导式剪辑流程
 
 1. 让 Codex 或 Claude 剪辑当前项目中的一个或多个媒体文件。
