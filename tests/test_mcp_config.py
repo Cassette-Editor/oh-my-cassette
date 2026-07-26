@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -188,6 +190,7 @@ def _reset_args(**overrides) -> argparse.Namespace:
         with_browser=False,
         use_environment=False,
         reset_password=True,
+        no_auto_update=False,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -346,3 +349,74 @@ def test_reset_password_uses_the_settings_api_url_not_the_stored_copy(local_conf
     assert seen["api_url"] == "https://settings.test"
     # A reset replaces a password; it must not flip the user's transport back to api.
     assert runtime_config.load_settings()["transport"] == "browser"
+
+
+def _claude_settings(tmp_path, monkeypatch, payload: dict) -> Path:
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    path = setup_local_mcp.claude_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def _installed_marketplace() -> dict:
+    return {"source": {"source": "github", "repo": "Cassette-Editor/oh-my-cassette"}}
+
+
+def test_claude_auto_update_opt_in_edits_only_the_marketplace_entry(tmp_path, monkeypatch):
+    path = _claude_settings(
+        tmp_path,
+        monkeypatch,
+        {
+            "theme": "dark",
+            "extraKnownMarketplaces": {
+                "other": _installed_marketplace(),
+                "cassette-editor": _installed_marketplace(),
+            },
+        },
+    )
+
+    message = setup_local_mcp.enable_claude_auto_update(skip=False, assume_yes=True)
+
+    settings = json.loads(path.read_text(encoding="utf-8"))
+    assert settings["extraKnownMarketplaces"]["cassette-editor"]["autoUpdate"] is True
+    assert settings["extraKnownMarketplaces"]["cassette-editor"]["source"] == _installed_marketplace()["source"]
+    # Every unrelated setting survives the read-modify-write.
+    assert settings["theme"] == "dark"
+    assert settings["extraKnownMarketplaces"]["other"] == _installed_marketplace()
+    assert "cassette-editor" in message
+
+
+def test_claude_auto_update_opt_in_skips_when_the_marketplace_is_absent(tmp_path, monkeypatch):
+    # No cassette-editor entry means Claude Code is not the host, or the plugin came from
+    # somewhere else; the setup script must never create the marketplace itself.
+    path = _claude_settings(tmp_path, monkeypatch, {"extraKnownMarketplaces": {"other": _installed_marketplace()}})
+    before = path.read_text(encoding="utf-8")
+
+    assert setup_local_mcp.enable_claude_auto_update(skip=False, assume_yes=True) == ""
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_claude_auto_update_opt_in_is_a_no_op_without_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    assert setup_local_mcp.enable_claude_auto_update(skip=False, assume_yes=True) == ""
+    assert not setup_local_mcp.claude_settings_path().exists()
+
+
+def test_claude_auto_update_opt_out_leaves_settings_untouched(tmp_path, monkeypatch):
+    path = _claude_settings(
+        tmp_path, monkeypatch, {"extraKnownMarketplaces": {"cassette-editor": _installed_marketplace()}}
+    )
+    before = path.read_text(encoding="utf-8")
+
+    message = setup_local_mcp.enable_claude_auto_update(skip=True, assume_yes=True)
+
+    assert "--no-auto-update" in message
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_reset_password_rejects_the_auto_update_flag(local_config):
+    args = _reset_args()
+    args.no_auto_update = True
+    with pytest.raises(setup_local_mcp.SetupError):
+        setup_local_mcp._reject_reset_password_conflicts(args)

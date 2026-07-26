@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import mcp_plugin
 from cassette import register
 
 
@@ -42,7 +43,18 @@ def test_dual_manifests_and_marketplaces_have_matching_identity_and_version():
     assert codex["name"] == claude["name"] == "oh-my-cassette"
     assert codex_market["name"] == claude_market["name"] == "cassette-editor"
     assert codex_market["plugins"][0]["name"] == claude_market["plugins"][0]["name"] == codex["name"]
-    versions = {codex["version"], claude["version"], claude_market["plugins"][0]["version"], hermes["version"]}
+    # Every version-bearing file, not a subset: Claude and Codex both key their plugin
+    # cache on the manifest version, so one file left behind on a release means those
+    # users silently never receive the update. version.txt is what the runtime's
+    # staleness check compares against the release channel.
+    versions = {
+        codex["version"],
+        claude["version"],
+        claude_market["plugins"][0]["version"],
+        hermes["version"],
+        (ROOT / "version.txt").read_text("utf-8").strip(),
+        mcp_plugin.__version__,
+    }
     assert len(versions) == 1
     assert re.fullmatch(r"\d+\.\d+\.\d+", versions.pop())
 

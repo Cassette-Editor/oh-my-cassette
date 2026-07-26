@@ -25,3 +25,14 @@ jobs:
       - name: Fast-forward the release channel to the new tag
         if: ${{ steps.release.outputs.release_created }}
         run: git push --force origin HEAD:release
+
+      # Everything downstream reads this branch: both marketplaces pin ref `release`, and
+      # the runtime's staleness check fetches release/version.txt. A channel left behind
+      # means nobody is offered the release that was just tagged.
+      - name: Verify the release channel serves the new tag
+        if: ${{ steps.release.outputs.release_created }}
+        run: |
+          tag_sha="$(git rev-parse HEAD)"
+          channel_sha="$(git ls-remote origin refs/heads/release | cut -f1)"
+          test "$tag_sha" = "$channel_sha"
+          test "$(cat version.txt)" = "${{ steps.release.outputs.version }}"
