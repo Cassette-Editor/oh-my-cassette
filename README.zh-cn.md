@@ -273,6 +273,8 @@ claude plugin install oh-my-cassette@cassette-editor
 claude plugin details oh-my-cassette@cassette-editor
 ```
 
+给插件市场开启自动更新后，Claude Code 就会自动把插件保持在最新版本，见[更新](#更新)。
+
 ### OpenCode
 
 OpenCode 的插件管理器只安装 npm 包，而且它的插件无法注册 MCP 服务，因此没有可添加的插件市场条目。改用一条命令：
@@ -477,21 +479,54 @@ python3 scripts/setup_local_mcp.py --with-browser
 
 ## 更新
 
-Codex 更新方式：
+插件每天检查一次有没有新版本。有的话会提醒你一次，并问你要不要它直接帮你更新。不需要就设置 `CASSETTE_UPDATE_CHECK=0`。
+
+| 宿主 | 自动更新 | 手动更新 |
+| --- | --- | --- |
+| Claude Code | 支持，需先开启（见下） | `claude plugin marketplace update cassette-editor && claude plugin update oh-my-cassette@cassette-editor` |
+| Codex | 只自动刷新插件市场 | `codex plugin add oh-my-cassette@cassette-editor` |
+| Hermes | 不支持 | `hermes plugins update cassette && hermes gateway restart` |
+| OpenCode | 不支持 | 重新执行安装命令 |
+
+### Claude Code：自动更新
+
+Claude Code 会在会话开始后自动更新插件，然后提示你运行 `/reload-plugins`。第三方插件市场默认不开启，开启一次即可。运行 `scripts/setup_local_mcp.py` 时它会问你要不要开（加 `--no-auto-update` 跳过）；也可以自己在 `/plugin` → **Marketplaces** → `cassette-editor` → **Enable auto-update** 里开启，或写进 `~/.claude/settings.json`：
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "cassette-editor": {
+      "source": { "source": "github", "repo": "Cassette-Editor/oh-my-cassette" },
+      "autoUpdate": true
+    }
+  }
+}
+```
+
+写进 `settings.json` 后以这里为准，以后想关掉就改回这个文件。
+
+Claude Code 的 `DISABLE_AUTOUPDATER` 会关掉包括插件在内的所有自动更新；如果只想自己管 Claude Code 本身、但保留插件自动更新，再加上 `FORCE_AUTOUPDATE_PLUGINS=1`。
+
+### Codex
+
+Codex 会自动刷新插件市场，但不会自动装上新版本，执行一条命令即可：
 
 ```bash
-codex plugin marketplace upgrade cassette-editor
+codex plugin marketplace upgrade cassette-editor   # 插件市场没刷新时才需要
 codex plugin add oh-my-cassette@cassette-editor
 ```
 
-Claude Code 更新方式：
+### OpenCode
+
+重新执行安装命令即可，安装和更新是同一条命令：
 
 ```bash
-claude plugin marketplace update cassette-editor
-claude plugin update oh-my-cassette@cassette-editor
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/release/scripts/install_opencode.py | python3 -
 ```
 
-本地启动器会在下次运行时自动更新由插件管理、依赖版本锁定的虚拟环境。浏览器组件仍只在明确要求时安装。
+以上任一方式更新后，本地启动器都会在下次运行时自动更新由插件管理、依赖版本锁定的虚拟环境。浏览器组件仍只在明确要求时安装。
+
+### Hermes
 
 如果是通过 Hermes 插件管理器安装的：
 

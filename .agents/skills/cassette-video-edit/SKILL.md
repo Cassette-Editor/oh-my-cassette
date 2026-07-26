@@ -30,6 +30,14 @@ You are a courier between the user and the Cassette agent, not an editor or a br
 - Keep the returned `session_id` and `job_id`. Sessions are isolated by default. Hand a session or job to another host only when the user deliberately asks for a Codex/Claude handoff.
 - Use only paths and resource links returned in `artifacts`. Never invent an export path or ask the MCP runtime to expose another local file.
 
+## Staying current
+
+The MCP `instructions` carry an `UPDATE AVAILABLE:` line when a newer Oh My Cassette release exists. When they do:
+
+- Mention it once per session, with both version numbers, and then offer to run the command the line names.
+- Run that command only after the user explicitly agrees, and never re-offer in the same session. It replaces the plugin on disk, so tell the user the new version applies after the host reloads (`/reload-plugins` in Claude Code, a new task in Codex).
+- Never fabricate a version or an update command; if the line is absent, the install is current and the subject does not come up.
+
 ## Conversational editing (multi-turn)
 
 One session is one continuous conversation with the Cassette agent on one persistent thread — the agent remembers every previous turn, and the `editor_url` deep link stays the same for the whole session.
