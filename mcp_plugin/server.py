@@ -38,6 +38,7 @@ from .models import (
     ToolEnvelope,
 )
 from .runtime import LocalMcpRuntime
+from . import update_check
 
 
 @dataclass
@@ -111,6 +112,8 @@ class ArtifactFastMCP(FastMCP[McpLifespanContext]):
 
 mcp = ArtifactFastMCP(
     "cassette",
+    # The trailing update_check.notice() is empty unless a newer release is already cached on
+    # disk. Only Claude Code updates plugins on its own, and only when the user enabled it.
     instructions=(
         "Local video-editing MCP runtime for Oh My Cassette. It uses stdio, opens no port, "
         "and connects directly to the separate Cassette backend. "
@@ -148,7 +151,7 @@ mcp = ArtifactFastMCP(
         "returns resume_not_waiting_for_user the user already decided in the editor tab — "
         "re-check status. "
         "If a tool returns auth_required, show error.details.setup_command as a private terminal "
-        "command; never collect credentials in chat."
+        "command; never collect credentials in chat." + update_check.notice()
     ),
     lifespan=lifespan,
     log_level="WARNING",
@@ -262,7 +265,11 @@ async def cassette_ingest_media(
         }
     )
     roots = await _client_roots(ctx)
-    return await _run_sync(_runtime(ctx).ingest_media, request.model_dump(exclude_none=True), roots)
+    envelope = await _run_sync(_runtime(ctx).ingest_media, request.model_dump(exclude_none=True), roots)
+    # Refresh the cached release version off the hot path: ingest already waits on the
+    # network, and the day-long TTL means this is a no-op on all but the first call.
+    await asyncio.to_thread(update_check.refresh)
+    return envelope
 
 
 @mcp.tool(description="List media assets isolated to one Cassette session.", structured_output=True)

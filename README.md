@@ -285,6 +285,8 @@ Restart Claude Code after installation. You can verify the installation with:
 claude plugin details oh-my-cassette@cassette-editor
 ```
 
+Claude Code can keep the plugin up to date on its own once you enable auto-update for the marketplace — see [Update](#update).
+
 ### OpenCode
 
 OpenCode's plugin manager installs npm packages only, and its plugins cannot contribute MCP servers, so there is no marketplace entry to add. One command instead:
@@ -500,21 +502,54 @@ In QQ or Telegram:
 
 ## Update
 
-For Codex:
+The runtime checks the release channel once a day and, when a newer version exists, tells your agent — which mentions it once and offers to run the command below for you. Set `CASSETTE_UPDATE_CHECK=0` to turn that check off.
+
+| Host | Automatic | Manual |
+| --- | --- | --- |
+| Claude Code | yes, once enabled (below) | `claude plugin marketplace update cassette-editor && claude plugin update oh-my-cassette@cassette-editor` |
+| Codex | marketplace snapshot only | `codex plugin add oh-my-cassette@cassette-editor` |
+| Hermes | no | `hermes plugins update cassette && hermes gateway restart` |
+| OpenCode | no | re-run the install command |
+
+### Claude Code: automatic updates
+
+Claude Code can update marketplaces and their plugins in the background shortly after a session starts, then prompts you to run `/reload-plugins`. It is off by default for third-party marketplaces, so turn it on once — `scripts/setup_local_mcp.py` offers to do this during setup (skip with `--no-auto-update`), or do it yourself in `/plugin` → **Marketplaces** → `cassette-editor` → **Enable auto-update**, or in `~/.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "cassette-editor": {
+      "source": { "source": "github", "repo": "Cassette-Editor/oh-my-cassette" },
+      "autoUpdate": true
+    }
+  }
+}
+```
+
+Declaring it in `settings.json` wins over the `/plugin` toggle — Claude Code syncs the declared value into its marketplace state and then points you back at the settings file to change it.
+
+Claude Code's `DISABLE_AUTOUPDATER` turns off all automatic updates including plugins; pair it with `FORCE_AUTOUPDATE_PLUGINS=1` to keep plugin updates while managing Claude Code itself manually.
+
+### Codex
+
+Codex refreshes configured git marketplace snapshots on its own, but installed plugins are cached per version, so one command applies the new one:
 
 ```bash
-codex plugin marketplace upgrade cassette-editor
+codex plugin marketplace upgrade cassette-editor   # only needed if the snapshot is stale
 codex plugin add oh-my-cassette@cassette-editor
 ```
 
-For Claude Code:
+### OpenCode
+
+Re-run the install command — it is the same command for installs and updates:
 
 ```bash
-claude plugin marketplace update cassette-editor
-claude plugin update oh-my-cassette@cassette-editor
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/release/scripts/install_opencode.py | python3 -
 ```
 
-The local launcher updates its locked, plugin-managed virtual environment automatically on the next start. Browser binaries are installed only when requested.
+The local launcher updates its locked, plugin-managed virtual environment automatically on the next start after any of these. Browser binaries are installed only when requested.
+
+### Hermes
 
 If installed through the Hermes plugin manager:
 

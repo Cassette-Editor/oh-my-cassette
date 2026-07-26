@@ -59,6 +59,7 @@ jobs:
               - 'mcp_plugin/**'
               - 'runtime_config.py'
               - 'core/**'
+              - 'version.txt'
               - 'requirements-mcp.in'
               - 'requirements-mcp.lock'
               - 'requirements-browser.in'
@@ -182,6 +183,7 @@ jobs:
           tests/test_mcp_protocol.py
           tests/test_mcp_runtime.py
           tests/test_mcp_state.py
+          tests/test_mcp_update_check.py
           tests/test_timeline.py
       - name: Smoke-test locked launcher bootstrap twice
         run: |
@@ -255,6 +257,12 @@ jobs:
           HOME="$smoke_root/home" claude plugin details oh-my-cassette@cassette-editor | tee "$smoke_root/claude-details.txt"
           grep -F 'Skills (1)  cassette-video-edit' "$smoke_root/claude-details.txt"
           grep -F 'MCP servers (1)  cassette' "$smoke_root/claude-details.txt"
+          # Claude keys its plugin cache on the manifest version and skips the update when it
+          # matches what is installed, so a manifest left un-bumped withholds the release from
+          # every user. Same assertion the Codex step makes above.
+          expected_version="$(jq -r .version .claude-plugin/plugin.json)"
+          test "$(jq -r '.plugins["oh-my-cassette@cassette-editor"][0].version' \
+            "$smoke_root/home/.claude/plugins/installed_plugins.json")" = "$expected_version"
           echo "smoke_root=$smoke_root" >> "$GITHUB_ENV"
       - name: Launch the MCP through Claude itself (plugin and project scope)
         # `claude mcp list` performs a real stdio initialize against every

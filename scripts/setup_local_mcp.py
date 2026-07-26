@@ -298,6 +298,61 @@ def reset_password(args: argparse.Namespace) -> str:
     return "emailed"
 
 
+CLAUDE_MARKETPLACE = "cassette-editor"
+
+
+def claude_settings_path() -> Path:
+    base = str(os.getenv("CLAUDE_CONFIG_DIR", "") or "").strip()
+    root = Path(base).expanduser() if base else Path.home() / ".claude"
+    return root / "settings.json"
+
+
+def enable_claude_auto_update(*, skip: bool, assume_yes: bool = False) -> str:
+    """Turn on Claude Code's per-marketplace auto-update for an existing cassette-editor entry.
+
+    Claude Code is the only host that updates plugins on its own, and third-party
+    marketplaces ship with it off. It is a user setting with no CLI flag, so the one
+    piece of ours that runs on a Claude user's machine offers to set it.
+    """
+    if skip:
+        return "Skipped the Claude Code auto-update opt-in (--no-auto-update)."
+    path = claude_settings_path()
+    try:
+        if path.is_symlink() or not path.is_file():
+            return ""
+        settings = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(settings, dict):
+        return ""
+    marketplaces = settings.get("extraKnownMarketplaces")
+    entry = marketplaces.get(CLAUDE_MARKETPLACE) if isinstance(marketplaces, dict) else None
+    # Never add the marketplace here: its absence means Claude Code is not the host, or the
+    # user installed the plugin some other way. `claude plugin marketplace add` owns that entry.
+    if not isinstance(entry, dict):
+        return ""
+    if entry.get("autoUpdate") is True:
+        return f"Claude Code auto-update is already on for {CLAUDE_MARKETPLACE}."
+    if not assume_yes and sys.stdin.isatty():
+        answer = input(f"Enable automatic plugin updates for {CLAUDE_MARKETPLACE} in Claude Code? [Y/n] ")
+        if answer.strip().lower() in {"n", "no"}:
+            return f"Left auto-update off; enable it later in /plugin > Marketplaces > {CLAUDE_MARKETPLACE}."
+    elif not assume_yes:
+        return f"Enable auto-update in /plugin > Marketplaces > {CLAUDE_MARKETPLACE} (not a terminal here)."
+    entry["autoUpdate"] = True
+    try:
+        # Read-modify-write of the parsed document: every other Claude setting is preserved
+        # untouched, and a partial write can never leave the user without settings.
+        temporary = path.with_name(f".{path.name}.oh-my-cassette.tmp")
+        temporary.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError as exc:
+        return f"Could not write {path} ({exc.__class__.__name__}); enable auto-update from /plugin instead."
+    # Claude Code syncs a settings-declared autoUpdate into its marketplace state and then
+    # refuses to change it from /plugin, so say where to turn it back off.
+    return f"Claude Code will now auto-update {CLAUDE_MARKETPLACE} plugins. Change it in {path}."
+
+
 def configure(args: argparse.Namespace) -> dict:
     imported: dict[str, str] = {}
     if args.import_hermes is not None:
@@ -397,6 +452,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Replace the account password and store the new one privately",
     )
+    parser.add_argument(
+        "--no-auto-update",
+        action="store_true",
+        help="Do not offer to enable Claude Code's automatic plugin updates for cassette-editor",
+    )
     return parser.parse_args()
 
 
@@ -411,6 +471,7 @@ def _reject_reset_password_conflicts(args: argparse.Namespace) -> None:
             ("--import-hermes", args.import_hermes is not None),
             ("--with-browser", args.with_browser),
             ("--use-environment", args.use_environment),
+            ("--no-auto-update", args.no_auto_update),
         )
         if used
     ]
@@ -441,6 +502,9 @@ def main() -> None:
         raise SystemExit(1) from exc
     print(f"Verified credentials saved privately at {runtime_config.credentials_path()}.")
     print(f"Selected transport: {setup['transport']}.")
+    auto_update = enable_claude_auto_update(skip=args.no_auto_update)
+    if auto_update:
+        print(auto_update)
     if not setup["full_api_access"] and setup["transport"] == "api":
         print("This account lacks full API access. Run this command again with --with-browser.")
 
