@@ -41,11 +41,8 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
   <a href="https://discord.gg/qd9NY4k8d7">
     <img src="https://img.shields.io/discord/1514649803626250452?style=flat-square&logo=discord&logoColor=white&label=Discord&color=5865F2" alt="Discord">
   </a>
-</p>
-
-<p align="center">
   <a href="https://glama.ai/mcp/servers/Cassette-Editor/oh-my-cassette">
-    <img src="https://glama.ai/mcp/servers/Cassette-Editor/oh-my-cassette/badges/card.svg" alt="oh-my-cassette MCP server" />
+    <img src="https://glama.ai/mcp/servers/Cassette-Editor/oh-my-cassette/badges/score.svg" alt="oh-my-cassette MCP server">
   </a>
 </p>
 
