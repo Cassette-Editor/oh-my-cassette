@@ -1179,14 +1179,15 @@ def _sheet_media_lookup(session_id: str) -> tuple[dict[str, str], dict[str, str]
 
     The upload cache maps local-file fingerprints to the mediaFileIds the server assigned, so
     clips resolve back to the exact files the plugin uploaded. The project session id and the
-    ingest session id can differ by the try-session- prefix (Hermes mode) — try both."""
+    ingest session id can differ by the namespace prefix (Hermes mode) — try both."""
     from . import api_transport as api_mod
 
     by_id: dict[str, str] = {}
     by_name: dict[str, str] = {}
     candidates = [session_id]
-    if session_id.startswith("try-session-"):
-        candidates.append(session_id[len("try-session-") :])
+    split = api_mod.split_session_prefix(session_id)
+    if split:
+        candidates.append(split[1])
     cache: dict[str, str] = {}
     for sid in candidates:
         try:

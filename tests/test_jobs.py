@@ -50,10 +50,10 @@ def test_job_id_cannot_escape_jobs_directory(cassette_env):
         raise AssertionError("path traversal job ID was accepted")
 
 
-def test_create_job_defaults_to_try_session_namespace(cassette_env):
-    """New sessions live in the try-session-* namespace (token-free editor deep links); explicit
-    ids — including pre-existing un-prefixed ones — are preserved verbatim."""
+def test_create_job_defaults_to_agent_session_namespace(cassette_env):
+    """New sessions live in the agent-session-* namespace (the authenticated `agent` access tier);
+    explicit ids — including pre-existing un-prefixed ones — are preserved verbatim."""
     defaulted = jobs.create_job("h4sh", "prompt", None, [], {})
-    assert defaulted["cassette_session_id"] == "try-session-h4sh"
+    assert defaulted["cassette_session_id"] == "agent-session-h4sh"
     explicit = jobs.create_job("h4sh", "prompt", None, [], {"cassette_session_id": "legacy-id"})
     assert explicit["cassette_session_id"] == "legacy-id"
