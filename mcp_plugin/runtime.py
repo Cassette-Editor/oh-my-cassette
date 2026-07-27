@@ -19,6 +19,17 @@ from .state import InvalidTransition, StateStore, next_action_for, phase_from_jo
 
 WAIT_TICK_SEC = 5.0
 
+# Every job_status poll returns the whole job record, and every one of them stays in the
+# agent's transcript to be re-sent on all later calls. Mid-render 87% of each payload was
+# byte-identical to the previous poll in the recorded showcase session, so while the job is
+# still working we return only what tells the agent where it is; the terminal poll that
+# carries the deliverables (timeline_delta, report, quality.timeline_ctl) is untouched.
+UNSETTLED_JOB_PHASES = frozenset({SessionPhase.RUNNING, SessionPhase.EXPORTING})
+UNSETTLED_JOB_DROP_KEYS = frozenset(
+    {"progress_events", "timeline_delta", "report", "chat_message", "message", "stage_timings"}
+)
+UNSETTLED_QUALITY_KEEP_KEYS = frozenset({"current_stage", "progress_summary"})
+
 # A stored password that no longer works. The API transport raises auth_failed off
 # /api/agent-auth/verify; the browser transport raises cassette_auth_failed off its login
 # timeout. Both mean the same thing to the user, and neither is fixed by re-running setup.
@@ -562,8 +573,11 @@ class LocalMcpRuntime:
     @staticmethod
     def _job_change_marker(job: dict[str, Any]) -> tuple[Any, ...]:
         quality = job.get("quality") if isinstance(job.get("quality"), dict) else {}
+        # Deliberately excludes updated_at: it is bumped by every write to the record,
+        # including heartbeats that change nothing observable, which woke the long poll
+        # on 75 of 78 calls in the recorded showcase session. The fields below are the
+        # ones an agent would actually act on; a quiet job now waits out the full window.
         return (
-            job.get("updated_at"),
             job.get("status"),
             job.get("current_stage"),
             quality.get("current_stage"),
@@ -573,6 +587,19 @@ class LocalMcpRuntime:
             len(job.get("errors") or []),
             len(job.get("progress_events") or []),
         )
+
+    @staticmethod
+    def _slim_unsettled_job(payload: dict[str, Any]) -> None:
+        """Drop the bulk fields from a still-working job payload, in place."""
+        data = payload.get("data")
+        job = data.get("job") if isinstance(data, dict) else None
+        if not isinstance(job, dict):
+            return
+        for key in UNSETTLED_JOB_DROP_KEYS:
+            job.pop(key, None)
+        quality = job.get("quality")
+        if isinstance(quality, dict):
+            job["quality"] = {k: v for k, v in quality.items() if k in UNSETTLED_QUALITY_KEEP_KEYS}
 
     def job_status(
         self,
@@ -626,6 +653,8 @@ class LocalMcpRuntime:
         artifacts, artifact_error = self._artifacts_for_job(job) if job else ([], None)
         if artifact_error:
             return artifact_error
+        if phase in UNSETTLED_JOB_PHASES:
+            self._slim_unsettled_job(payload)
         return self._envelope_from_core(payload, session_id=session_id, job_id=job_id, phase=phase, artifacts=artifacts)
 
     def review_completion(self, args: dict[str, Any]) -> ToolEnvelope:

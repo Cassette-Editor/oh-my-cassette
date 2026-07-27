@@ -233,6 +233,58 @@ def test_direct_core_and_mcp_adapter_preserve_semantic_validation_error(tmp_path
     assert direct["error"]["code"] == adapted.error.code == "missing_required_arg"
 
 
+def test_job_change_marker_ignores_bare_updated_at_bumps():
+    """A write that only moves updated_at is not a change worth waking the long poll for."""
+    from mcp_plugin.runtime import LocalMcpRuntime
+
+    base = {"status": "running", "current_stage": "editing", "updated_at": "2026-07-24T07:20:00Z"}
+    touched = {**base, "updated_at": "2026-07-24T07:20:06Z"}
+    real = {**base, "current_stage": "rendering"}
+
+    marker = LocalMcpRuntime._job_change_marker
+    assert marker(touched) == marker(base), "heartbeat-only write must not count as a change"
+    assert marker(real) != marker(base), "a real stage change must still wake the poll"
+
+
+def test_slim_unsettled_job_drops_bulk_but_keeps_progress():
+    """Mid-render the agent keeps its bearings; the deliverables are dropped until it settles."""
+    from mcp_plugin.runtime import LocalMcpRuntime
+
+    payload = {
+        "data": {
+            "job": {
+                "job_id": "j1",
+                "status": "running",
+                "current_stage": "editing",
+                "plan_progress": [{"step": 3}],
+                "editor_url": "https://example/editor",
+                "progress_events": [{"summary": "x"} for _ in range(10)],
+                "timeline_delta": {"clips": list(range(24))},
+                "report": {"lines": ["a"]},
+                "chat_message": "long agent prose",
+                "message": "long agent prose",
+                "stage_timings": {"editing": 42},
+                "quality": {"current_stage": "editing", "progress_summary": "8/12", "timeline_ctl": "BIG"},
+            }
+        }
+    }
+    LocalMcpRuntime._slim_unsettled_job(payload)
+    job = payload["data"]["job"]
+
+    for dropped in ("progress_events", "timeline_delta", "report", "chat_message", "message", "stage_timings"):
+        assert dropped not in job, f"{dropped} should not survive a mid-render poll"
+    assert job["quality"] == {"current_stage": "editing", "progress_summary": "8/12"}
+    for kept in ("job_id", "status", "current_stage", "plan_progress", "editor_url"):
+        assert kept in job, f"{kept} is how the agent reports progress"
+
+
+def test_slim_unsettled_job_tolerates_missing_or_odd_payloads():
+    from mcp_plugin.runtime import LocalMcpRuntime
+
+    for payload in ({}, {"data": None}, {"data": {}}, {"data": {"job": "not-a-dict"}}):
+        LocalMcpRuntime._slim_unsettled_job(payload)  # must not raise
+
+
 def test_job_status_long_poll_reports_wait_ticks_and_survives_tick_errors(tmp_path, monkeypatch):
     import mcp_plugin.runtime as runtime_module
 
