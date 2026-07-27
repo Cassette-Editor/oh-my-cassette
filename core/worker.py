@@ -12,6 +12,15 @@ else:
     # Detached subprocess: load the plugin root under the same `cassette` name the
     # parent process used, so this worker sees one module identity, not a second.
     root = Path(__file__).resolve().parents[1]
+    # Python seeds sys.path with this file's directory (core/), not the plugin root, so
+    # top-level modules living at the root are invisible here. Every other entrypoint
+    # (run_local_mcp, setup_local_mcp, local_mcp_bootstrap) puts the root on sys.path;
+    # without it `import runtime_config` inside core.api_transport._env raises, the bare
+    # except swallows it, and credential lookups silently fall back to the legacy
+    # ~/.hermes/.env — so an MCP password reset appears to do nothing and every job
+    # fails auth_failed, or auth_missing_credentials on a host that never ran Hermes.
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
     spec = importlib.util.spec_from_file_location(
         "cassette", root / "__init__.py", submodule_search_locations=[str(root)]
     )
