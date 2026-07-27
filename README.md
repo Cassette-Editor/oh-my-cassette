@@ -44,6 +44,12 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: Chat Your Raw Clips In
 </p>
 
 <p align="center">
+  <a href="https://glama.ai/mcp/servers/Cassette-Editor/oh-my-cassette">
+    <img src="https://glama.ai/mcp/servers/Cassette-Editor/oh-my-cassette/badges/card.svg" alt="oh-my-cassette MCP server" />
+  </a>
+</p>
+
+<p align="center">
   <a href="./README.zh-cn.md">简体中文</a> | <b>English</b>
 </p>
 
@@ -136,7 +142,7 @@ Upload your clips, describe the video you want, and the agent edits it.
 </td></tr>
 </table>
 
-<sub>The screen recording is compressed to keep this page light, so the terminal text looks softer here than it does on your machine; the cut below it is the full-quality render. Prompt to rendered file took about 13 minutes of real time, sped up above.</sub>
+<sub>The screen recording is compressed to keep this page light, so the terminal text looks softer here than it does on your machine; the cut below it is the full-quality render. Prompt to rendered file took about 13 minutes of real time, sped up above. A person's face is pixelated in both the screen recording and the cut it produced, for privacy — that blur is not something the agent added.</sub>
 
 <sub>**Token cost:** that session used 45K output tokens and 20.3M billed tokens in total (19.8M of them cache reads) across 4 turns on Claude Opus 4.8 — roughly **$13 at API list price**, measured from the Claude Code transcript of this exact recording. The editing itself runs on Cassette, so the agent only pays for the brief and the timeline digests, not for the footage.</sub>
 

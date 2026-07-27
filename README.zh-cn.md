@@ -44,6 +44,12 @@ Oh My <a href="https://trycassette.online/">Cassette</a>: 随身 AI 剪辑搭档
 </p>
 
 <p align="center">
+  <a href="https://glama.ai/mcp/servers/Cassette-Editor/oh-my-cassette">
+    <img src="https://glama.ai/mcp/servers/Cassette-Editor/oh-my-cassette/badges/card.svg" alt="oh-my-cassette MCP server" />
+  </a>
+</p>
+
+<p align="center">
   <b>简体中文</b> | <a href="./README.md">English</a>
 </p>
 
@@ -131,7 +137,7 @@ codex plugin add oh-my-cassette@cassette-editor
 </td></tr>
 </table>
 
-<sub>两段视频都经过大幅压缩以减轻页面体积，因此终端文字和画面看起来比本地实际效果更模糊。从提示词到成片的真实耗时约 13 分钟，上方视频为加速播放。</sub>
+<sub>两段视频都经过大幅压缩以减轻页面体积，因此终端文字和画面看起来比本地实际效果更模糊。从提示词到成片的真实耗时约 13 分钟，上方视频为加速播放。出于隐私考虑，屏幕录制和它产出的成片中都对某位出镜人物的面部做了马赛克处理——这不是 Agent 添加的效果。</sub>
 
 <sub>**Token 消耗：** 这段录制里，4 轮对话在 Claude Opus 4.8 上共产生 4.5 万 输出 token、2030 万 计费 token（其中 1980 万 是缓存读取），按 API 标准价约 **13 美元**，数据取自这次录制对应的 Claude Code 会话记录。剪辑本身在 Cassette 上完成，Agent 只为需求描述和时间轴摘要付费，不为素材本身付费。</sub>
 
