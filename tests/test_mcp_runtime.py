@@ -233,6 +233,40 @@ def test_direct_core_and_mcp_adapter_preserve_semantic_validation_error(tmp_path
     assert direct["error"]["code"] == adapted.error.code == "missing_required_arg"
 
 
+def test_detached_worker_can_import_root_level_runtime_config(tmp_path):
+    """The detached worker must read the MCP protected config, not ~/.hermes/.env.
+
+    Python seeds sys.path with core/, so without the worker's own fix `import
+    runtime_config` fails, api_transport._env swallows it, and credentials silently
+    come from the legacy Hermes dotenv — a reset password then appears to do nothing.
+    """
+    import subprocess
+    import sys
+    import textwrap
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        textwrap.dedent(
+            f"""
+            import json, runpy, sys
+            # Reproduce the detached spawn: only core/ on the path, exactly as
+            # subprocess.Popen([python, ".../core/worker.py"]) leaves it.
+            sys.path[:] = [r{str(root / "core")!r}] + [p for p in sys.path if p not in (r{str(root)!r}, "")]
+            runpy.run_path(r{str(root / "core" / "worker.py")!r}, run_name="not_main")
+            import runtime_config
+            print(json.dumps({{"ok": True, "has_mcp_env_value": hasattr(runtime_config, "mcp_env_value")}}))
+            """
+        ).strip()
+    )
+    proc = subprocess.run([sys.executable, str(probe)], capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, f"worker bootstrap failed:\n{proc.stderr}"
+    assert "ModuleNotFoundError" not in proc.stderr
+    payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert payload["ok"] and payload["has_mcp_env_value"]
+
+
 def test_job_change_marker_ignores_bare_updated_at_bumps():
     """A write that only moves updated_at is not a change worth waking the long poll for."""
     from mcp_plugin.runtime import LocalMcpRuntime
