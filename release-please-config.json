@@ -27,6 +27,11 @@
         {
           "type": "generic",
           "path": "mcp_plugin/__init__.py"
+        },
+        {
+          "type": "json",
+          "path": "server.json",
+          "jsonpath": "$.version"
         }
       ]
     }

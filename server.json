@@ -1,0 +1,13 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Cassette-Editor/oh-my-cassette",
+  "title": "Oh My Cassette",
+  "description": "Chat-driven AI video montage: beat-synced cuts, auto-matched music, subtitles, transitions.",
+  "version": "0.4.6",
+  "websiteUrl": "https://github.com/Cassette-Editor/oh-my-cassette",
+  "repository": {
+    "url": "https://github.com/Cassette-Editor/oh-my-cassette",
+    "source": "github",
+    "id": "1265161922"
+  }
+}
