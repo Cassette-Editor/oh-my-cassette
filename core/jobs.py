@@ -49,9 +49,10 @@ def create_job(
     job = {
         "job_id": job_id,
         "session_hash": session_hash,
-        # Default Hermes-mode sessions to the try-session-* namespace so the editor deep link
-        # (publicTry tier) works; explicit ids and pre-existing jobs keep their stored value.
-        "cassette_session_id": options.get("cassette_session_id") or f"try-session-{session_hash}",
+        # Default Hermes-mode sessions to the agent-session-* namespace: the server resolves
+        # those against the JWT we already send (agent tier, per-user rate limits) and the
+        # /agent deep link opens them. Explicit ids and pre-existing jobs keep their value.
+        "cassette_session_id": options.get("cassette_session_id") or f"agent-session-{session_hash}",
         "status": "queued",
         "created_at": now_iso(),
         "updated_at": now_iso(),

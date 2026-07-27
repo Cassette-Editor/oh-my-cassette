@@ -167,7 +167,7 @@ def test_real_stdio_process_initializes_and_calls_every_tool(tmp_path):
                 ingest = await session.call_tool("cassette_ingest_media", {"source_path": str(media)})
                 assert ingest.structuredContent["ok"] is True
                 session_id = ingest.structuredContent["session_id"]
-                assert session_id.startswith("try-session-")
+                assert session_id.startswith("agent-session-")
                 rejected = await session.call_tool(
                     "cassette_ingest_media", {"source_path": str(escaped), "session_id": session_id}
                 )

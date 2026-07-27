@@ -955,8 +955,8 @@ def test_thread_create_sends_uuid_and_persists_editor_url(cassette_env, mock_api
     assert session_context["mediaSessionId"] == "try-session-abc"
 
 
-def test_editor_url_only_for_try_session_projects(cassette_env, mock_api):
-    """Old un-prefixed sessions have no token-free browser view, so no deep link is composed."""
+def test_editor_url_only_for_namespaced_projects(cassette_env, mock_api):
+    """Old un-prefixed sessions map to no editor route, so no deep link is composed."""
     job = {
         "job_id": "job-old",
         "session_hash": "sess",
@@ -974,8 +974,12 @@ def test_editor_url_falls_back_to_cassette_url_origin(monkeypatch):
     from cassette.core.api_transport import _editor_url
 
     monkeypatch.delenv("CASSETTE_WEB_URL", raising=False)
-    url = _editor_url("try-session-h4sh", "aaaa-bbbb", {"url": "https://sg.trycassette.online/agent"})
-    assert url == "https://sg.trycassette.online/try?projectSessionId=h4sh&chatSessionId=aaaa-bbbb"
+    upstream = {"url": "https://sg.trycassette.online/agent"}
+    url = _editor_url("agent-session-h4sh", "aaaa-bbbb", upstream)
+    assert url == "https://sg.trycassette.online/agent?projectSessionId=h4sh&chatSessionId=aaaa-bbbb"
+    # Sessions minted before 0.4.6 keep their anonymous publicTry route.
+    legacy = _editor_url("try-session-h4sh", "aaaa-bbbb", upstream)
+    assert legacy == "https://sg.trycassette.online/try?projectSessionId=h4sh&chatSessionId=aaaa-bbbb"
     assert _editor_url("legacy-id", "aaaa-bbbb", {}) is None
 
 

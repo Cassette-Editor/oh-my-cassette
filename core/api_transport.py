@@ -258,16 +258,33 @@ def _session_id(job: dict) -> str:
     return str(job.get("cassette_session_id") or job.get("session_hash") or "default")
 
 
-_TRY_SESSION_PREFIX = "try-session-"
+AGENT_SESSION_PREFIX = "agent-session-"
+TRY_SESSION_PREFIX = "try-session-"
+
+# Namespace -> editor route. agent-session-* is the plugin's namespace: the server classifies
+# those requests as the `agent` access tier, so the JWT the plugin already sends is honoured
+# (rate limits keyed on the user, the account's real access level applies). try-session-* is the
+# anonymous publicTry namespace, kept only so sessions minted before 0.4.6 keep a working link.
+SESSION_PREFIX_ROUTES = {AGENT_SESSION_PREFIX: "/agent", TRY_SESSION_PREFIX: "/try"}
+
+
+def split_session_prefix(session_id: str) -> tuple[str, str] | None:
+    """(prefix, hash) for a namespaced session id, else None for un-prefixed legacy ids."""
+    for prefix in SESSION_PREFIX_ROUTES:
+        if session_id.startswith(prefix):
+            return prefix, session_id[len(prefix) :]
+    return None
 
 
 def _editor_url(session_id: str, thread_id: str, job: dict) -> str | None:
     """Deep link into the live editor for this session's project and chat thread.
 
-    Only try-session-* projects are reachable token-free (publicTry tier); older un-prefixed
-    session ids have no browsable link, so this returns None for them."""
-    if not session_id.startswith(_TRY_SESSION_PREFIX):
+    Only namespaced sessions have a browsable project route; older un-prefixed session ids
+    return None."""
+    split = split_session_prefix(session_id)
+    if not split:
         return None
+    prefix, session_hash = split
     base = _env("CASSETTE_WEB_URL")
     if not base:
         raw = str(job.get("url") or os.getenv("CASSETTE_URL", "https://sg.trycassette.online/agent"))
@@ -275,9 +292,8 @@ def _editor_url(session_id: str, thread_id: str, job: dict) -> str | None:
         if not parts.scheme or not parts.netloc:
             return None
         base = f"{parts.scheme}://{parts.netloc}"
-    session_hash = session_id[len(_TRY_SESSION_PREFIX) :]
     query = urlencode({"projectSessionId": session_hash, "chatSessionId": thread_id})
-    return f"{base.rstrip('/')}/try?{query}"
+    return f"{base.rstrip('/')}{SESSION_PREFIX_ROUTES[prefix]}?{query}"
 
 
 def _http_timeout() -> float:

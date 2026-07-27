@@ -367,9 +367,10 @@ class LocalMcpRuntime:
         config_error = self._config_error(session_id=args.get("session_id"))
         if config_error:
             return config_error
-        # try-session-* ids get token-free publicTry access on the Cassette server, which is what
-        # makes the /try?projectSessionId= editor deep link work without a login handoff.
-        session_id = str(args.get("session_id") or "").strip() or f"try-session-{secrets.token_urlsafe(18)}"
+        # agent-session-* ids resolve to the `agent` access tier on the Cassette server, so the
+        # bearer token the plugin already sends is actually honoured (per-user rate limits, the
+        # account's real access level) and /agent?projectSessionId= opens the same project.
+        session_id = str(args.get("session_id") or "").strip() or f"agent-session-{secrets.token_urlsafe(18)}"
         args = {**args, "session_id": session_id}
         payload = self._invoke_core("cassette_ingest_media", args, session_id=session_id, roots=roots)
         phase = self._load_state_phase(session_id)
