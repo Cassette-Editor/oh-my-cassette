@@ -133,6 +133,8 @@ codex plugin add oh-my-cassette@cassette-editor
 
 <sub>两段视频都经过大幅压缩以减轻页面体积，因此终端文字和画面看起来比本地实际效果更模糊。从提示词到成片的真实耗时约 13 分钟，上方视频为加速播放。</sub>
 
+<sub>**Token 消耗：** 这段录制里，4 轮对话在 Claude Opus 4.8 上共产生 4.5 万 输出 token、2030 万 计费 token（其中 1980 万 是缓存读取），按 API 标准价约 **13 美元**，数据取自这次录制对应的 Claude Code 会话记录。剪辑本身在 Cassette 上完成，Agent 只为需求描述和时间轴摘要付费，不为素材本身付费。</sub>
+
 ## 🎬 案例视频
 
 以下每个案例都由 AI Agent 通过 Oh My Cassette 按所示提示词端到端完成——真实素材、真实处理时长，成片即 Agent 交付的原始结果。
@@ -391,7 +393,29 @@ python3 scripts/setup_local_mcp.py --reset-password
 - Linux：`~/.config/oh-my-cassette/credentials.json`（设置了 `XDG_CONFIG_HOME` 时以该目录为准）
 - Windows：`%APPDATA%\Oh My Cassette\credentials.json`
 
+### 用法：让它找到你的素材
+
+1. **在存放素材的目录里启动 agent**——或在它的任意上层目录启动。该目录即为受信任的素材根目录（`CASSETTE_PROJECT_ROOT`，取客户端的项目目录），其下所有子目录都可以被读取，所以在 `~/videos/trip` 启动时 `~/videos/trip/raw/*.mp4` 也能用。素材在别处？把该目录登记一次：
+
+   ```bash
+   python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
+   ```
+
+   读取任何受信任目录之外的文件都会返回 `source_path_not_allowed`。
+
+2. **用一句话说清楚要什么，并指明素材目录。** 不需要你手动上传——agent 会自行接收所需文件。
+
+   > 用 ./footage 里的素材剪一支 30 秒旅行 vlog，卡点剪辑，片头片尾加标题 "KOTA KINABALU"，节奏轻快。
+
+3. **在同一段对话里继续修改。** 每一轮都会提交剪辑并返回时间线摘要、缩略图联系表和在线编辑器链接，但不会渲染。"开头再短一点""换一首更安静的音乐""撤销"都在同一会话内继续，agent 记得上下文。
+
+4. **满意后说"导出"。** 只有这一步会启动渲染，成片保存在 `cassette/exports/<job_id>/`。
+
+支持的输入为视频、图片和音频文件（`.mp4`、`.mov`、`.jpg`、`.png`、`.mp3`、`.wav` 等）。混放也没问题——素材和音乐可以一起给。
+
 ### 引导式剪辑流程
+
+上述每一轮背后，插件实际做的事：
 
 1. 让 Codex 或 Claude 剪辑当前项目中的一个或多个媒体文件。
 2. 插件只接收当前项目或显式信任目录中的素材，并会规范化路径、拒绝目录穿越和符号链接逃逸。
