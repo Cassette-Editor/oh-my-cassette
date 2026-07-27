@@ -138,6 +138,8 @@ Upload your clips, describe the video you want, and the agent edits it.
 
 <sub>The screen recording is compressed to keep this page light, so the terminal text looks softer here than it does on your machine; the cut below it is the full-quality render. Prompt to rendered file took about 13 minutes of real time, sped up above.</sub>
 
+<sub>**Token cost:** that session used 45K output tokens and 20.3M billed tokens in total (19.8M of them cache reads) across 4 turns on Claude Opus 4.8 — roughly **$13 at API list price**, measured from the Claude Code transcript of this exact recording. The editing itself runs on Cassette, so the agent only pays for the brief and the timeline digests, not for the footage.</sub>
+
 ## 🎬 Case Videos
 
 Every case below was edited end-to-end by an AI agent through Oh My Cassette, from the exact prompt shown — real inputs, real processing times, and the output is what the agent delivered.
@@ -403,7 +405,29 @@ This replaces the account password everywhere, including other machines, and sav
 - Linux: `~/.config/oh-my-cassette/credentials.json` (or under `XDG_CONFIG_HOME` when set)
 - Windows: `%APPDATA%\Oh My Cassette\credentials.json`
 
+### Usage: point it at your clips
+
+1. **Start your agent in the folder that holds the clips** — or in any parent of it. That folder is the trusted media root (`CASSETTE_PROJECT_ROOT`, set to the host's project directory), and everything beneath it is ingestible, so `~/videos/trip/raw/*.mp4` works when you start in `~/videos/trip`. Clips somewhere else? Register that directory once:
+
+   ```bash
+   python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
+   ```
+
+   Ingesting a file outside every trusted root fails with `source_path_not_allowed`.
+
+2. **Say what you want, in one message, naming the folder.** No upload step to run yourself — the agent ingests the files it needs.
+
+   > Edit the clips in ./footage into a 30-second travel vlog with beat-synced cuts. Add the title "KOTA KINABALU" at the start and end, and keep the rhythm light.
+
+3. **Keep going in the same conversation.** Each turn commits the edit and returns a timeline digest, a contact sheet, and a live editor link — nothing renders. "Make the intro shorter", "swap the music for something calmer", "undo that" all continue the same session, and the agent remembers.
+
+4. **Say "export" when you're happy.** That's the only thing that starts a render; the finished file lands in `cassette/exports/<job_id>/`.
+
+Supported inputs are video, image, and audio files (`.mp4`, `.mov`, `.jpg`, `.png`, `.mp3`, `.wav`, and friends). Mixed folders are fine — send the footage and the music track together.
+
 ### Guided editing flow
+
+What the plugin does under the hood on each of those turns:
 
 1. Ask Codex or Claude to edit one or more media files in the current project.
 2. The plugin ingests only media inside the active project or another explicitly trusted root. It canonicalizes paths and rejects traversal and symlink escapes.
