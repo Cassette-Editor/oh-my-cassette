@@ -1397,3 +1397,36 @@ def test_conversational_turn_carries_ctl_preview(cassette_env, mock_api, monkeyp
     assert result["quality"]["timeline_ctl"].startswith("TIMELINE try-session-tp v7")
     # No render was triggered.
     assert not any(p.startswith("/api/export/projects/") for _, p in mock_api.rec["requests"])
+
+
+def test_probe_duration_sec_parses_container_duration(monkeypatch, tmp_path):
+    """Audio has no server-side probe, so this value is what media import reads back."""
+    import subprocess as sp
+
+    from cassette.core import api_transport as T
+
+    def fake_run(cmd, **kwargs):
+        assert "format=duration" in cmd
+        return sp.CompletedProcess(cmd, 0, stdout='{"format": {"duration": "159.307755"}}', stderr="")
+
+    monkeypatch.setattr(T.subprocess, "run", fake_run)
+    assert T._probe_duration_sec(tmp_path / "song.mp3") == 159.307755
+
+
+def test_probe_duration_sec_returns_none_instead_of_guessing(monkeypatch, tmp_path):
+    """Every failure mode must yield None; a wrong number is worse than no number."""
+    import subprocess as sp
+
+    from cassette.core import api_transport as T
+
+    cases = {
+        "ffprobe missing": lambda cmd, **kw: (_ for _ in ()).throw(FileNotFoundError()),
+        "non-zero exit": lambda cmd, **kw: sp.CompletedProcess(cmd, 1, stdout="", stderr="boom"),
+        "garbage stdout": lambda cmd, **kw: sp.CompletedProcess(cmd, 0, stdout="not json", stderr=""),
+        "no duration key": lambda cmd, **kw: sp.CompletedProcess(cmd, 0, stdout='{"format": {}}', stderr=""),
+        "zero duration": lambda cmd, **kw: sp.CompletedProcess(cmd, 0, stdout='{"format":{"duration":"0"}}', stderr=""),
+        "timeout": lambda cmd, **kw: (_ for _ in ()).throw(sp.TimeoutExpired(cmd, 30)),
+    }
+    for label, impl in cases.items():
+        monkeypatch.setattr(T.subprocess, "run", impl)
+        assert T._probe_duration_sec(tmp_path / "song.mp3") is None, label

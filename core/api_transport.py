@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import subprocess
 import threading
 import time
 import uuid
@@ -206,6 +207,39 @@ def _api_base() -> str:
     /api/projects and /api/export. Defaults to the deployed Cassette API; override per env."""
     base = _env("CASSETTE_API_URL") or _env("CASSETTE_API_BASE_URL") or DEFAULT_CASSETTE_API_URL
     return base.rstrip("/")
+
+
+def _probe_duration_sec(file_path: Path) -> float | None:
+    """Container duration in seconds via ffprobe, or None when it cannot be determined.
+
+    Only video uploads get a server-side probe; the readiness pipeline (remux, VFR, HEVC,
+    thumbnail) is video-shaped and audio never enters it. With no probe and no client
+    metadata the agent's media import substitutes a hardcoded 3 seconds, so a 159-second
+    music track is planned against as if it were 3 — the edit is then built to the wrong
+    length and the agent burns its run reconciling the mismatch.
+
+    Reading a container header is not media analysis: creative decisions stay with
+    Cassette, this only reports how long the file the caller handed us actually is.
+    """
+    binary = str(_env("CASSETTE_FFPROBE_BIN") or os.getenv("CASSETTE_FFPROBE_BIN", "") or "ffprobe")
+    try:
+        proc = subprocess.run(
+            [binary, "-v", "error", "-show_entries", "format=duration", "-of", "json", str(file_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        raw = (json.loads(proc.stdout or "{}").get("format") or {}).get("duration")
+        duration = float(raw)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return duration if duration > 0 else None
 
 
 def _credentials() -> tuple[str, str]:
@@ -840,12 +874,19 @@ class ApiTransport:
 
         self._put_bytes(str(init["uploadUrl"]), file_path.read_bytes(), upload_content_type)
 
+        # upload/complete merges this into the stored row, so a duration supplied here is what
+        # media import reads back. Send it for every type: it is authoritative for audio (never
+        # probed server-side) and harmless for video, where the readiness probe overwrites it.
+        metadata: dict[str, Any] = {}
+        probed_duration = _probe_duration_sec(file_path)
+        if probed_duration is not None:
+            metadata["duration"] = probed_duration
         complete_body = {
             "key": key,
             "fileName": file_name,
             "mimeType": mime,
             "storageBackend": storage_backend,
-            "metadata": {},
+            "metadata": metadata,
         }
         if upload_attempt_id:
             complete_body["uploadAttemptId"] = upload_attempt_id
