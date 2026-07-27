@@ -7,6 +7,9 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # Lets mcp-publisher exchange a GitHub OIDC token for a registry one, so the
+  # publish needs no stored credential; the namespace comes from the repo owner.
+  id-token: write
 
 jobs:
   release-please:
@@ -36,3 +39,17 @@ jobs:
           channel_sha="$(git ls-remote origin refs/heads/release | cut -f1)"
           test "$tag_sha" = "$channel_sha"
           test "$(cat version.txt)" = "${{ steps.release.outputs.version }}"
+
+      # The registry serves whatever version was last pushed to it, so a release that
+      # skips this leaves io.github.Cassette-Editor/oh-my-cassette advertising the old
+      # one indefinitely — release-please bumps server.json but cannot publish it.
+      # Runs last: a registry outage should not mask a broken release channel.
+      - name: Publish the new version to the MCP registry
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          PUBLISHER_VERSION: "1.8.0"
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v${PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
+            | tar -xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

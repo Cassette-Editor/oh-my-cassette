@@ -188,6 +188,19 @@ def test_release_workflow_fast_forwards_the_release_channel():
     assert workflow["permissions"]["contents"] == "write"
 
 
+def test_release_workflow_republishes_to_the_mcp_registry():
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "release-please.yml").read_text("utf-8"))
+    steps = workflow["jobs"]["release-please"]["steps"]
+    publish = next((step for step in steps if "mcp-publisher publish" in str(step.get("run", ""))), None)
+    # release-please bumps server.json but cannot push it to the registry, so without
+    # this step the registry entry silently freezes at the last hand-published version.
+    assert publish, "no step republishes server.json; the registry would serve a stale version forever"
+    assert "steps.release.outputs.release_created" in str(publish["if"])
+    # OIDC is what keeps the publish secretless; it is inert without this permission.
+    assert workflow["permissions"]["id-token"] == "write"
+    assert "login github-oidc" in publish["run"]
+
+
 def test_native_smoke_install_rewrites_both_pinned_marketplace_sources():
     # Both marketplaces pin the plugin to the release channel, so a verbatim
     # install fetches a published tag. Without a rewrite the smoke jobs would
