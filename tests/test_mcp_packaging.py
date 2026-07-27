@@ -54,9 +54,21 @@ def test_dual_manifests_and_marketplaces_have_matching_identity_and_version():
         hermes["version"],
         (ROOT / "version.txt").read_text("utf-8").strip(),
         mcp_plugin.__version__,
+        _json("server.json")["version"],
     }
     assert len(versions) == 1
     assert re.fullmatch(r"\d+\.\d+\.\d+", versions.pop())
+
+
+def test_registry_manifest_fits_the_mcp_registry_limits():
+    server = _json("server.json")
+    # The namespace is what the registry authenticates against the GitHub org, and it
+    # is case-sensitive: lowercasing the org is a 403 at publish time, not a redirect.
+    # The 100-char description cap is the other quiet one — an overflow only fails at
+    # publish time, long after the edit that caused it.
+    assert server["name"] == "io.github.Cassette-Editor/oh-my-cassette"
+    assert server["repository"]["url"] == "https://github.com/Cassette-Editor/oh-my-cassette"
+    assert 0 < len(server["description"]) <= 100
 
 
 def test_host_configs_use_one_stdio_server_and_no_network_listener():
@@ -128,6 +140,7 @@ def test_release_please_updates_all_host_version_fields():
         ".claude-plugin/plugin.json",
         ".claude-plugin/marketplace.json",
         "mcp_plugin/__init__.py",
+        "server.json",
     } <= entries_by_path.keys()
     assert entries_by_path["plugin.yaml"] == {
         "type": "generic",
