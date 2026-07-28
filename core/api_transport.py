@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import threading
 import time
@@ -197,6 +198,24 @@ def _api_base() -> str:
     /api/projects and /api/export. Defaults to the deployed Cassette API; override per env."""
     base = _env("CASSETTE_API_URL") or _env("CASSETTE_API_BASE_URL") or DEFAULT_CASSETTE_API_URL
     return base.rstrip("/")
+
+
+def _parse_black_segments(ffmpeg_stderr: str) -> list[dict]:
+    """Black stretches from an ffmpeg blackdetect pass, in file order.
+
+    Kept separate from the subprocess call so the parse is testable without ffmpeg.
+    """
+    segments: list[dict] = []
+    for match in re.finditer(
+        r"black_start:\s*([0-9.]+)\s+black_end:\s*([0-9.]+)\s+black_duration:\s*([0-9.]+)",
+        ffmpeg_stderr or "",
+    ):
+        try:
+            start, end, duration = (round(float(match.group(i)), 3) for i in (1, 2, 3))
+        except (TypeError, ValueError):
+            continue
+        segments.append({"start_sec": start, "end_sec": end, "duration_sec": duration})
+    return segments
 
 
 def _probe_duration_sec(file_path: Path) -> float | None:
@@ -1055,7 +1074,12 @@ class ApiTransport:
         report/notification (the browser path derives this from the chat panel)."""
         try:
             _, state = self._request("GET", f"/api/langgraph/threads/{thread_id}/state", expect=200)
-            messages = ((state or {}).get("values") or {}).get("messages") or []
+            values = (state or {}).get("values") or {}
+            # Read the backend's own verdict before the message loop, not inside it:
+            # a turn whose last assistant message is blank would otherwise discard a
+            # successfully-read refusal and fall back to reporting completion.
+            self._last_terminal_outcome = (values.get("terminalDecision") or {}).get("outcome")
+            messages = values.get("messages") or []
             for message in reversed(messages):
                 if not isinstance(message, dict):
                     continue
@@ -1070,6 +1094,112 @@ class ApiTransport:
         except Exception:  # noqa: BLE001
             pass
         return ""
+
+    # Skip the black scan on long exports — a full decode pass is cheap on a 30s cut and
+    # not on a feature. Container facts are still reported.
+    _QC_BLACK_SCAN_MAX_SEC = 600.0
+
+    def _export_qc(self, outputs: list[dict]) -> dict | None:
+        """Measure the finished export once, here, so the caller never shells out for it.
+
+        The orchestration guard tells callers not to reach for ffprobe/ffmpeg themselves, but
+        the envelope carried no measurements — so every reviewer improvised its own probe:
+        several tool round trips and a permission prompt each, for facts the runtime can read
+        in one pass. Container facts only (duration, fps, resolution, audio span, black
+        stretches); creative judgement stays with Cassette.
+        """
+        if _env("CASSETTE_API_EXPORT_QC").lower() in {"0", "false", "no", "off"}:
+            return None
+        path = next(
+            (o.get("local_path") for o in (outputs or []) if isinstance(o, dict) and o.get("local_path")), None
+        )
+        if not path:
+            return None
+        file_path = Path(str(path))
+        if not file_path.exists():
+            return None
+        try:
+            qc: dict[str, Any] = {"file": str(file_path), "size_bytes": file_path.stat().st_size}
+            duration = self._qc_container_facts(file_path, qc)
+            self._qc_black_segments(file_path, duration, qc)
+            return qc
+        except Exception:  # noqa: BLE001 — QC is advisory; never fail an export over it
+            return None
+
+    def _qc_container_facts(self, file_path: Path, qc: dict[str, Any]) -> float | None:
+        """Fill duration/video/audio facts from one ffprobe call; return the container duration."""
+        binary = str(_env("CASSETTE_FFPROBE_BIN") or os.getenv("CASSETTE_FFPROBE_BIN", "") or "ffprobe")
+        try:
+            proc = subprocess.run(
+                [
+                    binary, "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-show_entries", "stream=codec_type,codec_name,width,height,r_frame_rate,duration",
+                    "-of", "json", str(file_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError):
+            qc["probe"] = "unavailable"
+            return None
+        if proc.returncode != 0:
+            qc["probe"] = "unavailable"
+            return None
+        payload = json.loads(proc.stdout or "{}")
+        duration: float | None = None
+        try:
+            duration = round(float((payload.get("format") or {}).get("duration")), 3)
+        except (AttributeError, TypeError, ValueError):
+            duration = None
+        if duration is not None:
+            qc["duration_sec"] = duration
+        for stream in payload.get("streams") or []:
+            if not isinstance(stream, dict):
+                continue
+            kind = stream.get("codec_type")
+            if kind not in {"video", "audio"} or kind in qc:
+                continue
+            entry: dict[str, Any] = {"codec": stream.get("codec_name")}
+            if kind == "video":
+                entry["width"] = stream.get("width")
+                entry["height"] = stream.get("height")
+                rate = str(stream.get("r_frame_rate") or "")
+                if "/" in rate:
+                    num, _, den = rate.partition("/")
+                    try:
+                        entry["fps"] = round(float(num) / float(den), 3) if float(den) else None
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        entry["fps"] = None
+            try:
+                entry["duration_sec"] = round(float(stream.get("duration")), 3)
+            except (TypeError, ValueError):
+                pass
+            qc[kind] = entry
+        return duration
+
+    def _qc_black_segments(self, file_path: Path, duration: float | None, qc: dict[str, Any]) -> None:
+        """Scan for black stretches — the defect a duration-only check cannot see."""
+        if duration is not None and duration > self._QC_BLACK_SCAN_MAX_SEC:
+            qc["black_scan"] = "skipped_long_export"
+            return
+        ffmpeg = str(_env("CASSETTE_FFMPEG_BIN") or os.getenv("CASSETTE_FFMPEG_BIN", "") or "ffmpeg")
+        try:
+            proc = subprocess.run(
+                [ffmpeg, "-v", "info", "-i", str(file_path), "-vf", "blackdetect=d=0.25:pix_th=0.10",
+                 "-an", "-f", "null", "-"],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+        except (OSError, subprocess.SubprocessError):
+            qc["black_scan"] = "unavailable"
+            return
+        segments = _parse_black_segments(proc.stderr or "")
+        qc["black_scan"] = "complete"
+        qc["black_segments"] = segments
+        qc["black_total_sec"] = round(sum(s["duration_sec"] for s in segments), 3)
 
     def _export_thumbnail(self, outputs: list[dict]) -> str | None:
         """Best-effort still frame from the exported mp4 — the api path has no browser to screenshot,
@@ -2113,6 +2243,12 @@ class ApiTransport:
         final_screenshot: Any | None = None,
     ) -> dict:
         outputs = outputs or []
+        # completion_observed is a transport fact — the LangGraph run reached success.
+        # A turn where the model reported it could not do the job also reaches success,
+        # so an explicit refusal has to downgrade it. Only ever downgrades: an absent
+        # or reshaped decision keeps today's behaviour.
+        if completion_observed and getattr(self, "_last_terminal_outcome", None) == "not_done":
+            completion_observed = False
         quality = {
             "transport": "api",
             "completion_observed": completion_observed,
@@ -2124,6 +2260,12 @@ class ApiTransport:
         }
         if extra_quality:
             quality.update({k: v for k, v in extra_quality.items() if v is not None})
+        if export_completed:
+            # Single choke point for every export path — measure once, here, so no caller
+            # has to probe the file itself.
+            export_qc = self._export_qc(outputs)
+            if export_qc:
+                quality["export_qc"] = export_qc
         return {
             "status": status,
             "outputs": outputs,
