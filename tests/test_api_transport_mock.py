@@ -1442,3 +1442,110 @@ def test_probe_duration_sec_returns_none_instead_of_guessing(monkeypatch, tmp_pa
     for label, impl in cases.items():
         monkeypatch.setattr(T.subprocess, "run", impl)
         assert T._probe_duration_sec(tmp_path / "song.mp3") is None, label
+
+
+def test_parse_black_segments_reads_every_blackdetect_line():
+    """The defect a duration check cannot see: picture that is present but blank."""
+    from cassette.core.api_transport import _parse_black_segments
+
+    stderr = (
+        "[Parsed_blackdetect_0 @ 0x972c46040] black_start:11.666667 black_end:12.366667 black_duration:0.7\n"
+        "[Parsed_blackdetect_0 @ 0x972c46040] black_start:24.1 black_end:30 black_duration:5.9\n"
+        "frame= 900 fps=0.0 q=-0.0 Lsize=N/A time=00:00:30.00 bitrate=N/A speed= 120x\n"
+    )
+    assert _parse_black_segments(stderr) == [
+        {"start_sec": 11.667, "end_sec": 12.367, "duration_sec": 0.7},
+        {"start_sec": 24.1, "end_sec": 30.0, "duration_sec": 5.9},
+    ]
+    assert _parse_black_segments("") == []
+
+
+def test_export_qc_measures_the_finished_file(monkeypatch, tmp_path):
+    """One probe pass in the runtime replaces every caller improvising its own ffprobe."""
+    import subprocess as sp
+
+    from cassette.core import api_transport as T
+
+    export = tmp_path / "cut.mp4"
+    export.write_bytes(b"FAKE_MP4_BYTES")
+
+    probe_payload = json.dumps({
+        "format": {"duration": "30.037333"},
+        "streams": [
+            {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080,
+             "r_frame_rate": "30/1", "duration": "30.000000"},
+            {"codec_type": "audio", "codec_name": "aac", "duration": "30.037333"},
+        ],
+    })
+
+    def fake_run(cmd, **kwargs):
+        if "blackdetect" in " ".join(str(part) for part in cmd):
+            return sp.CompletedProcess(cmd, 0, stdout="", stderr=(
+                "[Parsed_blackdetect_0 @ 0x1] black_start:11.666667 black_end:12.366667 black_duration:0.7\n"
+            ))
+        return sp.CompletedProcess(cmd, 0, stdout=probe_payload, stderr="")
+
+    monkeypatch.setattr(T.subprocess, "run", fake_run)
+    qc = T.ApiTransport()._export_qc([{"local_path": str(export)}])
+
+    assert qc["duration_sec"] == 30.037
+    assert qc["video"] == {"codec": "h264", "width": 1920, "height": 1080, "fps": 30.0, "duration_sec": 30.0}
+    assert qc["audio"]["codec"] == "aac"
+    assert qc["black_scan"] == "complete"
+    assert qc["black_segments"] == [{"start_sec": 11.667, "end_sec": 12.367, "duration_sec": 0.7}]
+    assert qc["black_total_sec"] == 0.7
+
+
+def test_export_qc_rides_every_export_result(monkeypatch, tmp_path):
+    """Attached at the single choke point, so all three export paths carry it."""
+    from cassette.core import api_transport as T
+
+    transport = T.ApiTransport()
+    monkeypatch.setattr(T.ApiTransport, "_export_qc", lambda self, outputs: {"duration_sec": 30.0})
+
+    exported = transport._result("succeeded", outputs=[{"local_path": str(tmp_path / "cut.mp4")}], export_completed=True)
+    assert exported["quality"]["export_qc"] == {"duration_sec": 30.0}
+
+    # A committed-but-unrendered turn has no file to measure.
+    committed = transport._result("succeeded", outputs=[], export_completed=False)
+    assert "export_qc" not in committed["quality"]
+
+
+def test_export_qc_never_fails_an_export(monkeypatch, tmp_path):
+    """Advisory measurement: a broken ffprobe must not cost the user their render."""
+    import subprocess as sp
+
+    from cassette.core import api_transport as T
+
+    export = tmp_path / "cut.mp4"
+    export.write_bytes(b"FAKE_MP4_BYTES")
+
+    monkeypatch.setattr(T.subprocess, "run", lambda cmd, **kw: (_ for _ in ()).throw(FileNotFoundError()))
+    qc = T.ApiTransport()._export_qc([{"local_path": str(export)}])
+    assert qc["probe"] == "unavailable"
+    assert qc["black_scan"] == "unavailable"
+
+    monkeypatch.setattr(T.subprocess, "run", lambda cmd, **kw: sp.CompletedProcess(cmd, 0, stdout="{}", stderr=""))
+    assert T.ApiTransport()._export_qc([{"local_path": str(tmp_path / "missing.mp4")}]) is None
+    assert T.ApiTransport()._export_qc([]) is None
+
+
+def test_explicit_refusal_downgrades_completion_observed():
+    """A run that ends 'success' with the model reporting it could not do the job
+    must not report completion - that is the always-on half of the false-completion bug."""
+    from cassette.core import api_transport as T
+
+    transport = T.ApiTransport()
+    transport._last_terminal_outcome = "not_done"
+    assert transport._result("succeeded", completion_observed=True)["quality"]["completion_observed"] is False
+
+
+def test_completion_observed_survives_a_normal_terminal_decision():
+    from cassette.core import api_transport as T
+
+    transport = T.ApiTransport()
+    transport._last_terminal_outcome = "done"
+    assert transport._result("succeeded", completion_observed=True)["quality"]["completion_observed"] is True
+    # An absent decision must not change today's behaviour.
+    transport._last_terminal_outcome = None
+    assert transport._result("succeeded", completion_observed=True)["quality"]["completion_observed"] is True
