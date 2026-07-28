@@ -11,7 +11,7 @@
       </section>
       <button type="button" title="新对话" aria-label="新对话">+</button>
       <textarea placeholder="描述你想要的效果…"></textarea>
-      <button type="button" title="DeepSeek V4 Flash · 低">模型</button>
+      <button type="button" title="GPT-5.6 Luna · 低">模型</button>
       <button type="submit" aria-label="发送消息" title="发送消息" disabled>发送</button>
       <div id="status"></div>
       <div id="export-status"></div>
@@ -40,13 +40,13 @@
           send.disabled = false;
         }, 100);
       });
-      document.querySelector('button[title*="DeepSeek"]').addEventListener('click', () => {
+      document.querySelector('button[title*="GPT"]').addEventListener('click', () => {
         const dialog = document.createElement('div');
         dialog.setAttribute('role', 'dialog');
         dialog.innerHTML = `
           <h2>AI 模型</h2>
-          <button>DeepSeek V4 Flash<br />高效 MoE 推理模型</button>
-          <button>Kimi K2.6<br />长上下文 Moonshot 推理模型</button>
+          <button>GPT-5.6 Luna<br />最新 OpenAI 智能体模型</button>
+          <button>GPT-5.4 Mini<br />快速 OpenAI 推理模型</button>
           <h2>思考深度</h2>
           <button title="轻量推理">低</button>
           <button title="平衡">中</button>

@@ -198,7 +198,7 @@ class RunJobInput(StrictModel):
     selectors: dict[str, Any] = Field(default_factory=dict)
     cassette_model: str | None = None
     model: str | None = None
-    thinking_level: str | None = None
+    thinking_level: Literal["off", "minimal", "low", "medium", "high", "xhigh"] | None = None
     cassette_language: Literal["zh", "en"] | None = None
     language: Literal["zh", "en"] | None = None
 
@@ -212,7 +212,7 @@ class RunJobInput(StrictModel):
 class ConfigInput(StrictModel):
     session_id: str
     model: str | None = None
-    thinking_level: Literal["low", "medium", "high"] | None = None
+    thinking_level: Literal["off", "minimal", "low", "medium", "high", "xhigh"] | None = None
 
 
 class JobStatusInput(StrictModel):

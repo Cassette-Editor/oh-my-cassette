@@ -1864,20 +1864,20 @@ def test_gateway_cassette_model_command_sets_preference_without_assets(cassette_
     )
     assert result is not None
     assert result["reason"] == "cassette_model_choice_requested"
-    assert "DeepSeek V4 Pro" in sent[-1][1]
+    assert "GPT-5.4 Mini" in sent[-1][1]
 
     gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="2", message_id="model_choice"),
         gateway=gateway,
     )
     result = gateway_mod.ingest_gateway_media(
-        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="2", message_id="thinking_choice"),
+        event=SimpleNamespace(source=source, media_urls=[], media_types=[], text="4", message_id="thinking_choice"),
         gateway=gateway,
     )
     assert result is not None
     assert result["reason"] == "cassette_model_set"
     prefs = tools._load_session_preferences(session_id)
-    assert prefs["cassette_model"] == "DeepSeek V4 Pro"
+    assert prefs["cassette_model"] == "GPT-5.4 Mini"
     assert prefs["cassette_thinking_level"] == "Medium"
 
 
@@ -3126,14 +3126,14 @@ def test_run_job_accepts_user_specified_cassette_model(cassette_env, monkeypatch
         tools.cassette_run_job(
             {
                 "prompt": "internal",
-                "chat_message": "请用 DeepSeek V4 Pro，高思考程度，剪成 10 秒",
-                "cassette_model": "DeepSeek V4 Pro",
+                "chat_message": "请用 GPT-5.6 Luna，高思考程度，剪成 10 秒",
+                "cassette_model": "GPT-5.6 Luna",
                 "session_id": "model-explicit",
             }
         )
     )
 
-    assert observed["model_selection"]["model"] == "DeepSeek V4 Pro"
+    assert observed["model_selection"]["model"] == "GPT-5.6 Luna"
     assert observed["model_selection"]["thinking_level"] == "High"
 
 
@@ -3198,7 +3198,7 @@ def test_gateway_run_job_uses_session_model_preference_over_prompt_text(cassette
         tools.cassette_run_job(
             {
                 "prompt": "internal",
-                "chat_message": "请用 DeepSeek V4 Flash，高思考程度，剪成 10 秒",
+                "chat_message": "请用 GPT-5.6 Luna，高思考程度，剪成 10 秒",
                 "session_id": session_id,
                 "wait": True,
             }
@@ -3348,38 +3348,44 @@ def test_cassette_config_get_returns_defaults_and_options(cassette_env):
     payload = json.loads(tools.cassette_config({"session_id": "cfg-get"}))
     assert payload["ok"] is True
     data = payload["data"]
-    assert data["model"] == "DeepSeek V4 Flash"
+    assert data["model"] == "GPT-5.6 Luna"
     assert data["thinking_level"] == "Low"
     assert data["source"] == "default"
     labels = [m["label"] for m in data["options"]["models"]]
-    assert labels == ["DeepSeek V4 Flash", "DeepSeek V4 Pro", "GPT 5.4 Mini"]
+    assert labels == ["GPT-5.6 Luna", "GPT-5.4 Mini"]
+    assert [item["value"] for item in data["options"]["thinking_levels"]] == [
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+    ]
     assert data["options"]["source"] == "static_product_list"
 
 
 def test_cassette_config_set_persists_and_applies_to_model_selection(cassette_env):
     set_payload = json.loads(
-        tools.cassette_config(
-            {"session_id": "cfg-set", "model": "deepseek/deepseek-v4-pro", "thinking_level": "medium"}
-        )
+        tools.cassette_config({"session_id": "cfg-set", "model": "openai/gpt-5.4-mini", "thinking_level": "medium"})
     )
     assert set_payload["ok"] is True
-    assert set_payload["data"]["model"] == "DeepSeek V4 Pro"
+    assert set_payload["data"]["model"] == "GPT-5.4 Mini"
     assert set_payload["data"]["thinking_level"] == "Medium"
     assert set_payload["data"]["source"] == "session_preference"
 
     # The preference now drives run_job model selection on ANY host (no delivery/platform gate).
     selection = tools._cassette_model_selection({"session_id": "cfg-set"}, None)
-    assert selection == {"model": "DeepSeek V4 Pro", "thinking_level": "Medium", "source": "session_preference"}
+    assert selection == {"model": "GPT-5.4 Mini", "thinking_level": "Medium", "source": "session_preference"}
 
     # Explicit run args still beat the session preference.
-    explicit = tools._cassette_model_selection({"session_id": "cfg-set", "cassette_model": "GPT 5.4 Mini"}, None)
-    assert explicit["model"] == "GPT 5.4 Mini"
+    explicit = tools._cassette_model_selection({"session_id": "cfg-set", "cassette_model": "GPT-5.6 Luna"}, None)
+    assert explicit["model"] == "GPT-5.6 Luna"
     assert explicit["source"] == "user_or_default"
 
 
 def test_cassette_config_accepts_label_and_rejects_unknown(cassette_env):
     by_label = json.loads(tools.cassette_config({"session_id": "cfg-label", "model": "gpt 5.4 mini"}))
-    assert by_label["ok"] and by_label["data"]["model"] == "GPT 5.4 Mini"
+    assert by_label["ok"] and by_label["data"]["model"] == "GPT-5.4 Mini"
 
     bad_model = json.loads(tools.cassette_config({"session_id": "cfg-label", "model": "gpt-9-ultra"}))
     assert bad_model["ok"] is False and bad_model["error"]["code"] == "invalid_cassette_model"
@@ -3387,7 +3393,13 @@ def test_cassette_config_accepts_label_and_rejects_unknown(cassette_env):
     bad_thinking = json.loads(tools.cassette_config({"session_id": "cfg-label", "thinking_level": "max"}))
     assert bad_thinking["ok"] is False and bad_thinking["error"]["code"] == "invalid_thinking_level"
 
-    # Thinking-only set keeps the saved model.
-    only_thinking = json.loads(tools.cassette_config({"session_id": "cfg-label", "thinking_level": "high"}))
-    assert only_thinking["ok"] and only_thinking["data"]["model"] == "GPT 5.4 Mini"
-    assert only_thinking["data"]["thinking_level"] == "High"
+    # GPT thinking-only settings keep the saved model and preserve the provider effort.
+    for thinking, expected in (
+        ("off", "Off"),
+        ("minimal", "Minimal"),
+        ("high", "High"),
+        ("xhigh", "XHigh"),
+    ):
+        only_thinking = json.loads(tools.cassette_config({"session_id": "cfg-label", "thinking_level": thinking}))
+        assert only_thinking["ok"] and only_thinking["data"]["model"] == "GPT-5.4 Mini"
+        assert only_thinking["data"]["thinking_level"] == expected
