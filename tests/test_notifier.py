@@ -678,7 +678,7 @@ def test_notify_model_selection_sends_quick_telegram_text(monkeypatch):
         {
             "job_id": "cassette_test",
             "cassette_language": "en",
-            "model_selection": {"model": "DeepSeek V4 Flash", "thinking_level": "Low"},
+            "model_selection": {"model": "GPT-5.6 Luna", "thinking_level": "Low"},
             "delivery": {"platform": "telegram", "chat_id": "telegram_chat_raw", "thread_id": "topic_raw"},
         }
     )
@@ -687,7 +687,7 @@ def test_notify_model_selection_sends_quick_telegram_text(monkeypatch):
     assert result["message_id"] == "tg-model-ok"
     assert sent[0][0] == "telegram_chat_raw"
     assert sent[0][2] == "topic_raw"
-    assert "Cassette model selected: DeepSeek V4 Flash" in sent[0][1]
+    assert "Cassette model selected: GPT-5.6 Luna" in sent[0][1]
     assert "telegram_chat_raw" not in sent[0][1]
 
 

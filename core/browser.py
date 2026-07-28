@@ -2920,12 +2920,19 @@ def _thinking_level_ui_candidates(thinking: str) -> list[str]:
     value = str(thinking or "").strip()
     normalized = value.casefold()
     aliases = {
+        "off": ["Off", "关闭"],
+        "minimal": ["Minimal", "最低", "最小"],
         "low": ["Low", "低", "轻量推理"],
         "medium": ["Medium", "中", "平衡"],
         "high": ["High", "高", "深度推理"],
+        "xhigh": ["Extra High", "XHigh", "超高"],
+        "关闭": ["关闭", "Off"],
+        "最低": ["最低", "Minimal", "最小"],
+        "最小": ["最小", "最低", "Minimal"],
         "低": ["低", "Low", "轻量推理"],
         "中": ["中", "Medium", "平衡"],
         "高": ["高", "High", "深度推理"],
+        "超高": ["超高", "Extra High", "XHigh"],
     }
     candidates = [value] if value else []
     candidates.extend(aliases.get(normalized, aliases.get(value, [])))
@@ -3205,10 +3212,26 @@ def _clean_model_label(text: str) -> str:
 def _thinking_value_from_label(label: str, title: str = "") -> str:
     label_norm = str(label or "").strip().casefold()
     title_norm = str(title or "").strip().casefold()
+    if label_norm in {"关闭", "off"} or "关闭" in title_norm or "reasoning off" in title_norm:
+        return "Off"
+    if (
+        label_norm in {"最低", "最小", "minimal"}
+        or "最低" in title_norm
+        or "最小" in title_norm
+        or "minimal" in title_norm
+    ):
+        return "Minimal"
     if label_norm in {"低", "low"} or "轻量" in title_norm or "low" in title_norm:
         return "Low"
     if label_norm in {"中", "medium"} or "平衡" in title_norm or "medium" in title_norm or "balanced" in title_norm:
         return "Medium"
+    if (
+        label_norm in {"超高", "xhigh", "extra high"}
+        or "超高" in title_norm
+        or "xhigh" in title_norm
+        or "extra high" in title_norm
+    ):
+        return "XHigh"
     if label_norm in {"高", "high"} or "深度" in title_norm or "high" in title_norm or "deep" in title_norm:
         return "High"
     return ""
@@ -3291,9 +3314,12 @@ def _fetch_cassette_model_options_direct(url: str | None = None, language: str =
             raise RuntimeError("cassette_model_options_empty")
         if not options.get("thinking_levels"):
             options["thinking_levels"] = [
+                {"label": "关闭" if target_language == "zh" else "Off", "value": "Off", "title": ""},
+                {"label": "最低" if target_language == "zh" else "Minimal", "value": "Minimal", "title": ""},
                 {"label": "低" if target_language == "zh" else "Low", "value": "Low", "title": "轻量推理"},
                 {"label": "中" if target_language == "zh" else "Medium", "value": "Medium", "title": "平衡"},
                 {"label": "高" if target_language == "zh" else "High", "value": "High", "title": "深度推理"},
+                {"label": "超高" if target_language == "zh" else "Extra High", "value": "XHigh", "title": ""},
             ]
         return {
             **options,

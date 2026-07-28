@@ -31,8 +31,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--transport", choices=("api", "browser"), default="api")
     parser.add_argument("--host", choices=("codex", "claude"), default="codex")
     parser.add_argument("--timeout-sec", type=int, default=1500)
-    parser.add_argument("--model", default="DeepSeek V4 Flash")
-    parser.add_argument("--thinking-level", choices=("low", "medium", "high"), default="low")
+    parser.add_argument("--model", default="GPT-5.6 Luna")
+    parser.add_argument(
+        "--thinking-level",
+        choices=("off", "minimal", "low", "medium", "high", "xhigh"),
+        default="low",
+    )
     parser.add_argument("--language", choices=("en", "zh"), default="en")
     return parser.parse_args()
 

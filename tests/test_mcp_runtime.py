@@ -54,6 +54,15 @@ def test_mcp_envelope_redacts_local_credentials(tmp_path, monkeypatch):
     assert serialized.count("<redacted>") >= 2
 
 
+def test_api_auth_token_satisfies_mcp_preflight_and_is_redacted(tmp_path, monkeypatch):
+    runtime = _runtime(tmp_path, monkeypatch)
+    runtime_config.credentials_path().unlink()
+    monkeypatch.setenv("CASSETTE_AUTH_TOKEN", "private-pre-issued-token")
+
+    assert runtime._auth_error(session_id="session") is None
+    assert "private-pre-issued-token" not in runtime._redact({"debug": "using private-pre-issued-token"})["debug"]
+
+
 def test_mcp_rejects_output_outside_job_export_directory(tmp_path, monkeypatch):
     runtime = _runtime(tmp_path, monkeypatch)
     outside = tmp_path / "outside.mp4"

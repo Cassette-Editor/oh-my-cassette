@@ -255,11 +255,11 @@ def _fake_result(via: str) -> dict:
 @pytest.mark.parametrize(
     "label,expected",
     [
-        ("DeepSeek V4 Flash", "deepseek/deepseek-v4-flash"),
-        ("DeepSeek V4 Pro", "deepseek/deepseek-v4-pro"),
+        ("GPT-5.6 Luna", "openai/gpt-5.6-luna"),
+        ("gpt 5.6 luna", "openai/gpt-5.6-luna"),
         ("GPT-5.4 Mini", "openai/gpt-5.4-mini"),
-        ("deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro"),  # already an id
-        ("", "deepseek/deepseek-v4-flash"),  # no choice -> default
+        ("openai/gpt-5.4-mini", "openai/gpt-5.4-mini"),  # already an id
+        ("", "openai/gpt-5.6-luna"),  # no choice -> default
     ],
 )
 def test_api_model_label_maps_to_id(label, expected):
@@ -277,9 +277,29 @@ def test_api_model_selection_required_fails_on_unmappable_label(monkeypatch):
     assert exc.value.code == "model_selection_failed"
     monkeypatch.setenv("CASSETTE_REQUIRE_MODEL_SELECTION", "off")
     assert (
-        ApiTransport._resolve_model_id({"model_selection": {"model": "Totally Unknown Model"}})
-        == "deepseek/deepseek-v4-flash"
+        ApiTransport._resolve_model_id({"model_selection": {"model": "Totally Unknown Model"}}) == "openai/gpt-5.6-luna"
     )
+
+
+def test_removed_deepseek_model_is_rejected(monkeypatch):
+    from cassette.core.api_transport import ApiTransportError
+
+    monkeypatch.delenv("CASSETTE_API_MODEL_ID", raising=False)
+    with pytest.raises(ApiTransportError) as exc:
+        ApiTransport._resolve_model_id({"model_selection": {"model": "DeepSeek V4 Flash"}})
+    assert exc.value.code == "model_selection_failed"
+
+
+@pytest.mark.parametrize("thinking", ["off", "minimal", "low", "medium", "high", "xhigh"])
+def test_api_thinking_config_uses_gpt_reasoning_levels(monkeypatch, thinking):
+    monkeypatch.delenv("CASSETTE_API_THINKING", raising=False)
+    assert ApiTransport._resolve_thinking_config({"model_selection": {"thinking_level": thinking.upper()}}) == thinking
+
+
+def test_api_thinking_config_rejects_non_gpt_level(monkeypatch):
+    monkeypatch.delenv("CASSETTE_API_THINKING", raising=False)
+    monkeypatch.delenv("CASSETTE_DEFAULT_THINKING_LEVEL", raising=False)
+    assert ApiTransport._resolve_thinking_config({"model_selection": {"thinking_level": "max"}}) == "low"
 
 
 def test_api_resume_value_classifies_and_records_interrupts():

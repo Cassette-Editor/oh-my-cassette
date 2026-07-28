@@ -1000,6 +1000,14 @@ def test_auth_token_override_skips_verify(cassette_env, mock_api, monkeypatch):
     assert ("POST", "/api/agent-auth/verify") not in mock_api.rec["requests"]
 
 
+def test_auth_token_override_satisfies_availability(cassette_env, monkeypatch):
+    monkeypatch.setenv("CASSETTE_AUTH_TOKEN", "pre-issued-token")
+    monkeypatch.delenv("CASSETTE_AUTH_EMAIL", raising=False)
+    monkeypatch.delenv("CASSETTE_AUTH_PASSWORD", raising=False)
+
+    assert ApiTransport().check_available() is True
+
+
 def test_cassette_timeline_tool_reads_live_document(cassette_env, mock_api):
     result = json.loads(tools.cassette_timeline({"session_id": "try-session-abc"}))
     assert result["ok"], result

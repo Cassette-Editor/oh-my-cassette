@@ -278,12 +278,15 @@ CASSETTE_RUN_JOB = {
             "selectors": {"type": "object"},
             "cassette_model": {
                 "type": "string",
-                "description": "Optional Cassette model label, for example DeepSeek V4 Flash. Defaults to DeepSeek V4 Flash.",
+                "description": "Optional Cassette model label, for example GPT-5.6 Luna. Defaults to GPT-5.6 Luna.",
             },
             "model": {"type": "string", "description": "Alias for cassette_model."},
             "thinking_level": {
                 "type": "string",
-                "description": "Optional Cassette thinking level: low, medium, high, or Chinese equivalents. Defaults to low.",
+                "enum": ["off", "minimal", "low", "medium", "high", "xhigh"],
+                "description": (
+                    "Optional GPT thinking level: off, minimal, low, medium, high, or xhigh. Defaults to low."
+                ),
             },
             "cassette_language": {
                 "type": "string",
@@ -424,9 +427,12 @@ CASSETTE_CONFIG = {
             "session_id": {"type": "string"},
             "model": {
                 "type": "string",
-                "description": "Product model id (e.g. deepseek/deepseek-v4-pro) or display label (e.g. DeepSeek V4 Pro).",
+                "description": "Product model id (e.g. openai/gpt-5.6-luna) or display label (e.g. GPT-5.6 Luna).",
             },
-            "thinking_level": {"type": "string", "enum": ["low", "medium", "high"]},
+            "thinking_level": {
+                "type": "string",
+                "enum": ["off", "minimal", "low", "medium", "high", "xhigh"],
+            },
         },
         "required": ["session_id"],
         "additionalProperties": False,
