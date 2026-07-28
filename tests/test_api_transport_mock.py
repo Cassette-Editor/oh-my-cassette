@@ -1549,3 +1549,51 @@ def test_completion_observed_survives_a_normal_terminal_decision():
     # An absent decision must not change today's behaviour.
     transport._last_terminal_outcome = None
     assert transport._result("succeeded", completion_observed=True)["quality"]["completion_observed"] is True
+
+
+def test_host_progress_sink_receives_ticks_and_is_scoped_to_the_call():
+    """One blocking run_job replaces the poll loop, so the transport must be able to reach the
+    host's progress channel from inside its own wait — and must stop when the call ends."""
+    from cassette.core import api_transport as T
+
+    transport = T.ApiTransport()
+    transport._reset_progress_state() if hasattr(transport, "_reset_progress_state") else None
+    seen: list[tuple[float, str]] = []
+    with T.host_progress_sink(lambda elapsed, stage: seen.append((elapsed, stage))):
+        transport._current_stage = "agent"
+        transport._run_started = 0.0
+        transport._last_host_progress = 0.0
+        transport._emit_host_progress(99.0, "studying the footage", force=True)
+    assert seen, "a forced tick must reach the sink"
+    assert "agent" in seen[0][1] and "studying the footage" in seen[0][1]
+
+    # Outside the context the sink is detached: a later job must not write to a finished call.
+    seen.clear()
+    transport._emit_host_progress(200.0, "later", force=True)
+    assert seen == []
+
+
+def test_host_progress_is_rate_limited_between_forced_boundaries():
+    from cassette.core import api_transport as T
+
+    transport = T.ApiTransport()
+    seen: list[tuple[float, str]] = []
+    with T.host_progress_sink(lambda elapsed, stage: seen.append((elapsed, stage))):
+        transport._current_stage = "export"
+        transport._run_started = 0.0
+        transport._last_host_progress = 0.0
+        transport._emit_host_progress(100.0, "rendering")          # first tick lands
+        transport._emit_host_progress(100.5, "rendering")          # inside the interval: dropped
+        transport._emit_host_progress(100.0 + T._HOST_PROGRESS_INTERVAL_SEC + 0.1, "rendering")
+    assert len(seen) == 2
+
+
+def test_host_progress_never_breaks_a_run():
+    from cassette.core import api_transport as T
+
+    transport = T.ApiTransport()
+    with T.host_progress_sink(lambda *_: (_ for _ in ()).throw(RuntimeError("host went away"))):
+        transport._current_stage = "agent"
+        transport._run_started = 0.0
+        transport._last_host_progress = 0.0
+        transport._emit_host_progress(10.0, "still working", force=True)  # must not raise

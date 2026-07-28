@@ -49,10 +49,11 @@ class LocalMcpRuntime:
 
     def __init__(self, config_errors: list[runtime_config.RuntimeConfigError] | None = None):
         load_core()
-        from cassette.core import jobs, tools
+        from cassette.core import api_transport, jobs, tools
 
         self.jobs = jobs
         self.tools = tools
+        self.api_transport = api_transport
         self.config_errors = list(config_errors or [])
         if self.config_errors:
             self.state = None
@@ -516,7 +517,11 @@ class LocalMcpRuntime:
         payload = self._invoke_core(name, args, session_id=session_id)
         return self._envelope_from_core(payload, session_id=session_id)
 
-    def run_job(self, args: dict[str, Any]) -> ToolEnvelope:
+    def run_job(
+        self,
+        args: dict[str, Any],
+        on_progress: Callable[[float, str], None] | None = None,
+    ) -> ToolEnvelope:
         session_id = str(args.get("session_id") or "").strip() or None
         config_error = self._config_error(session_id=session_id)
         if config_error:
@@ -547,7 +552,8 @@ class LocalMcpRuntime:
                 session_id=session_id,
                 phase=current_phase,
             )
-        payload = self._invoke_core("cassette_run_job", args, session_id=session_id)
+        with self.api_transport.host_progress_sink(on_progress):
+            payload = self._invoke_core("cassette_run_job", args, session_id=session_id)
         job_id = str(payload.get("job_id") or "").strip() or None
         phase = self._load_state_phase(session_id)
         job: dict[str, Any] = {}

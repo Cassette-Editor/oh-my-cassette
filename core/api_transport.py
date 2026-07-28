@@ -40,6 +40,8 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -191,6 +193,25 @@ def _env_num(name: str, default, floor, *, cast=float, getter=None):
 # the editor SPA route in CASSETTE_URL (which ends in /agent). Override with CASSETTE_API_URL for
 # self-hosted / non-default deployments.
 DEFAULT_CASSETTE_API_URL = "https://remotion-canvas-server-5tdb2hkb4q-as.a.run.app"
+
+# Host-progress plumbing. A blocking run_job is the no-poll path: the host makes one tool
+# call and is answered when the job is terminal. That only works if the transport can reach
+# the host's progress channel from inside its own wait, so the sink is set for the duration
+# of the call rather than threaded through every generic dispatch layer between them.
+_HOST_PROGRESS_INTERVAL_SEC = 5.0
+_PROGRESS_SINK: Callable[[float, str], None] | None = None
+
+
+@contextmanager
+def host_progress_sink(sink: Callable[[float, str], None] | None) -> Iterator[None]:
+    """Route transport progress to `sink` for the duration of one blocking call."""
+    global _PROGRESS_SINK
+    previous = _PROGRESS_SINK
+    _PROGRESS_SINK = sink
+    try:
+        yield
+    finally:
+        _PROGRESS_SINK = previous
 
 
 def _api_base() -> str:
@@ -2077,6 +2098,27 @@ class ApiTransport:
         if (now - self._last_heartbeat) >= self._heartbeat_interval():
             self._last_heartbeat = now
             self._send_heartbeat(summary)
+        self._emit_host_progress(now, summary, force=force_event)
+
+    def _emit_host_progress(self, now: float, summary: str, *, force: bool = False) -> None:
+        """Feed the MCP host's progress channel so one blocking call replaces a poll loop.
+
+        A host that waits on a single tool call needs two things: something to show the user,
+        and traffic often enough that the call is not judged idle and aborted. Both come from
+        here, on their own cadence — the event/heartbeat intervals above are tuned for the job
+        record and the gateway, and are far too slow to hold a call open.
+        """
+        sink = _PROGRESS_SINK
+        if sink is None:
+            return
+        if not force and (now - getattr(self, "_last_host_progress", 0.0)) < _HOST_PROGRESS_INTERVAL_SEC:
+            return
+        self._last_host_progress = now
+        try:
+            elapsed = now - getattr(self, "_run_started", now)
+            sink(round(elapsed, 1), f"{self._current_stage or 'running'} — {str(summary)[:160]}".strip(" —"))
+        except Exception:  # noqa: BLE001 — progress must never break the run
+            pass
 
     def _append_event(self, job_id: str, summary: str, status: str, outputs: list | None) -> None:
         try:
