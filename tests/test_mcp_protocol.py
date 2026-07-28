@@ -108,7 +108,9 @@ def test_mcp_lists_exactly_the_hermes_tools_with_flat_structured_schemas():
         assert {tool.name for tool in listed} == {tool["name"] for tool in hermes.tools} == EXPECTED_TOOLS
         by_name = {tool.name: tool for tool in listed}
         assert "request" not in by_name["cassette_run_job"].inputSchema["properties"]
-        assert by_name["cassette_run_job"].inputSchema["properties"]["wait"]["default"] is False
+        # The call IS the wait: it returns on a terminal phase and streams progress meanwhile,
+        # so the host makes one call per turn instead of a cassette_job_status poll loop.
+        assert by_name["cassette_run_job"].inputSchema["properties"]["wait"]["default"] is True
         assert set(by_name["cassette_config"].inputSchema["properties"]["thinking_level"]["anyOf"][0]["enum"]) == {
             "off",
             "minimal",

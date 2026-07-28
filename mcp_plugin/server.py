@@ -128,13 +128,16 @@ mcp = ArtifactFastMCP(
         "preview; pass export=true only when the user expresses finish/export intent. "
         "Model/thinking: never ask upfront (defaults match the web editor); when the user asks, "
         "set them via cassette_config — applied from the next turn. "
-        "Poll cassette_job_status with wait_for_change_sec=30 and route on the typed phase and next_action "
+        "cassette_run_job returns when the turn is settled, streaming progress notifications while it "
+        "works — one call per turn, never a status loop. Route on the typed phase and next_action "
         "fields, never on prose: needs_user means ask the user then call cassette_answer_question; "
         "review_required (export turns) means evaluate the result and call cassette_review_completion (only "
         "decision=export renders); succeeded means relay the delta/preview and continue the "
         "conversation; exported means present the validated artifacts; "
         "failed, cancelled, or timed_out means report the structured error (thread_busy = a run "
-        "is already live on this session's thread; wait and retry). Do not tight-poll. "
+        "is already live on this session's thread; wait and retry). cassette_job_status is for "
+        "re-attaching to a job whose call did not return (host restart, cancellation, wait=false) — "
+        "call it once, never in a loop. "
         "Ground every statement about project state in cassette_timeline, never in memory, and "
         "name the version in replies. Small named edits (trim, text, delete, undo) go through "
         "cassette_edit when CASSETTE_DIRECT_EDIT=1: read the timeline first, pass "
@@ -142,7 +145,7 @@ mcp = ArtifactFastMCP(
         "briefs go through cassette_run_job. Job envelopes carry editor_url — a live view of "
         "the real editor (timeline + preview, zero render): hand it to the user once at job "
         "start and again at questions/review, offering to open it locally; do not repeat it on "
-        "every poll. Status envelopes carry timeline_delta (what changed) and plan_progress — "
+        "every reply. Envelopes carry timeline_delta (what changed) and plan_progress — "
         "relay them instead of re-describing state. A needs_user question with reason "
         "edit_plan_review is the edit plan itself (quality also carries storyboard beat cells "
         "and a storyboard_sheet image — one planned source frame per beat, zero render): relay "
@@ -510,8 +513,11 @@ async def cassette_answer_question(
 
 @mcp.tool(
     description=(
-        "Start a Cassette edit. Local MCP execution is background-by-default; set wait=true only for "
-        "compatibility when a blocking call is intentional."
+        "Run one Cassette edit turn and return when it is settled. This call IS the wait: it streams "
+        "progress notifications while the agent works and answers with the terminal envelope "
+        "(succeeded / needs_user / review_required / exported / failed). Do not poll cassette_job_status "
+        "after it — that tool is for resuming a job whose call was interrupted. Pass wait=false only to "
+        "deliberately detach the turn into the background."
     ),
     structured_output=True,
 )
@@ -526,7 +532,7 @@ async def cassette_run_job(
     session_id: str | None = None,
     chat_id: str | None = None,
     url: str | None = None,
-    wait: bool = False,
+    wait: bool = True,
     timeout_sec: int | None = None,
     selectors: dict[str, Any] | None = None,
     cassette_model: str | None = None,
@@ -556,12 +562,26 @@ async def cassette_run_job(
             "language": language,
         }
     )
-    return await _run_sync(_runtime(ctx).run_job, request.model_dump(exclude_none=True))
+    loop = asyncio.get_running_loop()
+
+    def _tick(elapsed: float, stage: str) -> None:
+        # report_progress is a no-op unless the client sent a progressToken. Emitting it also
+        # keeps the call off the host's idle-abort path, which is what lets one blocking call
+        # stand in for a poll loop.
+        asyncio.run_coroutine_threadsafe(ctx.report_progress(elapsed, None, stage or None), loop)
+
+    envelope = await _run_sync(
+        _runtime(ctx).run_job, request.model_dump(exclude_none=True), _tick if wait else None
+    )
+    return await _maybe_elicit_needs_user(ctx, envelope)
 
 
 @mcp.tool(
     description=(
-        "Read one job or recent session jobs. wait_for_change_sec performs a bounded long-poll from 0 to 30 seconds."
+        "Re-attach to a job whose cassette_run_job call did not return — host restart, cancellation, "
+        "or a turn deliberately started with wait=false. Call it once and act on the phase; it is not "
+        "a progress loop. wait_for_change_sec gives an unsettled job up to 30 seconds to reach its next "
+        "phase before answering."
     ),
     structured_output=True,
 )
