@@ -338,6 +338,11 @@ def test_chinese_routine_and_completion_phrases_are_classified():
     assert browser._chat_indicates_complete(routine, routine) is False
     assert browser._chat_indicates_complete(complete, complete) is True
     assert browser._thinking_level_ui_candidates("Medium")[:2] == ["Medium", "中"]
+    assert browser._thinking_level_ui_candidates("XHigh")[:3] == ["XHigh", "Extra High", "超高"]
+    assert browser._thinking_value_from_label("Off") == "Off"
+    assert browser._thinking_value_from_label("Minimal") == "Minimal"
+    assert browser._thinking_value_from_label("Extra High") == "XHigh"
+    assert browser._thinking_value_from_label("XHigh") == "XHigh"
 
 
 def test_completion_denial_phrases_are_classified_in_chinese_and_english():
@@ -1345,10 +1350,10 @@ def test_selects_cassette_model_before_submission(cassette_env):
     html = """
     <!doctype html>
     <html><body>
-      <button title="DeepSeek V4 Flash · Low" id="trigger">model</button>
+      <button title="GPT-5.6 Luna · Low" id="trigger">model</button>
       <div role="dialog" id="dialog" style="display:none">
-        <button>DeepSeek V4 Flash</button>
-        <button>Kimi K2.6</button>
+        <button>GPT-5.6 Luna</button>
+        <button>GPT-5.4 Mini</button>
         <button>Low</button>
         <button>Medium</button>
         <button>High</button>
@@ -1372,11 +1377,11 @@ def test_selects_cassette_model_before_submission(cassette_env):
 
         result = browser._select_cassette_model(
             page,
-            {"model_selection": {"model": "Kimi K2.6", "thinking_level": "Medium"}},
+            {"model_selection": {"model": "GPT-5.4 Mini", "thinking_level": "Medium"}},
         )
 
         assert result["status"] == "selected"
-        assert page.evaluate("window.selected") == ["Kimi K2.6", "Medium"]
+        assert page.evaluate("window.selected") == ["GPT-5.4 Mini", "Medium"]
     finally:
         browser_instance.close()
 
@@ -1386,10 +1391,10 @@ def test_selects_cassette_model_with_chinese_ui(cassette_env):
     html = """
     <!doctype html>
     <html><body>
-      <button title="DeepSeek V4 Flash · 低" id="trigger">model</button>
+      <button title="GPT-5.6 Luna · 低" id="trigger">model</button>
       <div role="dialog" id="dialog" style="display:none">
-        <button>DeepSeek V4 Flash<br />高效 MoE 推理模型</button>
-        <button>Kimi K2.6<br />长上下文 Moonshot 推理模型</button>
+        <button>GPT-5.6 Luna<br />最新 OpenAI 智能体模型</button>
+        <button>GPT-5.4 Mini<br />快速 OpenAI 推理模型</button>
         <button title="轻量推理">低</button>
         <button title="平衡">中</button>
         <button title="深度推理">高</button>
@@ -1413,12 +1418,12 @@ def test_selects_cassette_model_with_chinese_ui(cassette_env):
 
         result = browser._select_cassette_model(
             page,
-            {"model_selection": {"model": "Kimi K2.6", "thinking_level": "Medium"}},
+            {"model_selection": {"model": "GPT-5.4 Mini", "thinking_level": "Medium"}},
         )
 
         assert result["status"] == "selected"
         selected = page.evaluate("window.selected")
-        assert selected[0].startswith("Kimi K2.6")
+        assert selected[0].startswith("GPT-5.4 Mini")
         assert selected[1] == "中"
     finally:
         browser_instance.close()

@@ -109,6 +109,14 @@ def test_mcp_lists_exactly_the_hermes_tools_with_flat_structured_schemas():
         by_name = {tool.name: tool for tool in listed}
         assert "request" not in by_name["cassette_run_job"].inputSchema["properties"]
         assert by_name["cassette_run_job"].inputSchema["properties"]["wait"]["default"] is False
+        assert set(by_name["cassette_config"].inputSchema["properties"]["thinking_level"]["anyOf"][0]["enum"]) == {
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        }
         assert "wait_for_change_sec" in by_name["cassette_job_status"].inputSchema["properties"]
         assert {"job_id", "response"} <= set(by_name["cassette_answer_question"].inputSchema["properties"])
         assert set(by_name["cassette_ingest_media"].inputSchema["properties"]["media_type"]["anyOf"][0]["enum"]) == {
@@ -202,7 +210,7 @@ def test_real_stdio_process_initializes_and_calls_every_tool(tmp_path):
                         "tool_name": "timeline_trim",
                         "input": {"clipId": "c1"},
                     },
-                    "cassette_config": {"session_id": session_id, "model": "DeepSeek V4 Pro"},
+                    "cassette_config": {"session_id": session_id, "model": "GPT-5.4 Mini"},
                 }
                 seen = {"cassette_ingest_media"}
                 results = {}
@@ -216,7 +224,7 @@ def test_real_stdio_process_initializes_and_calls_every_tool(tmp_path):
                 assert results["cassette_answer_question"].structuredContent["ok"] is True
                 assert results["cassette_run_job"].structuredContent["error"]["code"] == "auth_required"
                 assert results["cassette_config"].structuredContent["ok"] is True
-                assert results["cassette_config"].structuredContent["data"]["model"] == "DeepSeek V4 Pro"
+                assert results["cassette_config"].structuredContent["data"]["model"] == "GPT-5.4 Mini"
                 command = results["cassette_run_job"].structuredContent["error"]["details"]["setup_command"]
                 assert command.endswith("scripts/setup_local_mcp.py")
 

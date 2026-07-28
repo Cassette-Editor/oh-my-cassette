@@ -51,9 +51,10 @@ One session is one continuous conversation with the Cassette agent on one persis
 
 ## Model and thinking level
 
-- `cassette_config(session_id)` shows the current choice and the available options; `cassette_config(session_id, model=…, thinking_level=…)` changes them (accepts a product id like `deepseek/deepseek-v4-pro` or a label like "DeepSeek V4 Pro").
+- `cassette_config(session_id)` shows the current choice and the available options; `cassette_config(session_id, model=…, thinking_level=…)` changes them (accepts a product id like `openai/gpt-5.6-luna` or a label like "GPT-5.6 Luna").
 - The preference persists for the session and applies from the next turn — the same semantics as switching the model between turns in the web editor.
-- Defaults (DeepSeek V4 Flash, low thinking) match the web editor. Do not ask upfront; change only on user request and confirm in one line.
+- GPT thinking levels are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
+- The only user-selectable models are GPT-5.6 Luna and GPT-5.4 Mini. Defaults (GPT-5.6 Luna, low thinking) match the web editor. Do not ask upfront; change only on user request and confirm in one line.
 
 ## Typed progress handling
 

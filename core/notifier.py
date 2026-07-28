@@ -1071,11 +1071,18 @@ def format_progress_snapshot_message(job: dict, summary: str = "") -> str:
 
 
 def format_model_selection_message(model_selection: dict, language: str = "zh") -> str:
-    model = str(model_selection.get("model") or "DeepSeek V4 Flash")
+    model = str(model_selection.get("model") or "GPT-5.6 Luna")
     thinking = str(model_selection.get("thinking_level") or "Low")
     if _language_for_platform(None, {"cassette_language": language}) == "en":
         return f"Cassette model selected: {model}; thinking level: {thinking}."
-    thinking_label = {"Low": "低", "Medium": "中", "High": "高"}.get(thinking, thinking)
+    thinking_label = {
+        "Off": "关闭",
+        "Minimal": "最小",
+        "Low": "低",
+        "Medium": "中",
+        "High": "高",
+        "XHigh": "超高",
+    }.get(thinking, thinking)
     return f"Cassette 已选择模型：{model}，思考程度：{thinking_label}。"
 
 

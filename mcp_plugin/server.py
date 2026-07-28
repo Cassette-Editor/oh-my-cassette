@@ -531,7 +531,7 @@ async def cassette_run_job(
     selectors: dict[str, Any] | None = None,
     cassette_model: str | None = None,
     model: str | None = None,
-    thinking_level: str | None = None,
+    thinking_level: Literal["off", "minimal", "low", "medium", "high", "xhigh"] | None = None,
     cassette_language: Literal["zh", "en"] | None = None,
     language: Literal["zh", "en"] | None = None,
 ) -> ToolEnvelope:
@@ -629,7 +629,7 @@ async def cassette_config(
     session_id: str,
     ctx: Context,
     model: str | None = None,
-    thinking_level: Literal["low", "medium", "high"] | None = None,
+    thinking_level: Literal["off", "minimal", "low", "medium", "high", "xhigh"] | None = None,
 ) -> ToolEnvelope:
     request = ConfigInput(session_id=session_id, model=model, thinking_level=thinking_level)
     return await _run_sync(

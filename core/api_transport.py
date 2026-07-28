@@ -73,13 +73,12 @@ _NAVIGATE_NOOP_RESULT = {
 # (useAgentModelPrefsStore DEFAULT_MODEL), so the api transport matches the browser/UI flow. The
 # plugin's model_selection holds UI labels (or is empty), so it is only forwarded when it already
 # names a product model id; otherwise the configured/default model is used.
-DEFAULT_AGENT_MODEL_ID = "deepseek/deepseek-v4-flash"
+DEFAULT_AGENT_MODEL_ID = "openai/gpt-5.6-luna"
 # Single source for the product model list (id + display label): cassette_config, the gateway
 # /cassette_model picker, and the run-time resolver all derive from this tuple.
 AGENT_MODEL_OPTIONS = (
-    {"id": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
-    {"id": "deepseek/deepseek-v4-pro", "label": "DeepSeek V4 Pro"},
-    {"id": "openai/gpt-5.4-mini", "label": "GPT 5.4 Mini"},
+    {"id": "openai/gpt-5.6-luna", "label": "GPT-5.6 Luna"},
+    {"id": "openai/gpt-5.4-mini", "label": "GPT-5.4 Mini"},
 )
 _SUPPORTED_AGENT_MODEL_IDS = frozenset(option["id"] for option in AGENT_MODEL_OPTIONS)
 # The plugin's model_selection stores a UI *label* (browser.py scrapes only the label, not the id),
@@ -88,7 +87,7 @@ _SUPPORTED_AGENT_MODEL_IDS = frozenset(option["id"] for option in AGENT_MODEL_OP
 _MODEL_LABEL_TO_ID = {
     "".join(ch for ch in option["label"].lower() if ch.isalnum()): option["id"] for option in AGENT_MODEL_OPTIONS
 }
-AGENT_THINKING_LEVELS = ("low", "medium", "high")
+AGENT_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh")
 _DEFAULT_THINKING = "low"  # matches cassette-config DEFAULT_THINKING / per-model defaultThinking
 
 
@@ -113,20 +112,11 @@ def _auto_export() -> bool:
 
 
 def _model_id_from_label(label: str) -> str | None:
-    """Map a scraped model display label (e.g. 'DeepSeek V4 Pro') to its agent model id."""
+    """Map an exact normalized product label (e.g. 'GPT-5.6 Luna') to its model id."""
     norm = "".join(ch for ch in str(label).lower() if ch.isalnum())
     if not norm:
         return None
-    if norm in _MODEL_LABEL_TO_ID:
-        return _MODEL_LABEL_TO_ID[norm]
-    # Token fallback, robust to label drift / localization.
-    if "flash" in norm:
-        return "deepseek/deepseek-v4-flash"
-    if "deepseek" in norm and "pro" in norm:
-        return "deepseek/deepseek-v4-pro"
-    if "gpt" in norm or "mini" in norm:
-        return "openai/gpt-5.4-mini"
-    return None
+    return _MODEL_LABEL_TO_ID.get(norm)
 
 
 # Quality subkeys that _result computes from the current outcome — never carry these forward from a
@@ -374,6 +364,8 @@ class ApiTransport:
 
     # ── public Transport surface ──────────────────────────────────────────────
     def check_available(self) -> bool:
+        if _env("CASSETTE_AUTH_TOKEN"):
+            return bool(_api_base())
         email, password = _credentials()
         return bool(_api_base() and email and password)
 
@@ -1338,9 +1330,9 @@ class ApiTransport:
 
     @staticmethod
     def _resolve_thinking_config(job: dict) -> str:
-        # The editor thinking values are lowercase 'low'|'medium'|'high'; default 'low' matches the UI
-        # (cassette-config). Honor an env override or the job's thinking selection (case-insensitive).
-        valid = {"low", "medium", "high"}
+        # Mirror the GPT reasoning presets exposed by cassette-config. Honor an env override or the
+        # job's thinking selection (case-insensitive); default 'low' matches both product models.
+        valid = set(AGENT_THINKING_LEVELS)
         override = _env("CASSETTE_API_THINKING").lower()
         if override in valid:
             return override

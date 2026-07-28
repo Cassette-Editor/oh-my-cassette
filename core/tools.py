@@ -637,8 +637,14 @@ def _asset_paths_for_session(
 
 def _normalize_thinking_level(value: str | None, text: str = "") -> str:
     explicit = (value or "").strip().lower()
+    if explicit in {"off", "none", "disabled", "关闭", "关", "无"}:
+        return "Off"
+    if explicit in {"minimal", "minimum", "最小", "最低"}:
+        return "Minimal"
     if explicit in {"high", "deep", "高", "高思考", "深度", "重度"}:
         return "High"
+    if explicit in {"xhigh", "extra high", "extra-high", "最高", "超高"}:
+        return "XHigh"
     if explicit in {"low", "light", "低", "低思考", "轻度"}:
         return "Low"
     if explicit in {"medium", "balanced", "中", "中等", "中度"}:
@@ -1754,7 +1760,8 @@ def _cassette_model_options(language: str = "zh") -> dict[str, Any]:
     return {
         "models": [{"label": option["label"], "id": option["id"]} for option in api_transport.AGENT_MODEL_OPTIONS],
         "thinking_levels": [
-            {"label": level.capitalize(), "value": level.capitalize()} for level in api_transport.AGENT_THINKING_LEVELS
+            {"label": "Extra High" if level == "xhigh" else level.capitalize(), "value": level}
+            for level in api_transport.AGENT_THINKING_LEVELS
         ],
         "source": "static_product_list",
     }

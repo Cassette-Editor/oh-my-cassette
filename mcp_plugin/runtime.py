@@ -75,6 +75,10 @@ class LocalMcpRuntime:
         )
 
     def _auth_error(self, *, session_id: str | None = None) -> ToolEnvelope | None:
+        selected = str(os.getenv("CASSETTE_TRANSPORT", "api") or "api").strip().lower()
+        token = str(os.getenv("CASSETTE_AUTH_TOKEN", "") or "").strip()
+        if selected != "browser" and token:
+            return None
         try:
             credentials = runtime_config.load_credentials()
         except runtime_config.RuntimeConfigError as exc:
@@ -96,7 +100,6 @@ class LocalMcpRuntime:
                 },
                 session_id=session_id,
             )
-        selected = str(os.getenv("CASSETTE_TRANSPORT", "api") or "api").strip().lower()
         if selected != "browser" and credentials.get("full_api_access") is False:
             return self._failure(
                 "api_access_unavailable",
@@ -108,6 +111,9 @@ class LocalMcpRuntime:
 
     def _redaction_secrets(self) -> list[str]:
         values: list[str] = []
+        token = str(os.getenv("CASSETTE_AUTH_TOKEN", "") or "")
+        if token:
+            values.append(token)
         try:
             credentials = runtime_config.load_credentials()
             for key in ("email", "password"):

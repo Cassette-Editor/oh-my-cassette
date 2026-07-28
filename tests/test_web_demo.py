@@ -447,9 +447,7 @@ def test_web_skip_choice_reply_is_bridged_to_llm_history(cassette_env, monkeypat
     )
 
     def fake_ingest(event, gateway):
-        gateway.adapters["web"].send(
-            event.source.chat_id, "已选择模型：DeepSeek V4 Flash。请选择思考程度，回复序号即可："
-        )
+        gateway.adapters["web"].send(event.source.chat_id, "已选择模型：GPT-5.6 Luna。请选择思考程度，回复序号即可：")
         return {"action": "skip", "reason": "cassette_model_thinking_choice_requested", "reply_sent": True}
 
     monkeypatch.setattr(gateway_mod, "ingest_gateway_media", fake_ingest)
@@ -461,7 +459,7 @@ def test_web_skip_choice_reply_is_bridged_to_llm_history(cassette_env, monkeypat
     history = session_store.get_llm_messages(session_id)
     assert history[-2:] == [
         {"role": "user", "content": "1"},
-        {"role": "assistant", "content": "已选择模型：DeepSeek V4 Flash。请选择思考程度，回复序号即可："},
+        {"role": "assistant", "content": "已选择模型：GPT-5.6 Luna。请选择思考程度，回复序号即可："},
     ]
 
 
