@@ -76,7 +76,7 @@ For the Codex side, follow the `Smoke-install with Codex CLI` step in `.github/w
 - The web demo keeps its FastAPI server and process-environment config.
 - Hermes keeps its hooks, commands, notifier, gateway roots, and `.env` behavior.
 - Codex and Claude use the protected host-neutral config/data roots and the host-neutral skill under `skills/`.
-- Keep the 11 tool names in parity unless a deliberate compatibility change is approved.
+- Keep the 14 tool names in parity unless a deliberate compatibility change is approved.
 - Never make prompt wording the enforcement boundary for routing, transitions, tool choice, progress, completion, recovery, or export. Use Pydantic schemas, typed persisted state, runtime transition validation, bound tools, and deterministic tests.
 - Semantic keyword/regex classifiers and fixed semantic counters must not be added for agent routing or public gate decisions. Mechanical parsing, sanitization, redaction, exact schema checks, and named runtime budgets are allowed.
 - MCP stdout is protocol-only. Send diagnostics to stderr.
