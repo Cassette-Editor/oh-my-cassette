@@ -540,7 +540,7 @@ The runtime checks the release channel once a day and, when a newer version exis
 
 ### Claude Code: automatic updates
 
-Claude Code can update marketplaces and their plugins in the background shortly after a session starts, then prompts you to run `/reload-plugins`. It is off by default for third-party marketplaces, so turn it on once — `scripts/setup_local_mcp.py` offers to do this during setup (skip with `--no-auto-update`), or do it yourself in `/plugin` → **Marketplaces** → `cassette-editor` → **Enable auto-update**, or in `~/.claude/settings.json`:
+Claude Code checks for marketplace and plugin updates after your session starts, with a random delay of up to ten minutes, so the session you are in keeps the version it launched with — you are prompted to run `/reload-plugins`, or the new version loads next launch. It is off by default for third-party marketplaces, so turn it on once — `scripts/setup_local_mcp.py` offers to do this during setup (skip with `--no-auto-update`), or do it yourself in `/plugin` → **Marketplaces** → `cassette-editor` → **Enable auto-update**, or in `~/.claude/settings.json`:
 
 ```json
 {
@@ -554,6 +554,8 @@ Claude Code can update marketplaces and their plugins in the background shortly 
 ```
 
 Declaring it in `settings.json` wins over the `/plugin` toggle — Claude Code syncs the declared value into its marketplace state and then points you back at the settings file to change it.
+
+Because the setup prompt only runs at setup, an install that predates it — or one where it was declined — would never hear about the toggle again. So on Claude Code the runtime also reads that setting at startup and, while auto-update is off, asks your agent to mention it at most once per session and point you at the toggle. Your agent will not edit your Claude configuration itself. `CASSETTE_UPDATE_CHECK=0` silences this along with the release check.
 
 Claude Code's `DISABLE_AUTOUPDATER` turns off all automatic updates including plugins; pair it with `FORCE_AUTOUPDATE_PLUGINS=1` to keep plugin updates while managing Claude Code itself manually.
 
