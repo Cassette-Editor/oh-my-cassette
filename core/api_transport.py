@@ -1154,9 +1154,7 @@ class ApiTransport:
         """
         if _env("CASSETTE_API_EXPORT_QC").lower() in {"0", "false", "no", "off"}:
             return None
-        path = next(
-            (o.get("local_path") for o in (outputs or []) if isinstance(o, dict) and o.get("local_path")), None
-        )
+        path = next((o.get("local_path") for o in (outputs or []) if isinstance(o, dict) and o.get("local_path")), None)
         if not path:
             return None
         file_path = Path(str(path))
@@ -1176,10 +1174,16 @@ class ApiTransport:
         try:
             proc = subprocess.run(
                 [
-                    binary, "-v", "error",
-                    "-show_entries", "format=duration",
-                    "-show_entries", "stream=codec_type,codec_name,width,height,r_frame_rate,duration",
-                    "-of", "json", str(file_path),
+                    binary,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-show_entries",
+                    "stream=codec_type,codec_name,width,height,r_frame_rate,duration",
+                    "-of",
+                    "json",
+                    str(file_path),
                 ],
                 capture_output=True,
                 text=True,
@@ -1236,8 +1240,20 @@ class ApiTransport:
         ffmpeg = str(_env("CASSETTE_FFMPEG_BIN") or os.getenv("CASSETTE_FFMPEG_BIN", "") or "ffmpeg")
         try:
             proc = subprocess.run(
-                [ffmpeg, "-v", "info", "-i", str(file_path), "-vf", "blackdetect=d=0.25:pix_th=0.10",
-                 "-af", "volumedetect", "-f", "null", "-"],
+                [
+                    ffmpeg,
+                    "-v",
+                    "info",
+                    "-i",
+                    str(file_path),
+                    "-vf",
+                    "blackdetect=d=0.25:pix_th=0.10",
+                    "-af",
+                    "volumedetect",
+                    "-f",
+                    "null",
+                    "-",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=180,
