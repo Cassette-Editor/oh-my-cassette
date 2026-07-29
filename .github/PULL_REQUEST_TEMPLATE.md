@@ -26,7 +26,7 @@ you ran and what came back.
 ## Checklist
 
 - [ ] PR title is a conventional commit line
-- [ ] `uvx ruff check .` and `uvx ruff format --check .` pass
+- [ ] `uvx ruff@0.15.22 check .` and `uvx ruff@0.15.22 format --check .` pass
 - [ ] `pytest` passes locally
 - [ ] CI stays deterministic and credential-free — no real Cassette calls, no secrets in fixtures or the PR body
 - [ ] Both manifests / marketplaces / `plugin.yaml` updated, if packaging or tool registration changed

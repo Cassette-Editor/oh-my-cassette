@@ -27,14 +27,17 @@ uv pip install --python .venv/bin/python \
 Run the CI-equivalent checks:
 
 ```bash
-uvx ruff check .
-uvx ruff format --check .
+uvx ruff@0.15.22 check .
+uvx ruff@0.15.22 format --check .
 .venv/bin/python -m compileall -q .
 .venv/bin/python -m pytest -q -rs -n 4 --dist loadfile
 ./web_demo/build_frontend.sh
 ```
 
-`ruff format .` fixes formatting in place; configuration lives in `pyproject.toml`.
+`ruff format .` fixes formatting in place; configuration lives in `pyproject.toml`. The
+version is pinned because ruff's default rule set changes between minor releases — an
+unpinned `uvx ruff` reports hundreds of findings CI does not. `pyproject.toml` sets
+`required-version`, so a mismatched ruff refuses to run instead of inventing errors.
 
 Validate native packaging with supported host CLIs:
 

@@ -420,6 +420,26 @@ def test_opencode_installer_reads_a_plain_json_config(tmp_path):
     assert installer.read_config(tmp_path / "missing.json") == {}
 
 
+def test_every_documented_ruff_pin_names_the_version_ci_installs():
+    # ruff's default rule set changes between minor releases: 0.16 reports 463 findings on
+    # a tree 0.15.22 calls clean, so an unpinned `uvx ruff` buries a real finding under
+    # phantom ones. Pinning it in several files recreates exactly the drift that put this
+    # runtime a protocol revision behind, so the copies are checked rather than trusted.
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8")
+    installed = re.search(r"pip install ruff==(\d+\.\d+\.\d+)", ci)
+    assert installed, "CI no longer installs a pinned ruff"
+    version = installed.group(1)
+
+    # required-version is the backstop: it makes a mismatched ruff refuse to run at all,
+    # including from an editor integration that never reads the docs.
+    pyproject = (ROOT / "pyproject.toml").read_text("utf-8")
+    assert f'required-version = ">={version},<' in pyproject
+
+    for document in (".github/PULL_REQUEST_TEMPLATE.md", "CONTRIBUTING.md"):
+        documented = set(re.findall(r"uvx ruff@(\d+\.\d+\.\d+)", (ROOT / document).read_text("utf-8")))
+        assert documented == {version}, f"{document} documents ruff {documented or 'unpinned'}, CI installs {version}"
+
+
 @pytest.mark.parametrize(
     ("requirements_in", "lock"),
     [
