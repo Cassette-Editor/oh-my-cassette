@@ -570,9 +570,7 @@ async def cassette_run_job(
         # stand in for a poll loop.
         asyncio.run_coroutine_threadsafe(ctx.report_progress(elapsed, None, stage or None), loop)
 
-    envelope = await _run_sync(
-        _runtime(ctx).run_job, request.model_dump(exclude_none=True), _tick if wait else None
-    )
+    envelope = await _run_sync(_runtime(ctx).run_job, request.model_dump(exclude_none=True), _tick if wait else None)
     return await _maybe_elicit_needs_user(ctx, envelope)
 
 

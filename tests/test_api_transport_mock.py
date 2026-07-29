@@ -1469,20 +1469,31 @@ def test_export_qc_measures_the_finished_file(monkeypatch, tmp_path):
     export = tmp_path / "cut.mp4"
     export.write_bytes(b"FAKE_MP4_BYTES")
 
-    probe_payload = json.dumps({
-        "format": {"duration": "30.037333"},
-        "streams": [
-            {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080,
-             "r_frame_rate": "30/1", "duration": "30.000000"},
-            {"codec_type": "audio", "codec_name": "aac", "duration": "30.037333"},
-        ],
-    })
+    probe_payload = json.dumps(
+        {
+            "format": {"duration": "30.037333"},
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1920,
+                    "height": 1080,
+                    "r_frame_rate": "30/1",
+                    "duration": "30.000000",
+                },
+                {"codec_type": "audio", "codec_name": "aac", "duration": "30.037333"},
+            ],
+        }
+    )
 
     def fake_run(cmd, **kwargs):
         if "blackdetect" in " ".join(str(part) for part in cmd):
-            return sp.CompletedProcess(cmd, 0, stdout="", stderr=(
-                "[Parsed_blackdetect_0 @ 0x1] black_start:11.666667 black_end:12.366667 black_duration:0.7\n"
-            ))
+            return sp.CompletedProcess(
+                cmd,
+                0,
+                stdout="",
+                stderr=("[Parsed_blackdetect_0 @ 0x1] black_start:11.666667 black_end:12.366667 black_duration:0.7\n"),
+            )
         return sp.CompletedProcess(cmd, 0, stdout=probe_payload, stderr="")
 
     monkeypatch.setattr(T.subprocess, "run", fake_run)
@@ -1503,7 +1514,9 @@ def test_export_qc_rides_every_export_result(monkeypatch, tmp_path):
     transport = T.ApiTransport()
     monkeypatch.setattr(T.ApiTransport, "_export_qc", lambda self, outputs: {"duration_sec": 30.0})
 
-    exported = transport._result("succeeded", outputs=[{"local_path": str(tmp_path / "cut.mp4")}], export_completed=True)
+    exported = transport._result(
+        "succeeded", outputs=[{"local_path": str(tmp_path / "cut.mp4")}], export_completed=True
+    )
     assert exported["quality"]["export_qc"] == {"duration_sec": 30.0}
 
     # A committed-but-unrendered turn has no file to measure.
@@ -1582,8 +1595,8 @@ def test_host_progress_is_rate_limited_between_forced_boundaries():
         transport._current_stage = "export"
         transport._run_started = 0.0
         transport._last_host_progress = 0.0
-        transport._emit_host_progress(100.0, "rendering")          # first tick lands
-        transport._emit_host_progress(100.5, "rendering")          # inside the interval: dropped
+        transport._emit_host_progress(100.0, "rendering")  # first tick lands
+        transport._emit_host_progress(100.5, "rendering")  # inside the interval: dropped
         transport._emit_host_progress(100.0 + T._HOST_PROGRESS_INTERVAL_SEC + 0.1, "rendering")
     assert len(seen) == 2
 
