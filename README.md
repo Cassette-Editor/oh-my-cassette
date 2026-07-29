@@ -489,7 +489,9 @@ Every tool returns a structured envelope with `ok`, typed `data` or `error`, `se
 
 ### The live editor deep link and plan review
 
-Every session on the API transport carries ONE stable `editor_url` — a `…/try?projectSessionId=<id>&chatSessionId=<uuid>` link that opens the **real Cassette editor on the session's live conversation**: the timeline repaints as edits land, the preview plays without any server render, and the plan-review card is interactive. The link stays the same across every turn of the session (jobs are conversational turns on one persistent agent thread with memory). Anyone with the link can view *and* edit that one project (the same capability-URL posture as Cassette's public try page), so treat it like a share link.
+The runtime returns **no editor deep link**. A `…?projectSessionId=<id>&chatSessionId=<uuid>` URL is a bearer capability: the backend binds no owner to a scratch session, so the only checks on that route are "signed in" and "knows the id" — any authenticated account that sees the link can open the project *and* run edits on the thread. Tool output ends up in chat transcripts, logs and screen recordings, so the runtime no longer emits one, and the skills instruct the agent not to construct one. Previews are the timeline digest, the contact sheet, and the export.
+
+This narrows exposure rather than closing it: the route still resolves for anyone who reconstructs the URL. Binding a session to its owner has to happen server-side.
 
 Two concurrency semantics worth knowing: a plugin turn never cancels a run started from the open editor tab (it fails typed as `thread_busy` instead — wait and retry), while typing a fresh message in the tab DOES cancel an in-flight plugin turn (the tab takes over; existing product behavior).
 

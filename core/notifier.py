@@ -643,9 +643,8 @@ def _append_live_context(lines: list[str], job: dict, language: str) -> None:
     turn_done_no_render = status == "succeeded" and not (job.get("outputs") or job.get("output_links"))
     if delta and (status == "needs_user" or turn_done_no_render):
         lines.append(f"```\n{delta}\n```")
-    url = str(job.get("editor_url") or "").strip()
-    if url:
-        lines.append(("Watch live: " if language == "en" else "实时查看：") + url)
+    # No editor deep link here: it grants edit access to any signed-in account that sees it,
+    # and notifications land in chat transcripts and logs.
 
 
 def format_platform_final_message(job: dict, media_delivery: str | None = None, platform: str | None = None) -> str:
@@ -1296,10 +1295,8 @@ def notify_progress_snapshot(job: dict, screenshot_path: str, summary: str = "")
 def _desktop_terminal_message(job: dict) -> str:
     status = str(job.get("status") or "")
     job_id = str(job.get("job_id") or "")
-    url = str(job.get("editor_url") or "").strip()
-    suffix = f" — {url}" if url and status == "needs_user" else ""
     if status == "needs_user":
-        return f"Cassette needs your input ({job_id}){suffix}"
+        return f"Cassette needs your input ({job_id})"
     if status == "succeeded":
         for output in job.get("outputs") or []:
             if isinstance(output, dict) and output.get("local_path"):

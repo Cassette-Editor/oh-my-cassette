@@ -105,13 +105,13 @@ def test_session_thread_round_trip(cassette_env):
     sess_hash = manifest.resolve_session_hash(session_id="try-session-abc")
     assert manifest.load_session_thread(sess_hash) == {}
 
-    manifest.save_session_thread(sess_hash, "11111111-2222-3333-4444-555555555555", "http://web/try?x=1")
+    manifest.save_session_thread(sess_hash, "11111111-2222-3333-4444-555555555555")
     saved = manifest.load_session_thread(sess_hash)
     assert saved["thread_id"] == "11111111-2222-3333-4444-555555555555"
-    assert saved["editor_url"] == "http://web/try?x=1"
+    assert "editor_url" not in saved  # no deep link is persisted any more
     assert saved["updated_at"]
 
-    manifest.save_session_thread(sess_hash, "new-thread", None)
+    manifest.save_session_thread(sess_hash, "new-thread")
     assert manifest.load_session_thread(sess_hash)["thread_id"] == "new-thread"
 
 

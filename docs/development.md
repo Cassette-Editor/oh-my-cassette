@@ -118,7 +118,6 @@ Transparency and direct-edit flags (API transport):
 | `CASSETTE_UNATTENDED` | off | `1` restores fully headless auto-approve semantics |
 | `CASSETTE_DIRECT_EDIT` | off | enable the `cassette_edit` surgical no-LLM lane |
 | `CASSETTE_AUTH_TOKEN` | unset | pre-issued bearer, skips `/api/agent-auth/verify` (local dev/CI) |
-| `CASSETTE_WEB_URL` | origin of `CASSETTE_URL` | web origin used for `editor_url` deep links |
 
 
 

@@ -194,10 +194,10 @@ def load_session_thread(session_hash: str) -> dict:
         return {}
 
 
-def save_session_thread(session_hash: str, thread_id: str, editor_url: str | None = None) -> None:
+def save_session_thread(session_hash: str, thread_id: str) -> None:
     path = session_thread_path(session_hash)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"thread_id": thread_id, "editor_url": editor_url, "updated_at": now_iso()}
+    payload = {"thread_id": thread_id, "updated_at": now_iso()}
     fd, tmp_name = tempfile.mkstemp(prefix=".session_thread.", suffix=".json", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
