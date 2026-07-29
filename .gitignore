@@ -33,6 +33,7 @@ web_demo/logs/
 
 # Local tooling / agent files
 AGENTS.md
+CLAUDE.md
 .serena/
 .codex/
 .claude/
