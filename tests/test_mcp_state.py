@@ -35,18 +35,17 @@ def test_job_phase_is_derived_from_typed_persisted_fields(job, expected):
     assert phase_from_job(job) == expected
 
 
-def test_next_action_appends_editor_url_on_live_phases():
+def test_next_action_never_carries_an_editor_link():
+    """The editor deep link is a bearer capability — next_action must never surface one."""
     from mcp_plugin.state import next_action_for
     from mcp_plugin.models import SessionPhase
 
-    url = "http://127.0.0.1:8080/try?projectSessionId=abc&chatSessionId=u-1"
-    running = next_action_for(SessionPhase.RUNNING, job_id="j1", editor_url=url)
-    assert url in running and running.startswith("Call cassette_job_status")
-    needs_user = next_action_for(SessionPhase.NEEDS_USER, job_id="j1", editor_url=url)
-    assert url in needs_user
-    # Mechanical phases never carry the link.
-    assert url not in next_action_for(SessionPhase.NEW, editor_url=url)
-    assert url not in next_action_for(SessionPhase.SUCCEEDED, editor_url=url)
+    for phase in SessionPhase:
+        action = next_action_for(phase, job_id="j1")
+        assert "projectSessionId" not in action
+        assert "Watch live" not in action
+        assert "http://" not in action and "https://" not in action
+    assert next_action_for(SessionPhase.RUNNING, job_id="j1").startswith("Call cassette_job_status")
 
 
 def test_multi_turn_transitions_and_next_actions(tmp_path):

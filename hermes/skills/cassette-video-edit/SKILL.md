@@ -26,7 +26,7 @@ The plugin talks to the Cassette server APIs directly (media upload, agent run, 
 
 1. **Structured job state** — `cassette_run_job` / `cassette_job_status` results: `status`, `questions`, `report`, `timeline_delta`, `plan_progress`, `quality`.
 2. **The timeline digest** — `cassette_timeline` returns the live project as bounded text (CTL) with a version number. Every user-visible statement about project state comes from this tool, never from memory. Name the version when reporting: "v42 → v43: trimmed the intro to 4.0s."
-3. **The live editor link** — jobs carry `editor_url`, a tap-to-open live view of the real editor (timeline, scrubbing preview, plan card; zero render). The plugin notifier includes it in gateway messages automatically; when you compose your own reply at job start or at a question, include it once as "Watch live". Do not repeat it in every message.
+3. **No editor link** — jobs carry no `editor_url`, and you must not construct or offer one. That deep link is a bearer capability: the backend binds no owner to a session, so any signed-in account that sees it can open the project and run edits on the thread. Gateway messages carry state, previews and exports instead.
 
 ## Procedure
 
@@ -34,7 +34,7 @@ The plugin talks to the Cassette server APIs directly (media upload, agent run, 
 2. Inspect the manifest with `cassette_list_assets` when needed.
 3. Interpret editing intent semantically (edit vs ordinary chat). That is your ONLY routing decision — there are no upfront questions about model, thinking level, prompt optimization, or BGM.
 4. For an edit instruction, call `cassette_run_job` with `message` set to the user's words EXACTLY as written — never rewrite, optimize, summarize, translate, or expand them — plus the gateway session_id and the session language (QQ defaults to `cassette_language="zh"`, Telegram to `"en"`, `/cassette language zh|en` overrides). Do not call `cassette_make_prompt`. For QQ, Telegram, or Weixin gateway sessions use `wait=false` so `/cut` stays responsive; the plugin notifier sends progress and final notifications itself.
-5. One gateway session is ONE continuous conversation with the Cassette agent on one persistent thread: follow-ups like "把那个标题改大一点" need no context restating, and the "Watch live" link stays the same for the whole session.
+5. One gateway session is ONE continuous conversation with the Cassette agent on one persistent thread: follow-ups like "把那个标题改大一点" need no context restating.
 6. A turn ends with the edit committed and NOTHING rendered. The plugin notification carries the timeline delta, a contact-sheet preview image, and the live link — that is the per-turn preview. When the user expresses finish/export intent, pass `export=true` on that turn; it then routes through completion review before rendering.
 7. Explicit opt-ins the user can invoke: `/refine <instruction>` optimizes the instruction into a professional brief (policy in `prompts/hermes-edit-brief-optimizer.md`) and asks for confirmation before running; `/music <BGM requirement>` recommends exactly 3 concrete real songs (plus option 4 "换一批" and option 5 "随机匹配") and only registers a BGM asset; `/cassette_model` changes the saved model/thinking preference via a numbered picker over the static product list.
 8. Handle Cassette follow-up questions with `cassette_answer_question` (see "Questions and plan review" below).
@@ -69,7 +69,6 @@ When `cassette_run_job` returns `needs_user` with `completion_requires_hermes_re
 - `quality.timeline_ctl` — the timeline digest of what would be exported.
 - `quality.contact_sheet` — a tiled poster image (source frames, not composed output); for gateway users the notifier pushes it as a chat image automatically.
 - `quality.progress_summary` — the agent's own completion summary.
-- The `editor_url` live view, for the user's own judgment.
 
 Export only when the evidence says the edit is complete enough to export. Do not treat a single keyword in the agent's summary as proof either way. If the timeline is empty or obviously wrong, use `decision="continue"` with feedback or `"needs_user"`.
 
@@ -101,14 +100,14 @@ When `cassette_run_job` returns `timed_out` or an unclear state, diagnose from t
 1. Read the scrubbed job result: `status`, error codes, `report.current_stage`, `report.stage_timings`, latest `progress_events`, `timeline_delta`, and `final_screenshot`/export thumbnail if present.
 2. Call `cassette_timeline` for the session: a populated timeline with a recent version means Cassette created an edit but completion/export was not confirmed — report it as such ("timeline has N clips at v42; export not confirmed"), not as total failure.
 3. If a follow-up question is pending, classify and answer it via `cassette_answer_question` when safe.
-4. Give the user the `editor_url` link so they can see the live state themselves.
+4. Report the live state from `cassette_timeline` — never by handing out an editor link.
 5. Do not inspect or manipulate media locally to "finish" the edit. Local filesystem checks are only for validating job metadata and exported artifacts produced by Cassette.
 
 ## Progress Updates
 
 For gateway users, let the plugin notifier own progress and final summaries instead of keeping Hermes in a polling loop:
 
-- After job creation: tell the user the Cassette job has started, include the "Watch live" link once, and say progress/final notifications will arrive automatically.
+- After job creation: tell the user the Cassette job has started and that progress/final notifications will arrive automatically.
 - During work: do not call `cassette_job_status` repeatedly in the same Hermes turn. The plugin folds live commit events into `timeline_delta` and pushes progress through the stored delivery target.
 - Explicit status requests: if the user asks for status, call `cassette_job_status` once and summarize `report.current_stage`, `plan_progress`, and `timeline_delta`; then end the turn.
 - On timeout: summarize what Cassette visibly accomplished (via `cassette_timeline`) and what is still pending.

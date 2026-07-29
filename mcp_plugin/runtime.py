@@ -358,7 +358,6 @@ class LocalMcpRuntime:
             )
         data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
         self._annotate_stale_auth_errors(data)
-        editor_url = data.get("editor_url") if isinstance(data.get("editor_url"), str) else None
         return ToolEnvelope(
             ok=True,
             data=data,
@@ -366,7 +365,7 @@ class LocalMcpRuntime:
             session_id=session_id,
             job_id=resolved_job_id,
             phase=selected_phase,
-            next_action=next_action_for(selected_phase, job_id=resolved_job_id, editor_url=editor_url),
+            next_action=next_action_for(selected_phase, job_id=resolved_job_id),
             artifacts=artifacts or [],
         )
 

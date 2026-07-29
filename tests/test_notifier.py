@@ -853,7 +853,7 @@ def test_gateway_notifications_keep_platform_routing_without_mcp_adapter(monkeyp
     assert result["reason"] == "unsupported_platform"
 
 
-def test_final_message_carries_live_link_and_delta():
+def test_final_message_carries_the_delta_and_no_live_link():
     from cassette.core import notifier
 
     job = {
@@ -861,17 +861,16 @@ def test_final_message_carries_live_link_and_delta():
         "status": "needs_user",
         "quality": {},
         "delivery": {"platform": "telegram"},
-        "editor_url": "http://127.0.0.1:8080/try?projectSessionId=abc&chatSessionId=u1",
         "timeline_delta": "CHANGES v41 -> v42  (1 change)\n~ V1/B beach.mp4  duration 00:13.8 -> 00:11.3",
     }
     message = notifier.format_platform_final_message(job, platform="telegram")
-    assert "Watch live: http://127.0.0.1:8080/try?projectSessionId=abc" in message
+    assert "Watch live" not in message and "projectSessionId" not in message
     assert "CHANGES v41 -> v42" in message
 
     # A turn that ends without a render keeps the delta — it IS the per-turn preview.
     done = {**job, "status": "succeeded", "outputs": []}
     message = notifier.format_platform_final_message(done, platform="telegram")
-    assert "Watch live:" in message
+    assert "Watch live" not in message
     assert "CHANGES v41 -> v42" in message
 
     # An exported job drops the mid-run delta block.
@@ -881,7 +880,7 @@ def test_final_message_carries_live_link_and_delta():
 
     # zh platforms get the zh label.
     zh = notifier.format_platform_final_message({**job, "delivery": {"platform": "qqbot"}}, platform="qqbot")
-    assert "实时查看：" in zh
+    assert "实时查看：" not in zh  # the zh live-view label is gone with the link
 
 
 def test_final_message_turn_done_without_render_headlines(tmp_path: Path):

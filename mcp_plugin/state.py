@@ -113,18 +113,10 @@ def phase_from_job(job: dict) -> SessionPhase:
     return SessionPhase.READY
 
 
-def next_action_for(phase: SessionPhase, *, job_id: str | None = None, editor_url: str | None = None) -> str:
-    action = _next_action_base(phase, job_id=job_id)
-    # Live-view moments: hand the user the editor deep link exactly where watching helps
-    # (running / question / review), never on the mechanical phases.
-    if editor_url and phase in {
-        SessionPhase.RUNNING,
-        SessionPhase.EXPORTING,
-        SessionPhase.NEEDS_USER,
-        SessionPhase.REVIEW_REQUIRED,
-    }:
-        return f"{action} Watch live: {editor_url}"
-    return action
+def next_action_for(phase: SessionPhase, *, job_id: str | None = None) -> str:
+    # Live phases used to append an editor deep link here. That link is a bearer capability
+    # any signed-in account can act on, so it is no longer emitted — see core/api_transport.
+    return _next_action_base(phase, job_id=job_id)
 
 
 def _next_action_base(phase: SessionPhase, *, job_id: str | None = None) -> str:

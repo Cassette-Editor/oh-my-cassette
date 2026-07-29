@@ -918,9 +918,9 @@ def test_await_run_cancels_the_server_side_run(cassette_env, monkeypatch):
         server.server_close()
 
 
-def test_thread_create_sends_uuid_and_persists_editor_url(cassette_env, mock_api, monkeypatch):
-    """The thread id must be a client-minted UUID (LangGraph 422s anything else), the metadata must
-    split project ids from chat ids, and the job must gain the /try deep link with both."""
+def test_thread_create_sends_uuid_and_emits_no_deep_link(cassette_env, mock_api, monkeypatch):
+    """The thread id must be a client-minted UUID (LangGraph 422s anything else) and the metadata
+    must split project ids from chat ids — with no editor deep link anywhere on the job."""
     import uuid as _uuid
 
     monkeypatch.setenv("CASSETTE_WEB_URL", "http://127.0.0.1:8080")
@@ -946,7 +946,9 @@ def test_thread_create_sends_uuid_and_persists_editor_url(cassette_env, mock_api
     assert body["metadata"]["chatSessionId"] == minted
     # The server echo is authoritative for the thread id the run actually uses.
     assert job["chat_thread_id"] == "th-1"
-    assert job["editor_url"] == "http://127.0.0.1:8080/try?projectSessionId=abc&chatSessionId=th-1"
+    # The deep link is a bearer capability any signed-in account can act on: never emitted.
+    assert "editor_url" not in job
+    assert "projectSessionId" not in json.dumps(job)
     # sessionContext mirrors the split: chat/thread ids are the UUID thread, project ids the session.
     session_context = rec["run_config"]["configurable"]["sessionContext"]
     assert session_context["chatSessionId"] == "th-1"
@@ -955,32 +957,28 @@ def test_thread_create_sends_uuid_and_persists_editor_url(cassette_env, mock_api
     assert session_context["mediaSessionId"] == "try-session-abc"
 
 
-def test_editor_url_only_for_namespaced_projects(cassette_env, mock_api):
-    """Old un-prefixed sessions map to no editor route, so no deep link is composed."""
-    job = {
-        "job_id": "job-old",
-        "session_hash": "sess",
-        "cassette_session_id": "sess",
-        "prompt": "edit",
-        "asset_paths": [],
-        "timeout_sec": 60,
-    }
-    result = ApiTransport().run_job(job)
-    assert result["status"] == "succeeded", result["errors"]
-    assert job["editor_url"] is None
+def test_no_deep_link_for_any_session_namespace(cassette_env, mock_api):
+    """Namespaced and legacy sessions alike: the runtime composes no editor URL at all."""
+    for session_id in ("agent-session-abc", "try-session-abc", "sess"):
+        job = {
+            "job_id": f"job-{session_id}",
+            "session_hash": "sess",
+            "cassette_session_id": session_id,
+            "prompt": "edit",
+            "asset_paths": [],
+            "timeout_sec": 60,
+        }
+        result = ApiTransport().run_job(job)
+        assert result["status"] == "succeeded", result["errors"]
+        assert "editor_url" not in job
+        assert "projectSessionId" not in json.dumps(job)
 
 
-def test_editor_url_falls_back_to_cassette_url_origin(monkeypatch):
-    from cassette.core.api_transport import _editor_url
+def test_editor_url_builder_is_gone():
+    """The URL builder itself is removed, so no caller can reintroduce the link by accident."""
+    import cassette.core.api_transport as api_transport
 
-    monkeypatch.delenv("CASSETTE_WEB_URL", raising=False)
-    upstream = {"url": "https://sg.trycassette.online/agent"}
-    url = _editor_url("agent-session-h4sh", "aaaa-bbbb", upstream)
-    assert url == "https://sg.trycassette.online/agent?projectSessionId=h4sh&chatSessionId=aaaa-bbbb"
-    # Sessions minted before 0.4.6 keep their anonymous publicTry route.
-    legacy = _editor_url("try-session-h4sh", "aaaa-bbbb", upstream)
-    assert legacy == "https://sg.trycassette.online/try?projectSessionId=h4sh&chatSessionId=aaaa-bbbb"
-    assert _editor_url("legacy-id", "aaaa-bbbb", {}) is None
+    assert not hasattr(api_transport, "_editor_url")
 
 
 def test_auth_token_override_skips_verify(cassette_env, mock_api, monkeypatch):
@@ -1252,7 +1250,7 @@ def _is_cassette_thread_metadata(value) -> bool:
     )
 
 
-def test_thread_reused_across_jobs_with_stable_editor_url(cassette_env, mock_api, monkeypatch):
+def test_thread_reused_across_jobs_on_one_session(cassette_env, mock_api, monkeypatch):
     monkeypatch.setenv("CASSETTE_WEB_URL", "http://127.0.0.1:8080")
     base = {
         "session_hash": "multi",
@@ -1272,9 +1270,9 @@ def test_thread_reused_across_jobs_with_stable_editor_url(cassette_env, mock_api
     # Turn 2 re-ensures the SAME thread the server echoed for turn 1 (th-1), not a fresh UUID.
     assert creates[1]["thread_id"] == "th-1"
     assert creates[1]["if_exists"] == "do_nothing"
-    # One conversation → one stable deep link across turns.
-    assert job_a["editor_url"] == job_b["editor_url"]
+    # One conversation → one thread across turns, and no deep link on either turn.
     assert job_a["chat_thread_id"] == job_b["chat_thread_id"] == "th-1"
+    assert "editor_url" not in job_a and "editor_url" not in job_b
     # The reused ensure also PATCHes metadata so the tab's resume context stays fresh.
     assert rec.get("thread_patch_bodies"), "expected a thread metadata PATCH on the reused ensure"
     assert _is_cassette_thread_metadata(rec["thread_patch_bodies"][-1]["metadata"])

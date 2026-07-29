@@ -45,7 +45,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .manifest import get_asset_root
@@ -329,24 +329,15 @@ def split_session_prefix(session_id: str) -> tuple[str, str] | None:
     return None
 
 
-def _editor_url(session_id: str, thread_id: str, job: dict) -> str | None:
-    """Deep link into the live editor for this session's project and chat thread.
-
-    Only namespaced sessions have a browsable project route; older un-prefixed session ids
-    return None."""
-    split = split_session_prefix(session_id)
-    if not split:
-        return None
-    prefix, session_hash = split
-    base = _env("CASSETTE_WEB_URL")
-    if not base:
-        raw = str(job.get("url") or os.getenv("CASSETTE_URL", "https://sg.trycassette.online/agent"))
-        parts = urlparse(raw)
-        if not parts.scheme or not parts.netloc:
-            return None
-        base = f"{parts.scheme}://{parts.netloc}"
-    query = urlencode({"projectSessionId": session_hash, "chatSessionId": thread_id})
-    return f"{base.rstrip('/')}{SESSION_PREFIX_ROUTES[prefix]}?{query}"
+# A `…?projectSessionId=<id>&chatSessionId=<uuid>` deep link used to be built here and
+# returned on every job envelope. It is a bearer capability: the backend binds no owner to
+# a scratch session, so the only checks on that route are "signed in" and "knows the id" —
+# any authenticated account that sees the link can open the project AND run edits on the
+# thread. A link with that reach does not belong in tool output that gets relayed into chat
+# transcripts, logs, and screen recordings, so the runtime no longer emits one.
+#
+# Removing it narrows exposure; it does not close it. The route still resolves for anyone
+# who reconstructs the URL — the ownership binding has to happen server-side.
 
 
 def _http_timeout() -> float:
@@ -1432,17 +1423,15 @@ class ApiTransport:
                 )
             except Exception:  # noqa: BLE001 — the run's own sessionContext stays authoritative
                 pass
-        editor_url = _editor_url(session_id, thread_id, job)
-        manifest_mod.save_session_thread(session_hash, thread_id, editor_url)
+        manifest_mod.save_session_thread(session_hash, thread_id)
         job["chat_thread_id"] = thread_id
-        job["editor_url"] = editor_url
         job_id = str(job.get("job_id") or "")
         if job_id:
             try:
                 from . import jobs
 
-                jobs.update_job(job_id, chat_thread_id=thread_id, editor_url=editor_url)
-            except Exception:  # noqa: BLE001 — persisting the link must not fail the run
+                jobs.update_job(job_id, chat_thread_id=thread_id)
+            except Exception:  # noqa: BLE001 — persisting the thread must not fail the run
                 pass
         return thread_id
 
