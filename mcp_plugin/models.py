@@ -184,7 +184,8 @@ class JamendoMatcherInput(StrictModel):
 
 class RunJobInput(StrictModel):
     message: str | None = None
-    # None = not provided: the transport keeps its own default (API: no render; browser: render).
+    # None = not provided: the transport keeps its default, which is to commit the edit and
+    # render nothing. Only an explicit True asks for a render.
     export: bool | None = None
     prompt: str | None = None
     chat_message: str | None = None
