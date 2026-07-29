@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -124,6 +125,30 @@ def _fingerprint(lock_path: Path, version: tuple[int, int, int]) -> str:
     return digest.hexdigest()
 
 
+def locked_version(lock_path: Path, package: str) -> str | None:
+    """Read a pinned version out of the lock the environment was installed from.
+
+    The marker this feeds is diagnostic only, so an unreadable or unpinned lock
+    omits the field rather than failing the bootstrap.  It must never report a
+    version that was not installed: a hardcoded value silently outlives the
+    dependency bump that invalidates it.
+    """
+    wanted = re.sub(r"[-_.]+", "-", package).strip().lower()
+    try:
+        content = lock_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in content.splitlines():
+        name, separator, remainder = line.partition("==")
+        if not separator:
+            continue
+        if re.sub(r"[-_.]+", "-", name.strip()).lower() != wanted:
+            continue
+        # Strip any PEP 508 environment marker (" ; sys_platform != 'emscripten'").
+        return remainder.split(";")[0].strip() or None
+    return None
+
+
 def _run(command: list[str], *, environment: dict[str, str] | None = None, output: TextIO | None = None) -> None:
     sink = output or sys.stderr
     try:
@@ -195,14 +220,14 @@ def bootstrap_runtime(*, with_browser: bool = False, output: TextIO | None = Non
                 ],
                 output=output,
             )
-            _write_marker(
-                base_marker,
-                {
-                    "fingerprint": base_fingerprint,
-                    "python": ".".join(str(value) for value in version),
-                    "mcp": "1.12.4",
-                },
-            )
+            base_record = {
+                "fingerprint": base_fingerprint,
+                "python": ".".join(str(value) for value in version),
+            }
+            mcp_version = locked_version(base_lock, "mcp")
+            if mcp_version:
+                base_record["mcp"] = mcp_version
+            _write_marker(base_marker, base_record)
 
         if with_browser:
             browser_lock = PLUGIN_ROOT / "requirements-browser.lock"
@@ -226,6 +251,10 @@ def bootstrap_runtime(*, with_browser: bool = False, output: TextIO | None = Non
                 environment = os.environ.copy()
                 environment["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_path)
                 _run([str(python), "-m", "playwright", "install", "chromium"], environment=environment, output=output)
-                _write_marker(browser_marker, {"fingerprint": browser_fingerprint, "playwright": "1.60.0"})
+                browser_record = {"fingerprint": browser_fingerprint}
+                playwright_version = locked_version(browser_lock, "playwright")
+                if playwright_version:
+                    browser_record["playwright"] = playwright_version
+                _write_marker(browser_marker, browser_record)
         _unlock(lock_handle)
     return python

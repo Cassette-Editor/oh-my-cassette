@@ -16,7 +16,26 @@ if str(PLUGIN_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
 
 import runtime_config  # noqa: E402
-from local_mcp_bootstrap import BootstrapError, select_python  # noqa: E402
+from local_mcp_bootstrap import BootstrapError, locked_version, select_python  # noqa: E402
+
+
+def _mcp_profile() -> dict:
+    """The protocol ceiling this installation can offer, without needing a live client.
+
+    A host only ever negotiates down to this number, so a stale lock shows up here as a
+    revision below what the host offered -- the failure that is otherwise invisible.
+    """
+    profile: dict[str, object] = {"locked": locked_version(PLUGIN_ROOT / "requirements-mcp.lock", "mcp")}
+    try:
+        import importlib.metadata
+
+        from mcp import types
+
+        profile["installed"] = importlib.metadata.version("mcp")
+        profile["max_protocol"] = types.LATEST_PROTOCOL_VERSION
+    except Exception:  # noqa: BLE001 — the host python need not carry the runtime deps
+        profile["note"] = "run this with the plugin-managed runtime python to report the protocol ceiling"
+    return profile
 
 
 def diagnose() -> dict:
@@ -25,6 +44,7 @@ def diagnose() -> dict:
         "platform": sys.platform,
         "config_root": str(runtime_config.config_root()),
         "data_root": str(runtime_config.data_root()),
+        "mcp": _mcp_profile(),
     }
     try:
         executable, version = select_python()

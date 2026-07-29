@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import queue
+import subprocess
 import sys
 import tempfile
 import threading
@@ -10,6 +12,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 
@@ -81,6 +84,116 @@ def _environment(tmp_path: Path, project: Path) -> dict[str, str]:
         }
     )
     return environment
+
+
+def _speak_raw(environment: dict[str, str], requests: list[dict], timeout: float = 30.0) -> dict[int, dict]:
+    """Exchange raw JSON-RPC with the real server process, bypassing ClientSession.
+
+    ClientSession can only ever send the revision the installed SDK was built for, so
+    pinning the negotiated ceiling -- and describing what a newer-revision client meets --
+    has to happen on the wire.  Replies are collected off a reader thread so a request the
+    server never answers fails on the timeout instead of blocking the suite forever.
+    """
+    process = subprocess.Popen(
+        [sys.executable, "-m", "mcp_plugin.server"],
+        cwd=str(ROOT),
+        env=environment,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+    lines: queue.Queue[str] = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(line) for line in process.stdout], daemon=True).start()
+    replies: dict[int, dict] = {}
+    try:
+        for request in requests:
+            process.stdin.write(json.dumps(request) + "\n")
+        process.stdin.flush()
+        outstanding = {request["id"] for request in requests if "id" in request}
+        deadline = time.time() + timeout
+        while outstanding and time.time() < deadline:
+            try:
+                line = lines.get(timeout=max(0.1, deadline - time.time()))
+            except queue.Empty:
+                break
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:  # stdout is protocol-only, but never trust it blindly
+                continue
+            identifier = message.get("id")
+            if identifier in outstanding:
+                replies[identifier] = message
+                outstanding.discard(identifier)
+    finally:
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+        process.terminate()
+        process.wait(timeout=15)
+    return replies
+
+
+def _initialize_request(protocol_version: str, identifier: int = 1) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": identifier,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": protocol_version,
+            "capabilities": {},
+            "clientInfo": {"name": "era-probe", "version": "1"},
+        },
+    }
+
+
+@pytest.mark.parametrize("requested", ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"])
+def test_protocol_negotiation_answers_every_revision_the_runtime_supports(tmp_path, requested):
+    # The ceiling is a shipped artifact of the pinned SDK, not a constant: while the lock
+    # sat on mcp 1.12.4 this server answered a 2025-11-25 client with 2025-06-18 and no
+    # host ever said so out loud. Asserting the echo is what makes a silent downgrade fail.
+    project = tmp_path / "project"
+    project.mkdir()
+    reply = _speak_raw(_environment(tmp_path, project), [_initialize_request(requested)]).get(1)
+    assert reply is not None, f"the server never answered an initialize for {requested}"
+    assert reply["result"]["protocolVersion"] == requested
+
+
+def test_a_newer_revision_client_is_downgraded_rather_than_refused(tmp_path):
+    # A 2026-07-28 client that still probes with initialize for backward compatibility must
+    # land on the ceiling this runtime supports, not an error -- that downgrade is the only
+    # reason Codex can adopt rmcp 3.0.0 before this plugin migrates to the v2 SDK.
+    project = tmp_path / "project"
+    project.mkdir()
+    reply = _speak_raw(_environment(tmp_path, project), [_initialize_request("2026-07-28")]).get(1)
+    assert reply is not None, "the server never answered a newer-revision initialize"
+    assert reply["result"]["protocolVersion"] == types.LATEST_PROTOCOL_VERSION
+
+
+def test_a_stateless_2026_request_meets_a_structured_error_not_a_hang(tmp_path):
+    # 2026-07-28 removes the initialize handshake and carries the protocol version in _meta
+    # instead. Until this runtime moves to the v2 SDK it cannot serve that shape -- what it
+    # MUST do is refuse in JSON-RPC rather than hang a host that opened with it, because a
+    # stdio host has no timeout of its own to fall back on.
+    # When the v2 migration lands this assertion flips to a real tools/list result.
+    project = tmp_path / "project"
+    project.mkdir()
+    stateless = {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/list",
+        "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {},
+            }
+        },
+    }
+    reply = _speak_raw(_environment(tmp_path, project), [stateless], timeout=20.0).get(7)
+    assert reply is not None, "a stateless 2026-07-28 request left the host waiting forever"
+    assert reply["error"]["code"] == -32602
 
 
 def test_mcp_lists_exactly_the_hermes_tools_with_flat_structured_schemas():

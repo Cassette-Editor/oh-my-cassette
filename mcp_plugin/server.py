@@ -44,6 +44,7 @@ from . import update_check
 @dataclass
 class McpLifespanContext:
     runtime: LocalMcpRuntime
+    client_profile_logged: bool = False
 
 
 @asynccontextmanager
@@ -59,10 +60,66 @@ async def lifespan(_: FastMCP) -> AsyncIterator[McpLifespanContext]:
     yield McpLifespanContext(runtime=runtime)
 
 
+def _log_client_profile_once(context: Context) -> None:
+    """Record the negotiated protocol revision and optional capabilities, once per run.
+
+    The elicitation and roots paths below both degrade to silence by design.  That was
+    safe while every host spoke one revision, but 2026-07-28 removes the `initialize`
+    handshake those capability probes read, so against a new-spec client they become
+    permanent no-ops that look identical to a broken server.  Naming the negotiated
+    profile once, on stderr, is what turns "elicitation stopped working after a host
+    upgrade" into a single line the user can read back.
+    """
+    try:
+        lifespan = context.request_context.lifespan_context
+        if lifespan.client_profile_logged:
+            return
+        lifespan.client_profile_logged = True
+        params = getattr(context.session, "client_params", None)
+        capabilities = getattr(params, "capabilities", None)
+        info = getattr(params, "clientInfo", None)
+        negotiated = getattr(params, "protocolVersion", None)
+        elicitation = getattr(capabilities, "elicitation", None) is not None
+        roots = getattr(capabilities, "roots", None) is not None
+        print(
+            "oh-my-cassette: mcp client={name}/{version} protocol={negotiated} "
+            "server_max={supported} elicitation={elicitation} roots={roots}".format(
+                name=getattr(info, "name", None) or "unknown",
+                version=getattr(info, "version", None) or "unknown",
+                negotiated=negotiated or "unnegotiated",
+                supported=types.LATEST_PROTOCOL_VERSION,
+                elicitation="yes" if elicitation else "no",
+                roots="yes" if roots else "no",
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        if not elicitation:
+            print(
+                "oh-my-cassette: this client offers no elicitation capability; needs_user "
+                "questions fall back to the cassette_answer_question round-trip",
+                file=sys.stderr,
+                flush=True,
+            )
+        if not roots:
+            print(
+                "oh-my-cassette: this client offers no roots capability; media paths must "
+                "come from CASSETTE_PROJECT_ROOT or a configured media root",
+                file=sys.stderr,
+                flush=True,
+            )
+    except Exception:  # noqa: BLE001 — diagnostics must never fail a tool call
+        return
+
+
 class ArtifactFastMCP(FastMCP[McpLifespanContext]):
     """Append validated artifact ResourceLink blocks to structured tool output."""
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        try:
+            _log_client_profile_once(self.get_context())
+        except Exception:  # noqa: BLE001 — never let diagnostics block the tool surface
+            pass
         try:
             result = await super().call_tool(name, arguments)
         except ToolError as exc:
