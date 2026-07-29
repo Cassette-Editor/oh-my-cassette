@@ -221,6 +221,29 @@ def _api_base() -> str:
     return base.rstrip("/")
 
 
+def _parse_volume_levels(ffmpeg_stderr: str) -> dict | None:
+    """Mean and peak dBFS from an ffmpeg volumedetect pass.
+
+    Kept separate from the subprocess call so the parse is testable without ffmpeg.
+    volumedetect prints one summary per input; the last match wins so a filtergraph
+    that ends up reporting twice still yields the figures for the audio actually read.
+    """
+    mean = peak = None
+    for match in re.finditer(r"mean_volume:\s*(-?[0-9.]+) dB", ffmpeg_stderr or ""):
+        mean = match.group(1)
+    for match in re.finditer(r"max_volume:\s*(-?[0-9.]+) dB", ffmpeg_stderr or ""):
+        peak = match.group(1)
+    if mean is None and peak is None:
+        return None
+    try:
+        return {
+            "mean_dbfs": round(float(mean), 1) if mean is not None else None,
+            "peak_dbfs": round(float(peak), 1) if peak is not None else None,
+        }
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_black_segments(ffmpeg_stderr: str) -> list[dict]:
     """Black stretches from an ffmpeg blackdetect pass, in file order.
 
@@ -1201,7 +1224,12 @@ class ApiTransport:
         return duration
 
     def _qc_black_segments(self, file_path: Path, duration: float | None, qc: dict[str, Any]) -> None:
-        """Scan for black stretches — the defect a duration-only check cannot see."""
+        """Scan for black stretches and audio level — the defects a duration-only check cannot see.
+
+        Both filters ride the same decode. Level is here rather than in its own pass because the
+        file is already being read: a reviewer asking "is the audio real" otherwise pays a second
+        full decode, plus a permission prompt, for a number this pass had in hand.
+        """
         if duration is not None and duration > self._QC_BLACK_SCAN_MAX_SEC:
             qc["black_scan"] = "skipped_long_export"
             return
@@ -1209,7 +1237,7 @@ class ApiTransport:
         try:
             proc = subprocess.run(
                 [ffmpeg, "-v", "info", "-i", str(file_path), "-vf", "blackdetect=d=0.25:pix_th=0.10",
-                 "-an", "-f", "null", "-"],
+                 "-af", "volumedetect", "-f", "null", "-"],
                 capture_output=True,
                 text=True,
                 timeout=180,
@@ -1217,10 +1245,19 @@ class ApiTransport:
         except (OSError, subprocess.SubprocessError):
             qc["black_scan"] = "unavailable"
             return
+        # An aborted pass emits no blackdetect lines, which parses as "no black found" —
+        # indistinguishable from a clean export, on exactly the defect this scan exists to
+        # catch. Dropping -an made that reachable: the audio path can now fail on its own.
+        if proc.returncode != 0:
+            qc["black_scan"] = "unavailable"
+            return
         segments = _parse_black_segments(proc.stderr or "")
         qc["black_scan"] = "complete"
         qc["black_segments"] = segments
         qc["black_total_sec"] = round(sum(s["duration_sec"] for s in segments), 3)
+        levels = _parse_volume_levels(proc.stderr or "")
+        if levels:
+            qc["audio_levels"] = levels
 
     def _export_thumbnail(self, outputs: list[dict]) -> str | None:
         """Best-effort still frame from the exported mp4 — the api path has no browser to screenshot,
@@ -2030,15 +2067,22 @@ class ApiTransport:
     def _download(self, path: str, target: Path, *, _retried: bool = False) -> None:
         request = Request(_api_base() + path, method="GET", headers=self._auth_headers({}))
         try:
+            job_id = str((getattr(self, "_job", None) or {}).get("job_id") or "")
             with (
                 urlopen(request, timeout=max(120.0, self._http_timeout_for_upload(0))) as response,
                 target.open("wb") as fh,
             ):
+                received = 0
                 while True:
                     chunk = response.read(1024 * 256)
                     if not chunk:
                         break
                     fh.write(chunk)
+                    received += len(chunk)
+                    # Downloading a finished render is the longest stretch with nothing
+                    # else to say. A host that waits on one blocking call judges silence
+                    # as an idle call, so the bytes have to speak.
+                    self._tick(job_id, f"Downloading the export ({received // (1024 * 1024)} MB)")
         except HTTPError as exc:
             if exc.code == 401 and not _retried:
                 self._token = None
@@ -2349,10 +2393,16 @@ class ApiTransport:
 
     @staticmethod
     def _job_timeout(job: dict) -> float:
+        # timeout_sec is a tool parameter, so the model picks it. Unclamped, a large
+        # value outlives whatever wall the host puts on a blocking call, and the host
+        # kills the call instead of the plugin answering — the one outcome that loses
+        # the job_id needed to re-attach. The ceiling keeps the answer on our side.
+        ceiling = _env_num("CASSETTE_MCP_MAX_BLOCKING_SEC", 1500.0, 60.0, getter=os.getenv)
         try:
-            return max(60.0, float(job.get("timeout_sec") or 1800))
+            requested = float(job.get("timeout_sec") or 1800)
         except (TypeError, ValueError):
-            return 1800.0
+            requested = 1800.0
+        return min(max(60.0, requested), ceiling)
 
     @staticmethod
     def _export_timeout(job: dict) -> float:

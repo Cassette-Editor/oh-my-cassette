@@ -1597,3 +1597,79 @@ def test_host_progress_never_breaks_a_run():
         transport._run_started = 0.0
         transport._last_host_progress = 0.0
         transport._emit_host_progress(10.0, "still working", force=True)  # must not raise
+
+
+def test_parse_volume_levels_reads_the_last_summary():
+    stderr = (
+        "[Parsed_volumedetect_0 @ 0x1] mean_volume: -30.0 dB\n"
+        "[Parsed_volumedetect_0 @ 0x1] max_volume: -12.0 dB\n"
+        "[Parsed_volumedetect_0 @ 0x2] mean_volume: -14.8 dB\n"
+        "[Parsed_volumedetect_0 @ 0x2] max_volume: -0.0 dB\n"
+    )
+    from cassette.core.api_transport import _parse_volume_levels
+
+    assert _parse_volume_levels(stderr) == {"mean_dbfs": -14.8, "peak_dbfs": -0.0}
+    assert _parse_volume_levels("no audio summary here") is None
+
+
+def test_black_scan_reports_unavailable_when_ffmpeg_fails(monkeypatch, tmp_path):
+    """An aborted pass emits no blackdetect lines, which parses as 'no black found'.
+    Reporting that as 'complete' is a silent false negative on the very defect it checks."""
+    from cassette.core import api_transport as T
+
+    clip = tmp_path / "cut.mp4"
+    clip.write_bytes(b"x")
+
+    class _Failed:
+        returncode = 1
+        stderr = ""
+
+    monkeypatch.setattr(T.subprocess, "run", lambda *a, **k: _Failed())
+    qc: dict = {}
+    T.ApiTransport()._qc_black_segments(clip, 30.0, qc)
+    assert qc["black_scan"] == "unavailable"
+    assert "black_segments" not in qc
+    assert "audio_levels" not in qc
+
+
+def test_black_scan_reports_levels_from_the_same_pass(monkeypatch, tmp_path):
+    from cassette.core import api_transport as T
+
+    clip = tmp_path / "cut.mp4"
+    clip.write_bytes(b"x")
+
+    class _Ok:
+        returncode = 0
+        stderr = (
+            "[blackdetect @ 0x1] black_start:23.367 black_end:24.133 black_duration:0.767\n"
+            "[Parsed_volumedetect_0 @ 0x2] mean_volume: -14.8 dB\n"
+            "[Parsed_volumedetect_0 @ 0x2] max_volume: -0.0 dB\n"
+        )
+
+    captured: dict = {}
+
+    def _run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _Ok()
+
+    monkeypatch.setattr(T.subprocess, "run", _run)
+    qc: dict = {}
+    T.ApiTransport()._qc_black_segments(clip, 30.0, qc)
+    assert qc["black_scan"] == "complete"
+    assert qc["audio_levels"] == {"mean_dbfs": -14.8, "peak_dbfs": -0.0}
+    assert len(qc["black_segments"]) == 1
+    # One decode, both filters — the whole point of folding level in here.
+    assert "-an" not in captured["cmd"]
+    assert "volumedetect" in captured["cmd"]
+
+
+def test_job_timeout_is_clamped_against_the_host_wall():
+    """timeout_sec is model-supplied. Unclamped, the host kills the blocking call before
+    the plugin answers, which loses the job_id the user needs to re-attach."""
+    from cassette.core.api_transport import ApiTransport
+
+    assert ApiTransport._job_timeout({"timeout_sec": 99999}) == 1500.0
+    assert ApiTransport._job_timeout({"timeout_sec": 600}) == 600.0
+    assert ApiTransport._job_timeout({"timeout_sec": 5}) == 60.0
+    assert ApiTransport._job_timeout({}) == 1500.0  # default 1800 clamped to the ceiling
+    assert ApiTransport._job_timeout({"timeout_sec": "nonsense"}) == 1500.0
