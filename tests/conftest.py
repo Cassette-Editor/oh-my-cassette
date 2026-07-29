@@ -36,12 +36,11 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
-def _default_browser_transport(monkeypatch):
-    # The plugin ships with CASSETTE_TRANSPORT=api as the default. Pin the suite to the browser path
-    # (what most tests were written against) so they exercise the Playwright entrypoints; tests that
-    # target the API transport override this by setting CASSETTE_TRANSPORT=api (or delete it to assert
-    # the shipped default).
-    monkeypatch.setenv("CASSETTE_TRANSPORT", "browser")
+def _no_inherited_transport_setting(monkeypatch):
+    # There is one transport, so nothing here selects it. The variable is still deleted: a
+    # developer with a leftover CASSETTE_TRANSPORT=browser in their shell would otherwise
+    # have every test print the retirement notice to stderr.
+    monkeypatch.delenv("CASSETTE_TRANSPORT", raising=False)
 
 
 @pytest.fixture
@@ -53,7 +52,7 @@ def cassette_env(tmp_path, monkeypatch):
     monkeypatch.setenv("CASSETTE_ALLOWED_SOURCE_ROOTS", str(source_root))
     monkeypatch.setenv("CASSETTE_ALLOWED_EXTENSIONS", ".mp4,.jpg,.png,.mp3,.txt")
     monkeypatch.setenv("CASSETTE_MAX_BYTES", "1024")
-    monkeypatch.setenv("CASSETTE_MIN_BROWSER_TIMEOUT_SEC", "0")
+    monkeypatch.setenv("CASSETTE_MIN_JOB_TIMEOUT_SEC", "0")
     monkeypatch.setenv("CASSETTE_WEIXIN_FORCE_H264", "0")
     monkeypatch.setenv("CASSETTE_PING_ON_GATEWAY_INSTRUCTION", "0")
     monkeypatch.delenv("JAMENDO_CLIENT_ID", raising=False)

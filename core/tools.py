@@ -148,49 +148,17 @@ def cassette_answer_question(a: dict, **kw) -> str:
         if is_completion_question and not has_continuation:
             # Post-review user answer: the reviewed turn already completed, so there is no
             # interrupt to resume — route the answer as a follow-up direct-line turn instead.
-            live_browser = False
-            if transport.selected_transport() == transport.TRANSPORT_BROWSER:
-                from . import browser as browser_mod
-
-                live_browser = browser_mod.has_live_browser_session_threaded(job)
-            if not live_browser:
-                answered_quality = dict(quality)
-                answered_quality["completion_question_answered"] = True
-                job.update({"status": "succeeded", "quality": answered_quality, "finished_at": jobs.now_iso()})
-                jobs.save_job(job)
-                follow = _completion_follow_up_turn(job, response, kw)
-                follow_data = follow.get("data") if isinstance(follow.get("data"), dict) else {}
-                return ok(
-                    {"job": _scrub_job(job), "follow_up": follow_data or follow},
-                    job_id=job_id,
-                )
+            answered_quality = dict(quality)
+            answered_quality["completion_question_answered"] = True
+            job.update({"status": "succeeded", "quality": answered_quality, "finished_at": jobs.now_iso()})
+            jobs.save_job(job)
+            follow = _completion_follow_up_turn(job, response, kw)
+            follow_data = follow.get("data") if isinstance(follow.get("data"), dict) else {}
+            return ok(
+                {"job": _scrub_job(job), "follow_up": follow_data or follow},
+                job_id=job_id,
+            )
         if kw.get("runtime_host") == "mcp":
-            if transport.selected_transport() == transport.TRANSPORT_BROWSER:
-                from . import browser
-
-                if not browser.has_live_browser_session_threaded(job):
-                    result = transport.get_transport().resume(job, response)
-                    job = jobs.merge_persisted_runtime_fields(job)
-                    job.update(result)
-                    job["status"] = result.get("status", "failed")
-                    job["finished_at"] = jobs.now_iso()
-                    job.pop("resume_request", None)
-                    job.pop("continuation", None)
-                    jobs.save_job(job)
-                    return ok({"job": _scrub_job(job), "background": False}, job_id=job_id)
-                job["status"] = "running"
-                job["started_at"] = job.get("started_at") or jobs.now_iso()
-                job["finished_at"] = None
-                job["worker_kind"] = "thread"
-                job["resume_request"] = {"response": response}
-                jobs.save_job(job)
-                _gateway_job_executor().submit(
-                    _finish_background_cassette_job,
-                    job_id,
-                    "resume",
-                    response,
-                )
-                return ok({"job": _scrub_job(job), "background": True}, job_id=job_id)
             job = jobs.start_worker(job_id, action="resume", response=response)
             return ok({"job": _scrub_job(job), "background": True}, job_id=job_id)
         result = transport.get_transport().resume(job, response)
@@ -852,7 +820,7 @@ def cassette_run_job(a: dict, **kw) -> str:
             "cassette_session_id": a.get("session_id"),
             "model_selection": _cassette_model_selection(a, delivery),
             "cassette_language": _cassette_language_for_run(a, delivery),
-            # Tri-state: absent keeps the transport default (API: no render; browser: render).
+            # Tri-state: absent means no render, so a turn ends with the edit committed only.
             **({"export_on_complete": "true" if a.get("export") else "false"} if a.get("export") is not None else {}),
         },
     )
@@ -865,16 +833,6 @@ def cassette_run_job(a: dict, **kw) -> str:
                 "background": True,
                 "hermes_next_step": _gateway_background_next_step(),
             },
-            job_id=job["job_id"],
-        )
-    if (
-        kw.get("runtime_host") == "mcp"
-        and a.get("wait", False) is False
-        and transport.selected_transport() == transport.TRANSPORT_BROWSER
-    ):
-        job = _start_inprocess_cassette_job(job, runtime_host="mcp")
-        return ok(
-            {"job": _scrub_job(job), "background": True},
             job_id=job["job_id"],
         )
     if a.get("wait", True) is False:
@@ -952,7 +910,9 @@ def _job_report(job: dict) -> dict:
     elif status == "needs_user":
         user_summary = "Cassette needs user input before it can continue."
     elif status == "cancelled":
-        user_summary = "Cassette job was paused by request; browser state is preserved for retry or follow-up editing instructions."
+        user_summary = (
+            "Cassette job was paused by request; the session is preserved for retry or follow-up editing instructions."
+        )
     elif status == "running" and is_gateway_background:
         user_summary = (
             "Cassette is running in the background. The plugin will send progress screenshots and the final gateway "
@@ -1574,9 +1534,8 @@ def cassette_timeline(a: dict, **kw) -> str:
     return ok(data)
 
 
-def check_playwright() -> bool:
-    # Transport-readiness gate: under the browser transport this checks Playwright;
-    # under the API transport it checks that the API base URL + credentials are configured.
+def check_transport_ready() -> bool:
+    # Transport-readiness gate: the API base URL and credentials are configured.
     return transport.get_transport().check_available()
 
 
@@ -1752,8 +1711,8 @@ def _save_cassette_model_preference(session_id: str, model: str, thinking_level:
 
 
 def _cassette_model_options(language: str = "zh") -> dict[str, Any]:
-    # Static product list single-sourced from the API transport — no browser scraping, cannot
-    # fail or block. Labels are locale-independent brand names, so `language` is unused.
+    # Static product list single-sourced from the API transport, so it cannot fail or block.
+    # Labels are locale-independent brand names, so `language` is unused.
     from . import api_transport
 
     del language
@@ -2167,7 +2126,7 @@ def _bgm_next_step_guidance(
     if not continue_after_match:
         return (
             "Standalone smart BGM command is complete. Do not call cassette_list_assets, "
-            "cassette_make_prompt, cassette_run_job, or browser automation; only report the saved BGM material status."
+            "cassette_make_prompt, or cassette_run_job; only report the saved BGM material status."
         )
     if optimization_enabled:
         return (

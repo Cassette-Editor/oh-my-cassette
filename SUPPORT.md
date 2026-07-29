@@ -41,8 +41,8 @@ python3 scripts/diagnose_install.py     # Hermes
 ```
 
 Several common errors are self-explaining: `auth_required` returns the exact
-private setup command, `source_path_not_allowed` names the trusted-root problem,
-and `browser_session_lost` explains why a browser job can't survive a restart.
+private setup command, and `source_path_not_allowed` names the trusted-root
+problem.
 
 ## Why the backend isn't open
 

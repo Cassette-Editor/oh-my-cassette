@@ -179,7 +179,7 @@ mcp = ArtifactFastMCP(
         "Cassette agent. Call cassette_ingest_media once per source file (reuse the returned "
         "session_id), then for every editing request call cassette_run_job with message set to "
         "the user's VERBATIM words — never rewrite, optimize, or expand them; the agent reads "
-        "the session's media itself (cassette_make_prompt is legacy browser-transport only). "
+        "the session's media itself (cassette_make_prompt is a legacy brief builder — do not call it). "
         "One session = one persistent agent thread with memory. "
         "A turn ends succeeded with the edit committed and nothing rendered, carrying "
         "timeline_delta + quality.timeline_ctl + a contact-sheet artifact as the per-turn "

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -56,16 +55,19 @@ def diagnose() -> dict:
         checks["authentication"] = {
             "configured": bool(credentials.get("email") and credentials.get("password")),
             "source": credentials.get("source"),
-            "full_api_access": credentials.get("full_api_access"),
         }
     except runtime_config.RuntimeConfigError as exc:
         checks["authentication"] = {"configured": False, "code": exc.code, "path": str(exc.path or "")}
     try:
-        settings = runtime_config.load_settings()
-        checks["transport"] = settings.get("transport") or os.getenv("CASSETTE_TRANSPORT") or "api"
+        runtime_config.load_settings()
         checks["configured_media_root_count"] = len(runtime_config.configured_media_roots())
     except runtime_config.RuntimeConfigError as exc:
         checks["settings"] = {"ok": False, "code": exc.code, "path": str(exc.path or "")}
+    leftover = runtime_config.data_root() / "browsers"
+    if leftover.exists():
+        # Chromium the retired browser transport downloaded. Reported rather than deleted:
+        # it is hundreds of MB, and reclaiming disk is the user's call, not an upgrade's.
+        checks["retired_browser_cache"] = {"path": str(leftover), "note": "safe to delete"}
     return checks
 
 

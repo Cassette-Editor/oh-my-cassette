@@ -321,7 +321,7 @@ Install through the Hermes plugin manager (recommended):
 hermes plugins install Cassette-Editor/oh-my-cassette
 ```
 
-The Hermes installer prompts for your Cassette account email and password and saves them to `~/.hermes/.env`. Then run the setup finisher — it installs Playwright Chromium into the Hermes Python environment, detects `ffmpeg`/`ffprobe`, and lets you pick the Cassette region — and enable the plugin:
+The Hermes installer prompts for your Cassette account email and password and saves them to `~/.hermes/.env`. Then run the setup finisher — it detects `ffmpeg`/`ffprobe` and lets you pick the Cassette region — and enable the plugin:
 
 ```bash
 python3 ~/.hermes/plugins/cassette/scripts/install_plugin.py --setup-only
@@ -351,7 +351,6 @@ The installer:
   - `https://trycassette.online/agent` (America)
 - optionally saves Cassette login and Jamendo credentials into `~/.hermes/.env`;
 - detects `ffmpeg` and `ffprobe` paths for service environments;
-- installs Python Playwright and Chromium into the Hermes Python environment;
 - restarts the Hermes gateway service.
 
 To copy files instead of creating a symlink:
@@ -393,7 +392,7 @@ Credentials may also come from process environment variables. Environment values
 python3 scripts/setup_local_mcp.py --import-hermes
 ```
 
-The setup command creates config directories with mode `0700` and credential files with mode `0600`, rejects symlinks and permissive files, and never persists access or refresh tokens. If the account does not have full API access, setup reports the optional browser path instead of silently changing transports.
+The setup command creates config directories with mode `0700` and credential files with mode `0600`, rejects symlinks and permissive files, and never persists access or refresh tokens.
 
 ### Resetting the password
 
@@ -453,17 +452,11 @@ python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
 
 Exports stay under the shared Oh My Cassette data directory at `cassette/exports/<job_id>/`. Only files contained in that job-specific directory can be returned.
 
-### API and optional browser transports
+### How the plugin reaches Cassette
 
-The API transport is the default. It connects directly to the separate Cassette backend, retries authentication once after a `401`, and keeps access tokens in memory only. Because API continuation metadata is persisted, paused API jobs can resume after Codex or Claude restarts.
+One way: direct calls to the separate Cassette backend. Authentication retries once after a `401`, access tokens are kept in memory only, and continuation metadata is persisted, so a paused job resumes after Codex or Claude restarts.
 
-Browser transport is an explicit fallback for accounts without full API access and for parity diagnostics. Install pinned Playwright and Chromium only when needed:
-
-```bash
-python3 scripts/setup_local_mcp.py --with-browser
-```
-
-Browser jobs can resume while the same MCP process is alive. After a host restart they return `browser_session_lost`, because live browser objects cannot be persisted.
+There is no browser to install, drive, or keep alive. The Playwright transport that used to sit behind `CASSETTE_TRANSPORT=browser` has been removed; a leftover setting is reported once on stderr and ignored.
 
 ### MCP tools
 
@@ -473,7 +466,7 @@ The local MCP runtime exposes the same 14 tool names as Hermes:
 |---|---|
 | `cassette_ingest_media` | Safely ingest trusted project media into an isolated session |
 | `cassette_list_assets` | Read the session's media manifest |
-| `cassette_make_prompt` | (legacy, browser transport) Build a full edit brief |
+| `cassette_make_prompt` | (legacy) Build a full edit brief — superseded by verbatim relay |
 | `cassette_match_bgm` | Match Free To Use background music |
 | `cassette_match_exact_bgm` | Match a specific title and artist |
 | `jamendo_music_matcher` | Match structured Jamendo preferences |
@@ -496,7 +489,7 @@ This narrows exposure rather than closing it: the route still resolves for anyon
 
 Two concurrency semantics worth knowing: a plugin turn never cancels a run started from the open editor tab (it fails typed as `thread_busy` instead — wait and retry), while typing a fresh message in the tab DOES cancel an in-flight plugin turn (the tab takes over; existing product behavior).
 
-**Behavior change (0.4.1):** the agent now receives the user's `message` verbatim (no brief wrapper), sessions are multi-turn on one thread, and a turn ends with the edit committed but **nothing rendered** — the envelope carries `timeline_delta`, `quality.timeline_ctl`, and a contact-sheet preview instead; pass `export=true` on the turn where the user asks to finish (browser transport keeps its render-per-job behavior). Model/thinking are session preferences via `cassette_config` — never asked upfront, defaults match the web editor.
+**Behavior change (0.4.1):** the agent now receives the user's `message` verbatim (no brief wrapper), sessions are multi-turn on one thread, and a turn ends with the edit committed but **nothing rendered** — the envelope carries `timeline_delta`, `quality.timeline_ctl`, and a contact-sheet preview instead; pass `export=true` on the turn where the user asks to finish. Model/thinking are session preferences via `cassette_config` — never asked upfront, defaults match the web editor.
 
 **Behavior change (0.4.0):** on MCP hosts, `edit_plan_review` now surfaces as a real question by default (`CASSETTE_PLAN_REVIEW=user`) instead of being silently auto-approved — answer with `approve`, `revise <feedback>`, or `reject`, in chat or in the open editor tab (first answer wins). Set `CASSETTE_UNATTENDED=1` to restore the previous fully headless behavior. Status envelopes additionally carry `timeline_delta` (what changed) and `plan_progress`, fed by the run's SSE event stream (`CASSETTE_API_STREAM=0` disables).
 
@@ -526,7 +519,7 @@ In QQ or Telegram:
 
 * Assets and video state are preserved within the same conversation session. You can send additional messages in the same session to further modify the edited video results.
 
-* Use `/new` or `/reset` to start a fresh Hermes session and clear the live Cassette browser session and your assets for that conversation.
+* Use `/new` or `/reset` to start a fresh Hermes session and clear the live Cassette session and your assets for that conversation.
 
 * QQ is set to Chinese and Telegram is set to English by default, you can set language by command `/cassette language zh/en` manually.
 
@@ -579,7 +572,7 @@ Re-run the install command — it is the same command for installs and updates:
 curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/release/scripts/install_opencode.py | python3 -
 ```
 
-The local launcher updates its locked, plugin-managed virtual environment automatically on the next start after any of these. Browser binaries are installed only when requested.
+The local launcher updates its locked, plugin-managed virtual environment automatically on the next start after any of these.
 
 ### Hermes
 

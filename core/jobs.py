@@ -32,9 +32,11 @@ def _redact_prompt(prompt: str) -> str:
 
 
 def _job_timeout_sec(options: dict) -> int:
-    default = int(os.getenv("CASSETTE_BROWSER_TIMEOUT_SEC", "1800"))
+    # CASSETTE_*_BROWSER_* are the pre-API-transport names. They still work so an existing
+    # deployment's tuning is not silently reset to the default by an upgrade.
+    default = int(os.getenv("CASSETTE_JOB_TIMEOUT_SEC") or os.getenv("CASSETTE_BROWSER_TIMEOUT_SEC", "1800"))
     requested = int(options.get("timeout_sec") or default)
-    minimum = int(os.getenv("CASSETTE_MIN_BROWSER_TIMEOUT_SEC", "1800"))
+    minimum = int(os.getenv("CASSETTE_MIN_JOB_TIMEOUT_SEC") or os.getenv("CASSETTE_MIN_BROWSER_TIMEOUT_SEC", "1800"))
     if minimum > 0:
         return max(requested, minimum)
     return requested
@@ -125,7 +127,7 @@ def update_job(job_id: str, **fields: Any) -> dict:
 
 
 def merge_persisted_runtime_fields(job: dict) -> dict:
-    """Keep browser-side progress updates written while a job is running."""
+    """Keep progress updates the transport wrote to the record while the job was running."""
     try:
         persisted = load_job(job["job_id"])
     except Exception:
@@ -139,7 +141,6 @@ def merge_persisted_runtime_fields(job: dict) -> dict:
         "model_selection_notification",
         "cassette_language",
         "language_selection",
-        "browser_events",
         "chat_thread_id",
         "timeline_delta",
         "plan_progress",

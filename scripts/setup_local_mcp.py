@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private first-run authentication and optional browser setup."""
+"""Private first-run authentication and media-root setup."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ if str(PLUGIN_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
 
 import runtime_config  # noqa: E402
-from local_mcp_bootstrap import BootstrapError, bootstrap_runtime  # noqa: E402
 
 
 DEFAULT_API_URL = "https://remotion-canvas-server-5tdb2hkb4q-as.a.run.app"
@@ -156,10 +155,9 @@ def verify_credentials(api_url: str, email: str, password: str, *, timeout: floa
         raise CredentialsRejected("Cassette rejected the credentials; no credentials were written.")
     # access_token is returned for the caller's immediate use only. It must never reach
     # _write_credentials, which is why that helper takes named fields instead of a dict.
-    return {
-        "full_api_access": bool(payload.get("isFullUser")),
-        "access_token": str(session["access_token"]),
-    }
+    # The response also carries an access level; it is not read. Setup verifies that the
+    # account exists and the password works, and stops there.
+    return {"access_token": str(session["access_token"])}
 
 
 def _canonical_media_roots(values: list[str]) -> list[str]:
@@ -174,7 +172,7 @@ def _canonical_media_roots(values: list[str]) -> list[str]:
     return roots
 
 
-def _write_credentials(*, email: str, password: str, full_api_access: bool, api_url: str) -> None:
+def _write_credentials(*, email: str, password: str, api_url: str) -> None:
     """Commit credentials, building the payload from named fields only.
 
     Not a dict splat on purpose: session tokens flow through this module, and a `{**result}`
@@ -185,7 +183,6 @@ def _write_credentials(*, email: str, password: str, full_api_access: bool, api_
         {
             "email": email,
             "password": password,
-            "full_api_access": full_api_access,
             "verified_at": _now_iso(),
             "api_url": api_url,
         },
@@ -271,12 +268,7 @@ def reset_password(args: argparse.Namespace) -> str:
             )
             new_password = str(body.get("password") or "").strip() if status == 200 else ""
             if new_password:
-                _write_credentials(
-                    email=email,
-                    password=new_password,
-                    full_api_access=bool(verification["full_api_access"]),
-                    api_url=api_url,
-                )
+                _write_credentials(email=email, password=new_password, api_url=api_url)
                 return "rotated"
             # A deployment without the rotate route (or one that refused) still resets by email.
 
@@ -288,13 +280,8 @@ def reset_password(args: argparse.Namespace) -> str:
             "No password was entered. The account password has already been replaced, so re-run "
             "this command with the password from your email."
         )
-    verification = verify_credentials(api_url, email, password)
-    _write_credentials(
-        email=email,
-        password=password,
-        full_api_access=bool(verification["full_api_access"]),
-        api_url=api_url,
-    )
+    verify_credentials(api_url, email, password)
+    _write_credentials(email=email, password=password, api_url=api_url)
     return "emailed"
 
 
@@ -353,7 +340,7 @@ def enable_claude_auto_update(*, skip: bool, assume_yes: bool = False) -> str:
     return f"Claude Code will now auto-update {CLAUDE_MARKETPLACE} plugins. Change it in {path}."
 
 
-def configure(args: argparse.Namespace) -> dict:
+def configure(args: argparse.Namespace) -> None:
     imported: dict[str, str] = {}
     if args.import_hermes is not None:
         imported = _read_hermes_env(args.import_hermes)
@@ -390,36 +377,19 @@ def configure(args: argparse.Namespace) -> dict:
         or imported.get("CASSETTE_API_URL")
         or DEFAULT_API_URL
     ).rstrip("/")
-    verification = verify_credentials(api_url, email, password)
+    verify_credentials(api_url, email, password)
 
     existing_settings = runtime_config.read_protected_json(runtime_config.settings_path())
     roots = _canonical_media_roots(args.allowed_root)
     settings = {
         **existing_settings,
-        "transport": "browser" if args.with_browser else args.transport,
         "media_roots": roots if args.allowed_root else existing_settings.get("media_roots", []),
         "api_url": api_url,
     }
 
     # Verification is complete; only now are credentials committed atomically.
-    _write_credentials(
-        email=email,
-        password=password,
-        full_api_access=bool(verification["full_api_access"]),
-        api_url=api_url,
-    )
+    _write_credentials(email=email, password=password, api_url=api_url)
     runtime_config.write_protected_json(runtime_config.settings_path(), settings)
-
-    if args.with_browser:
-        try:
-            bootstrap_runtime(with_browser=True, output=sys.stderr)
-        except BootstrapError as exc:
-            raise SetupError(f"Credentials were saved, but optional browser setup failed: {exc}") from exc
-
-    return {
-        "transport": settings["transport"],
-        "full_api_access": verification["full_api_access"],
-    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -428,7 +398,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--email", help="Cassette account email; password is never accepted as a command-line argument")
     parser.add_argument("--api-url", help="Cassette API origin")
-    parser.add_argument("--transport", choices=("api", "browser"), default="api")
     parser.add_argument("--allowed-root", action="append", default=[], help="Additional trusted media directory")
     parser.add_argument(
         "--import-hermes",
@@ -436,11 +405,6 @@ def parse_args() -> argparse.Namespace:
         const=Path.home() / ".hermes" / ".env",
         type=Path,
         help="Explicitly import Cassette credentials from a Hermes .env file",
-    )
-    parser.add_argument(
-        "--with-browser",
-        action="store_true",
-        help="Install pinned Playwright and Chromium, then select browser transport",
     )
     parser.add_argument(
         "--use-environment",
@@ -466,10 +430,8 @@ def _reject_reset_password_conflicts(args: argparse.Namespace) -> None:
         name
         for name, used in (
             ("--api-url", bool(args.api_url)),
-            ("--transport", args.transport != "api"),
             ("--allowed-root", bool(args.allowed_root)),
             ("--import-hermes", args.import_hermes is not None),
-            ("--with-browser", args.with_browser),
             ("--use-environment", args.use_environment),
             ("--no-auto-update", args.no_auto_update),
         )
@@ -494,19 +456,16 @@ def main() -> None:
             print("Password rotated." if delivery == "rotated" else "New password stored.")
             print(f"Saved at {runtime_config.credentials_path()}.")
             return
-        setup = configure(args)
+        configure(args)
     except (SetupError, runtime_config.RuntimeConfigError) as exc:
         path = getattr(exc, "path", None)
         location = f" ({path})" if path else ""
         print(f"oh-my-cassette setup: {exc}{location}", file=sys.stderr)
         raise SystemExit(1) from exc
     print(f"Verified credentials saved privately at {runtime_config.credentials_path()}.")
-    print(f"Selected transport: {setup['transport']}.")
     auto_update = enable_claude_auto_update(skip=args.no_auto_update)
     if auto_update:
         print(auto_update)
-    if not setup["full_api_access"] and setup["transport"] == "api":
-        print("This account lacks full API access. Run this command again with --with-browser.")
 
 
 if __name__ == "__main__":

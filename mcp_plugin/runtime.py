@@ -76,9 +76,8 @@ class LocalMcpRuntime:
         )
 
     def _auth_error(self, *, session_id: str | None = None) -> ToolEnvelope | None:
-        selected = str(os.getenv("CASSETTE_TRANSPORT", "api") or "api").strip().lower()
         token = str(os.getenv("CASSETTE_AUTH_TOKEN", "") or "").strip()
-        if selected != "browser" and token:
+        if token:
             return None
         try:
             credentials = runtime_config.load_credentials()
@@ -101,13 +100,9 @@ class LocalMcpRuntime:
                 },
                 session_id=session_id,
             )
-        if selected != "browser" and credentials.get("full_api_access") is False:
-            return self._failure(
-                "api_access_unavailable",
-                "This account does not have full Cassette API access; configure the optional browser transport.",
-                details={"browser_setup_command": runtime_config.browser_setup_command(PLUGIN_ROOT)},
-                session_id=session_id,
-            )
+        # Having credentials is the whole check. The plugin has one class of user, an agent
+        # account, and every tool it exposes — export included — is an operation that account
+        # is entitled to, so there is no second tier to gate on here.
         return None
 
     def _redaction_secrets(self) -> list[str]:

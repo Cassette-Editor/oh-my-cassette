@@ -26,8 +26,12 @@ CASSETTE_URL_OPTIONS = (
     ("1", "https://sg.trycassette.online/agent", "Asia"),
     ("2", "https://trycassette.online/agent", "America"),
 )
+# The API origin the plugin calls. CASSETTE_URL above is the web editor a human opens; it is
+# recorded on job records and offered during install, but no code path fetches it.
+CASSETTE_DEFAULT_API_URL = "https://remotion-canvas-server-5tdb2hkb4q-as.a.run.app"
 AUTH_ENV_KEYS = (
     "CASSETTE_URL",
+    "CASSETTE_API_URL",
     "CASSETTE_FFMPEG_BIN",
     "CASSETTE_FFPROBE_BIN",
     "CASSETTE_AUTH_EMAIL",
@@ -206,37 +210,6 @@ def _run_command(cmd: list[str], *, dry_run: bool = False) -> int:
         return 0
     print(f"running: {printable}")
     return subprocess.run(cmd, check=False).returncode
-
-
-def _ensure_pip(python: Path, *, dry_run: bool = False) -> bool:
-    pip_check_code = _run_command([str(python), "-m", "pip", "--version"], dry_run=dry_run)
-    if pip_check_code == 0:
-        return True
-
-    print("pip was not found in the Hermes Python environment; bootstrapping it with ensurepip...")
-    ensurepip_code = _run_command([str(python), "-m", "ensurepip", "--upgrade"], dry_run=dry_run)
-    if ensurepip_code != 0:
-        print("pip bootstrap failed. Install pip in the Hermes Python environment, then rerun this installer.")
-        return False
-    return True
-
-
-def install_hermes_playwright(home: Path, *, dry_run: bool = False) -> bool:
-    python = hermes_python(home)
-    if not python.exists():
-        print(f"skip Playwright setup; Hermes Python was not found: {python}")
-        return False
-    if not _ensure_pip(python, dry_run=dry_run):
-        return False
-    pip_code = _run_command([str(python), "-m", "pip", "install", "playwright"], dry_run=dry_run)
-    if pip_code != 0:
-        print("Playwright Python package installation failed.")
-        return False
-    browser_code = _run_command([str(python), "-m", "playwright", "install", "chromium"], dry_run=dry_run)
-    if browser_code != 0:
-        print("Playwright Chromium installation failed.")
-        return False
-    return True
 
 
 def restart_gateway(home: Path, *, dry_run: bool = False) -> bool:
@@ -476,11 +449,6 @@ def main() -> int:
         "--skip-cassette-auth", action="store_true", help="do not prompt for Cassette login credentials"
     )
     parser.add_argument("--skip-jamendo-auth", action="store_true", help="do not prompt for Jamendo API credentials")
-    parser.add_argument(
-        "--skip-playwright-install",
-        action="store_true",
-        help="do not install Playwright into the Hermes Python environment",
-    )
     parser.add_argument("--skip-ffmpeg-detect", action="store_true", help="do not detect and save ffmpeg/ffprobe paths")
     parser.add_argument(
         "--skip-gateway-restart", action="store_true", help="do not restart Hermes gateway after installation"
@@ -507,8 +475,6 @@ def main() -> int:
         configure_jamendo_auth(home)
     if code == 0 and not args.dry_run and not args.skip_ffmpeg_detect:
         configure_transcoder_paths(home)
-    if code == 0 and not args.skip_playwright_install:
-        install_hermes_playwright(home, dry_run=args.dry_run)
     if code == 0 and not args.skip_gateway_restart:
         restart_gateway(home, dry_run=args.dry_run)
     return code

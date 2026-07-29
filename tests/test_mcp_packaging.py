@@ -442,10 +442,7 @@ def test_every_documented_ruff_pin_names_the_version_ci_installs():
 
 @pytest.mark.parametrize(
     ("requirements_in", "lock"),
-    [
-        ("requirements-mcp.in", "requirements-mcp.lock"),
-        ("requirements-browser.in", "requirements-browser.lock"),
-    ],
+    [("requirements-mcp.in", "requirements-mcp.lock")],
 )
 def test_requirement_locks_carry_the_versions_their_inputs_declare(requirements_in, lock):
     # Dependabot edits the .in files and has no idea the uv-compiled locks exist, but the

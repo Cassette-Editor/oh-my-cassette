@@ -24,7 +24,7 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from . import browser, exact_bgm, jobs, manifest, notifier, security, transport
+from . import api_transport, exact_bgm, jobs, manifest, notifier, security, transport
 from . import tools as tools_mod
 from .errors import CassetteError
 from .security import redact_for_log, safe_hash_id
@@ -648,8 +648,8 @@ def _cassette_unreachable_message(language: str = "zh") -> str:
 def _fixed_cut_requested_message(active: bool, language: str = "zh") -> str:
     if _normalize_cassette_language(language) == "en":
         if active:
-            return "Requested a stop for the current Cassette operation. If the Cassette agent is still running, I will click the page stop button; the browser state will be preserved for retry or the next edit instruction."
-        return "Cassette has no active edit operation right now. The browser state is preserved; send a retry or the next edit instruction to continue."
+            return "Requested a stop for the current Cassette operation. If the Cassette agent is still running, I will request a stop; the session is preserved for retry or the next edit instruction."
+        return "Cassette has no active edit operation right now. The session is preserved; send a retry or the next edit instruction to continue."
     if active:
         return "已请求停止当前 Cassette 操作。若 Cassette agent 仍在执行，我会触发页面停止按钮；浏览器状态会保留，等待你发送重试或下一步剪辑指令。"
     return "Cassette 当前没有正在运行的剪辑任务，已保持浏览器状态暂停。你可以发送重试或下一步剪辑指令继续。"
@@ -725,7 +725,7 @@ def _cassette_connectivity_skip(gateway: Any, event: Any, language: str = "zh") 
     ).lower()
     if ping_setting in {"0", "false", "no", "off"}:
         return None
-    result = browser.check_cassette_connectivity()
+    result = api_transport.check_cassette_connectivity()
     if result.get("ok"):
         return None
     reply_sent = _send_gateway_fixed_reply(gateway, event, _cassette_unreachable_message(language))
@@ -1439,7 +1439,7 @@ def _request_exact_bgm_recommendations(
 def _exact_bgm_success_guidance(optimization_enabled: bool, continue_after_match: bool, language: str = "zh") -> str:
     if not continue_after_match:
         return (
-            "If cassette_match_exact_bgm succeeds, do not call cassette_list_assets, cassette_make_prompt, cassette_run_job, or browser automation. "
+            "If cassette_match_exact_bgm succeeds, do not call cassette_list_assets, cassette_make_prompt, or cassette_run_job. "
             "Only tell the user the exact BGM matching result if the tool notification was not already delivered. "
         )
     if optimization_enabled:
@@ -1611,7 +1611,7 @@ def _rewrite_smart_bgm_keyword_selection(
     else:
         after_match_guidance = (
             "Call cassette_match_bgm with continue_after_match=false. "
-            "After the tool returns, do not call cassette_list_assets, cassette_make_prompt, cassette_run_job, or any Cassette browser automation. "
+            "After the tool returns, do not call cassette_list_assets, cassette_make_prompt, or cassette_run_job. "
             "Only tell the user the BGM matching result if the tool notification was not already delivered. "
         )
     text = (
@@ -1657,11 +1657,11 @@ def _rewrite_jamendo_first_bgm_selection(
         )
     else:
         jamendo_success = (
-            "If jamendo_music_matcher succeeds, do not call cassette_list_assets, cassette_make_prompt, cassette_run_job, or browser automation. "
+            "If jamendo_music_matcher succeeds, do not call cassette_list_assets, cassette_make_prompt, or cassette_run_job. "
             "Only tell the user the Jamendo BGM matching result if the tool notification was not already delivered. "
         )
         freetouse_success = (
-            "If the Free To Use fallback succeeds, do not call cassette_list_assets, cassette_make_prompt, cassette_run_job, or browser automation. "
+            "If the Free To Use fallback succeeds, do not call cassette_list_assets, cassette_make_prompt, or cassette_run_job. "
             "Only tell the user the BGM matching result if the tool notification was not already delivered. "
         )
     text = (
@@ -1802,7 +1802,7 @@ def _rewrite_direct_original_instruction(
         f"{bgm_note}"
         f"Use cassette session_id `{session_id}` for this confirmed edit. "
         f"{_direct_original_instruction_guard(direct_reason, language)} "
-        "Call cassette_run_job with wait=false for this gateway job so /cut can pause the active Cassette browser operation. "
+        "Call cassette_run_job with wait=false for this gateway job so /cut can pause the active Cassette operation. "
         f"{_cassette_orchestration_guard()} "
         "Do not emit MEDIA tags or guess local export paths; cassette_run_job notification handles the stored gateway delivery target and reports any delivery failure.]"
     )
@@ -2123,7 +2123,7 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                     f"[Cassette optimized prompt confirmed. Cassette gateway assets available: {asset_count} asset(s). "
                     f"Use cassette session_id `{session_id}` for this confirmed edit. "
                     f"{_confirmed_prompt_guard(cassette_language)} "
-                    "Call cassette_run_job with wait=false for this gateway job so /cut can pause the active Cassette browser operation. "
+                    "Call cassette_run_job with wait=false for this gateway job so /cut can pause the active Cassette operation. "
                     f"{_cassette_orchestration_guard()} "
                     "Do not emit MEDIA tags or guess local export paths; cassette_run_job notification handles the stored gateway delivery target and reports any delivery failure.]"
                 )
@@ -2141,7 +2141,7 @@ def ingest_gateway_media(event: Any = None, gateway: Any = None, **kwargs) -> di
                 f"[Cassette optimized prompt confirmed. Cassette gateway assets available: {asset_count} asset(s). "
                 f"Use cassette session_id `{session_id}` for this confirmed edit. "
                 f"{_confirmed_prompt_guard(cassette_language)} "
-                "Call cassette_run_job with wait=false for this gateway job so /cut can pause the active Cassette browser operation. "
+                "Call cassette_run_job with wait=false for this gateway job so /cut can pause the active Cassette operation. "
                 f"{_cassette_orchestration_guard()} "
                 "Do not emit MEDIA tags or guess local export paths; cassette_run_job notification handles the stored gateway delivery target and reports any delivery failure.]"
             )
@@ -2366,7 +2366,7 @@ def handle_cut_command(raw_args: str = "") -> str:
     return _fixed_cut_requested_message(False)
 
 
-def close_cassette_browser_sessions(**kwargs) -> None:
+def close_cassette_sessions(**kwargs) -> None:
     transport.get_transport().close_sessions()
 
 

@@ -1,6 +1,6 @@
 # Oh My Cassette installed 🎬
 
-Finish setup (Playwright Chromium in the Hermes venv, ffmpeg detection, region choice):
+Finish setup (ffmpeg detection, region choice):
 
     python3 ~/.hermes/plugins/cassette/scripts/install_plugin.py --setup-only
 

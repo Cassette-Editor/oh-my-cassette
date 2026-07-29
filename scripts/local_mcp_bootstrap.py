@@ -176,7 +176,7 @@ def _write_marker(path: Path, value: dict) -> None:
     runtime_config.write_protected_json(path, value)
 
 
-def bootstrap_runtime(*, with_browser: bool = False, output: TextIO | None = None) -> Path:
+def bootstrap_runtime(*, output: TextIO | None = None) -> Path:
     selected, version = select_python()
     data = runtime_config.ensure_private_dir(runtime_config.data_root())
     root = runtime_config.ensure_private_dir(data / "runtime")
@@ -229,32 +229,5 @@ def bootstrap_runtime(*, with_browser: bool = False, output: TextIO | None = Non
                 base_record["mcp"] = mcp_version
             _write_marker(base_marker, base_record)
 
-        if with_browser:
-            browser_lock = PLUGIN_ROOT / "requirements-browser.lock"
-            browser_marker = venv / ".browser-runtime.json"
-            browser_fingerprint = _fingerprint(browser_lock, version)
-            if _read_marker(browser_marker).get("fingerprint") != browser_fingerprint:
-                _run(
-                    [
-                        str(python),
-                        "-m",
-                        "pip",
-                        "install",
-                        "--disable-pip-version-check",
-                        "--no-input",
-                        "--requirement",
-                        str(browser_lock),
-                    ],
-                    output=output,
-                )
-                browser_path = runtime_config.ensure_private_dir(runtime_config.data_root() / "browsers")
-                environment = os.environ.copy()
-                environment["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_path)
-                _run([str(python), "-m", "playwright", "install", "chromium"], environment=environment, output=output)
-                browser_record = {"fingerprint": browser_fingerprint}
-                playwright_version = locked_version(browser_lock, "playwright")
-                if playwright_version:
-                    browser_record["playwright"] = playwright_version
-                _write_marker(browser_marker, browser_record)
         _unlock(lock_handle)
     return python

@@ -245,14 +245,15 @@ def load_credentials() -> dict[str, Any]:
             "email": email,
             "password": password,
             "source": "environment",
-            "full_api_access": None,
         }
     stored = read_protected_json(credentials_path())
+    # Access level is deliberately not read back: the plugin serves agent accounts and treats
+    # every Cassette operation, export included, as one they are entitled to. Files written by
+    # older versions may still carry a full_api_access key; it is ignored, not migrated.
     return {
         "email": str(stored.get("email") or "").strip(),
         "password": str(stored.get("password") or "").strip(),
         "source": "local_config" if stored else "missing",
-        "full_api_access": stored.get("full_api_access"),
         "verified_at": stored.get("verified_at"),
     }
 
@@ -320,10 +321,6 @@ def setup_command(plugin_root: Path | None = None) -> str:
     return f"{python_command()} {_quote_for_shell(str(root / 'scripts' / 'setup_local_mcp.py'))}"
 
 
-def browser_setup_command(plugin_root: Path | None = None) -> str:
-    return setup_command(plugin_root) + " --with-browser"
-
-
 def reset_password_command(plugin_root: Path | None = None) -> str:
     return setup_command(plugin_root) + " --reset-password"
 
@@ -337,9 +334,6 @@ def configure_mcp_process_environment() -> list[RuntimeConfigError]:
     """
     os.environ[RUNTIME_ADAPTER_ENV] = MCP_ADAPTER
     os.environ.setdefault("CASSETTE_ASSET_ROOT", str(asset_root()))
-    browser_store = data_root() / "browsers"
-    if browser_store.exists():
-        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(browser_store))
     errors: list[RuntimeConfigError] = []
     for path in (config_root(), data_root(), asset_root()):
         try:
@@ -347,10 +341,9 @@ def configure_mcp_process_environment() -> list[RuntimeConfigError]:
         except RuntimeConfigError as exc:
             errors.append(exc)
     try:
-        settings = load_settings()
-        transport = str(settings.get("transport") or "").strip().lower()
-        if transport in {"api", "browser"}:
-            os.environ.setdefault("CASSETTE_TRANSPORT", transport)
+        # A stored transport is read but no longer honored — there is one transport. Loading
+        # settings still matters: it surfaces a permissions/ownership problem with the file.
+        load_settings()
     except RuntimeConfigError as exc:
         errors.append(exc)
     try:

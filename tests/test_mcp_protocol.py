@@ -439,7 +439,6 @@ def test_protocol_successfully_reviews_and_cancels_persisted_jobs(tmp_path):
             {
                 "email": "protocol@example.test",
                 "password": "protocol-private-password",
-                "full_api_access": True,
             }
         ),
         encoding="utf-8",
