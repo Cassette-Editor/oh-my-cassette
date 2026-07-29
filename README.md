@@ -117,31 +117,32 @@ Upload your clips, describe the video you want, and the agent edits it.
 
 <table width="100%">
 <tr><td>
-  <video src="https://github.com/user-attachments/assets/59ea9038-0cec-4d95-beef-6d871a663292" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/28792f85-a468-4f8b-a5c6-c7f550e724a3" controls width="100%"></video>
 </td></tr>
 </table>
 
 | Time | What happens |
 | --- | --- |
-| 0:00 | The brief — the same prompt as the Travel Vlog case below, typed into Claude Code |
-| 0:05 | 14 files upload to Cassette; every clip is analyzed for scene content |
-| 0:13 | The agent edits on its own — shot selection, titles, picture-in-picture, beat-synced cuts |
-| 0:16 | The timeline comes back as a readable digest, with a clickable preview link |
-| 0:25 | One `cmd+click` opens the real contact sheet — one frame per clip, zero render |
-| 0:30 | Nothing renders until you say so; the export runs on your go |
-| 0:36 | The finished cut lands in the project folder |
+| 0:09 | The brief — one line, style left entirely to the agent, typed into Claude Code |
+| 0:22 | 15 files upload to Cassette; every clip is analyzed for scene content |
+| 0:35 | The agent edits on its own — shot selection, title card, lower-third, grading, beat-synced cuts |
+| 0:58 | The timeline comes back as a readable digest, with a clickable contact-sheet link |
+| 1:03 | One `cmd+click` opens the real contact sheet — one frame per clip, zero render |
+| 1:12 | The contact sheet itself: what the cut looks like before a single frame is rendered |
+| 1:44 | The export lands, and the runtime measures it — duration, black frames, audio levels |
+| 1:52 | The finished cut |
 
 **The cut it produced**
 
 <table align="center" width="70%">
 <tr><td>
-  <video src="https://github.com/user-attachments/assets/e43783d6-7b14-4ff9-a530-c9a12d3a6afa" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/54df6c4d-ba5f-4b01-af83-62f214dc6249" controls width="100%"></video>
 </td></tr>
 </table>
 
-<sub>The screen recording is compressed to keep this page light, so the terminal text looks softer here than it does on your machine; the cut below it is the full-quality render. Prompt to rendered file took about 13 minutes of real time, sped up above. A person's face is pixelated in both the screen recording and the cut it produced, for privacy — that blur is not something the agent added.</sub>
+<sub>The screen recording is compressed to keep this page light, so the terminal text looks softer here than it does on your machine; the cut below it is the full-quality render. Prompt to rendered file took 9 minutes 53 seconds of real time, sped up above. A person's face is pixelated in both the screen recording and the cut it produced, for privacy — that blur is not something the agent added.</sub>
 
-<sub>**Token cost:** that session used 45K output tokens and 20.3M billed tokens in total (19.8M of them cache reads) across 4 turns on Claude Opus 4.8 — roughly **$13 at API list price**, measured from the Claude Code transcript of this exact recording. The editing itself runs on Cassette, so the agent only pays for the brief and the timeline digests, not for the footage.</sub>
+<sub>**Token cost:** that session used 55K output tokens and 2.33M billed input tokens (2.07M of them cache reads) on Claude Opus 5 — roughly **$4 at API list price**, measured from the Claude Code transcript of this exact recording. One brief, one turn, start to exported file. The editing itself runs on Cassette, so the agent only pays for the brief and the timeline digests, not for the footage.</sub>
 
 ## 🎬 Case Videos
 
