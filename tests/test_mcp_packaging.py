@@ -97,7 +97,10 @@ def test_repo_root_mcp_config_is_claude_project_scoped_not_codex():
     # that made the MCP fail inside Claude).
     project = _json(".mcp.json")["mcpServers"]["cassette"]
     assert "CODEX_HOME" not in json.dumps(project)
-    for codex_only in ("env_vars", "startup_timeout_sec", "tool_timeout_sec"):
+    # "timeout" belongs here too: Claude Code reads it as a HARD wall-clock cap that
+    # progress notifications do not extend, so shipping one would cap every blocking
+    # run_job at a number chosen without knowing the edit.
+    for codex_only in ("env_vars", "startup_timeout_sec", "tool_timeout_sec", "timeout"):
         assert codex_only not in project
     assert project["args"] == ["${CLAUDE_PROJECT_DIR:-.}/scripts/run_local_mcp.py"]
 
