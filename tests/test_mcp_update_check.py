@@ -94,5 +94,81 @@ def test_every_shipped_host_has_an_update_command():
     assert update_check.update_command("") == update_check.FALLBACK_COMMAND
 
 
+@pytest.fixture
+def claude_settings(tmp_path, monkeypatch):
+    """Point the runtime at a throwaway ~/.claude and write settings.json into it."""
+    root = tmp_path / "claude-home"
+    root.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(root))
+    monkeypatch.setenv("CASSETTE_MCP_HOST", "claude")
+    monkeypatch.delenv("CASSETTE_UPDATE_CHECK", raising=False)
+
+    def write(value: dict) -> None:
+        (root / "settings.json").write_text(json.dumps(value), encoding="utf-8")
+
+    return write
+
+
+def _marketplaces(entry: dict) -> dict:
+    return {"extraKnownMarketplaces": {"cassette-editor": entry}}
+
+
+def test_auto_update_notice_fires_when_the_toggle_is_off(claude_settings):
+    claude_settings(_marketplaces({"source": {"source": "github", "repo": "Cassette-Editor/oh-my-cassette"}}))
+    notice = update_check.auto_update_notice()
+    assert "AUTO-UPDATE IS OFF" in notice
+    assert "cassette-editor" in notice
+    # The agent must route the user to the toggle, never write their Claude config itself.
+    assert "Enable auto-update" in notice
+    assert "do not edit their Claude configuration yourself" in notice
+
+
+def test_auto_update_notice_is_silent_once_enabled(claude_settings):
+    claude_settings(_marketplaces({"source": {"source": "github"}, "autoUpdate": True}))
+    assert update_check.auto_update_notice() == ""
+
+
+def test_auto_update_notice_is_silent_without_the_marketplace_entry(claude_settings):
+    # No entry means Claude Code is not the host or the plugin arrived another way, so
+    # there is no toggle to describe — and inventing one would send the user nowhere.
+    claude_settings({"extraKnownMarketplaces": {"someone-else": {"autoUpdate": False}}})
+    assert update_check.auto_update_notice() == ""
+    claude_settings({})
+    assert update_check.auto_update_notice() == ""
+
+
+@pytest.mark.parametrize("host", ["codex", "opencode", "hermes", ""])
+def test_auto_update_notice_is_claude_only(claude_settings, host, monkeypatch):
+    # Every other host lacks the toggle entirely; naming it would be a dead end.
+    claude_settings(_marketplaces({"source": {"source": "github"}}))
+    monkeypatch.setenv("CASSETTE_MCP_HOST", host)
+    assert update_check.auto_update_notice() == ""
+
+
+def test_auto_update_notice_survives_a_hostile_or_missing_settings_file(claude_settings, monkeypatch, tmp_path):
+    claude_settings({"extraKnownMarketplaces": "not-a-dict"})
+    assert update_check.auto_update_notice() == ""
+    (tmp_path / "claude-home" / "settings.json").write_text("{ not json", encoding="utf-8")
+    assert update_check.auto_update_notice() == ""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "absent"))
+    assert update_check.auto_update_notice() == ""
+
+
+def test_auto_update_notice_ignores_a_symlinked_settings_file(claude_settings, tmp_path):
+    claude_settings(_marketplaces({"source": {"source": "github"}}))
+    real = tmp_path / "claude-home" / "settings.json"
+    planted = tmp_path / "planted.json"
+    planted.write_text(real.read_text(encoding="utf-8"), encoding="utf-8")
+    real.unlink()
+    real.symlink_to(planted)
+    assert update_check.auto_update_notice() == ""
+
+
+def test_opt_out_silences_the_auto_update_notice(claude_settings, monkeypatch):
+    claude_settings(_marketplaces({"source": {"source": "github"}}))
+    monkeypatch.setenv("CASSETTE_UPDATE_CHECK", "0")
+    assert update_check.auto_update_notice() == ""
+
+
 def _explode() -> str:
     raise OSError("network down")

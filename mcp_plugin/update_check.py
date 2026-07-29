@@ -12,6 +12,7 @@ does one short HTTP GET at most once a day, and both swallow every failure.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -26,12 +27,14 @@ LATEST_URL = "https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/r
 TTL_SECONDS = 86_400
 FETCH_TIMEOUT_SEC = 3.0
 MAX_VERSION_BYTES = 64
+CLAUDE_MARKETPLACE = "cassette-editor"
 
 # Keyed by CASSETTE_MCP_HOST, which every host config sets (.claude-plugin/mcp.json,
 # .codex-plugin/mcp.json, opencode.json). Hermes never launches this server.
 UPDATE_COMMANDS = {
     "claude": (
-        "claude plugin marketplace update cassette-editor && claude plugin update oh-my-cassette@cassette-editor"
+        f"claude plugin marketplace update {CLAUDE_MARKETPLACE} && "
+        f"claude plugin update oh-my-cassette@{CLAUDE_MARKETPLACE}"
     ),
     "codex": "codex plugin add oh-my-cassette@cassette-editor",
     "opencode": (
@@ -99,6 +102,51 @@ def notice(host: str | None = None) -> str:
         f" UPDATE AVAILABLE: Oh My Cassette {latest} was released; this install is {installed}. "
         "Mention it once per session, then offer to run this command for the user and run it only "
         f"if they agree: {update_command(host)}"
+    )
+
+
+def _claude_settings_path() -> Path:
+    base = str(os.getenv("CLAUDE_CONFIG_DIR", "") or "").strip()
+    root = Path(base).expanduser() if base else Path.home() / ".claude"
+    return root / "settings.json"
+
+
+def auto_update_notice(host: str | None = None) -> str:
+    """One sentence when Claude Code could keep this install current but is not set to.
+
+    `setup_local_mcp.py` offers the opt-in, but only during setup — an install that
+    predates that prompt, or one where it was declined, never hears about it again and
+    stays pinned to whatever version it was installed at. This is the only host with a
+    per-marketplace auto-update toggle, and third-party marketplaces ship with it off.
+
+    Reads Claude Code's own settings file, so `runtime_config.read_protected_json` is
+    wrong here: that demands 0600, and this file is theirs (0644) not ours. Never
+    raises; a missing, hostile, or unreadable file is silence.
+    """
+    if not enabled():
+        return ""
+    key = (host if host is not None else os.getenv("CASSETTE_MCP_HOST", "")).strip().lower()
+    if key != "claude":
+        return ""
+    try:
+        path = _claude_settings_path()
+        if path.is_symlink() or not path.is_file():
+            return ""
+        settings = json.loads(path.read_text(encoding="utf-8"))
+        marketplaces = settings.get("extraKnownMarketplaces") if isinstance(settings, dict) else None
+        entry = marketplaces.get(CLAUDE_MARKETPLACE) if isinstance(marketplaces, dict) else None
+        # No entry means Claude Code is not the host or the plugin arrived some other
+        # way; the toggle we would be describing does not exist. Say nothing.
+        if not isinstance(entry, dict) or entry.get("autoUpdate") is True:
+            return ""
+    except Exception:  # noqa: BLE001 — a settings file we do not own must never break an edit
+        return ""
+    return (
+        " AUTO-UPDATE IS OFF: Claude Code can keep Oh My Cassette current on its own, but the "
+        f"{CLAUDE_MARKETPLACE} marketplace has it disabled, so this install stays on its current "
+        "version until updated by hand. Mention this at most once per session, and point the user "
+        f"at /plugin > Marketplaces > {CLAUDE_MARKETPLACE} > Enable auto-update — it is a setting "
+        "only they can toggle, so do not edit their Claude configuration yourself."
     )
 
 

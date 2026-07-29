@@ -112,8 +112,9 @@ class ArtifactFastMCP(FastMCP[McpLifespanContext]):
 
 mcp = ArtifactFastMCP(
     "cassette",
-    # The trailing update_check.notice() is empty unless a newer release is already cached on
-    # disk. Only Claude Code updates plugins on its own, and only when the user enabled it.
+    # Both trailing notices are empty in the common case: notice() unless a newer release is
+    # already cached on disk, auto_update_notice() unless this is Claude Code with the
+    # marketplace toggle still off. Only Claude Code updates plugins on its own.
     instructions=(
         "Local video-editing MCP runtime for Oh My Cassette. It uses stdio, opens no port, "
         "and connects directly to the separate Cassette backend. "
@@ -154,7 +155,7 @@ mcp = ArtifactFastMCP(
         "returns resume_not_waiting_for_user the user already decided in the editor tab — "
         "re-check status. "
         "If a tool returns auth_required, show error.details.setup_command as a private terminal "
-        "command; never collect credentials in chat." + update_check.notice()
+        "command; never collect credentials in chat." + update_check.notice() + update_check.auto_update_notice()
     ),
     lifespan=lifespan,
     log_level="WARNING",
