@@ -36,7 +36,7 @@ hermes gateway restart
 python3 scripts/diagnose_local_mcp.py
 ```
 
-它会检查运行时引导、受保护配置、传输方式、项目与媒体根目录，以及与客户端无关的数据路径，并且不会输出凭据。常见 MCP 错误都带有可执行的说明：`auth_required` 会提供私人设置命令，`source_path_not_allowed` 会指出可信目录问题，`browser_session_lost` 会说明浏览器任务为何无法跨重启继续。
+它会检查运行时引导、受保护配置、项目与媒体根目录，以及与客户端无关的数据路径，并且不会输出凭据。常见 MCP 错误都带有可执行的说明：`auth_required` 会提供私人设置命令，`source_path_not_allowed` 会指出可信目录问题。
 
 诊断 Hermes：
 
@@ -50,9 +50,8 @@ python3 scripts/diagnose_install.py
 - 插件是否已在 Hermes 中启用；
 - `~/.hermes/.env` 中的配置值，并隐藏敏感信息；
 - `ffmpeg` 和 `ffprobe`；
-- Hermes Python 环境中的 Playwright；
 - Cassette 地址是否可访问；
-- 通过 Chromium 打开 Agent 页面检查 Cassette 登录凭据；
+- 通过 agent-auth 接口检查 Cassette 登录凭据；
 - Hermes 网关状态。
 
 如果接收媒体时报错 `transcoder_missing`，请重新运行安装器，让它记录明确的 `CASSETTE_FFMPEG_BIN` 和 `CASSETTE_FFPROBE_BIN` 路径：
@@ -62,8 +61,7 @@ python3 scripts/install_plugin.py \
   --skip-plugin-enable \
   --skip-cassette-url \
   --skip-cassette-auth \
-  --skip-jamendo-auth \
-  --skip-playwright-install
+  --skip-jamendo-auth
 ```
 
 ## 配置
@@ -116,8 +114,7 @@ JAMENDO_CLIENT_SECRET=your_client_secret
 
 ```bash
 uv venv .venv
-uv pip install --python .venv/bin/python pytest playwright
-.venv/bin/python -m playwright install chromium
+uv pip install --python .venv/bin/python pytest
 ```
 
 运行检查：
@@ -135,7 +132,7 @@ CASSETTE_MCP_PYTHON="$PWD/.venv/bin/python" \
 .venv/bin/python scripts/run_local_mcp.py
 ```
 
-确定性测试会覆盖核心能力对齐、全部 11 个工具、真实 stdio 协议调用、长轮询、重启与续跑、状态转换、资源链接、身份验证和文件系统安全、两种插件清单、现有 Hermes 与网页演示测试，以及前端构建。由维护者手动触发的实时 E2E 会通过临时环境变量读取仓库 Secret；PR CI 本身不使用凭据。
+确定性测试会覆盖核心能力对齐、全部 14 个工具、真实 stdio 协议调用、长轮询、重启与续跑、状态转换、资源链接、身份验证和文件系统安全、两种插件清单、现有 Hermes 与网页演示测试，以及前端构建。由维护者手动触发的实时 E2E 会通过临时环境变量读取仓库 Secret；PR CI 本身不使用凭据。
 
 运行本地 Cassette 端到端测试工具：
 
@@ -150,7 +147,6 @@ CASSETTE_MCP_PYTHON="$PWD/.venv/bin/python" \
 ```bash
 uv venv .venv-web
 uv pip install --python .venv-web/bin/python -r requirements-web.txt
-.venv-web/bin/python -m playwright install chromium
 # 构建浏览器前端（Vite/React -> web_demo/frontend/dist）；需要 Node.js + npm。
 ./web_demo/build_frontend.sh
 set -a

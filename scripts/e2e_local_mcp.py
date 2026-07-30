@@ -28,7 +28,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one real edit through the local Cassette MCP plugin")
     parser.add_argument("--media", type=Path, required=True)
     parser.add_argument("--instruction", required=True)
-    parser.add_argument("--transport", choices=("api", "browser"), default="api")
     parser.add_argument("--host", choices=("codex", "claude"), default="codex")
     parser.add_argument("--timeout-sec", type=int, default=1500)
     parser.add_argument("--model", default="GPT-5.6 Luna")
@@ -59,12 +58,11 @@ async def run(args: argparse.Namespace) -> dict:
     environment.update(
         {
             "CASSETTE_RUNTIME_ADAPTER": "mcp",
-            "CASSETTE_TRANSPORT": args.transport,
             "CASSETTE_MCP_HOST": args.host,
             "CASSETTE_PROJECT_ROOT": str(media.parent),
             "CASSETTE_MCP_SKIP_BOOTSTRAP": "1",
             "CASSETTE_MCP_PYTHON": sys.executable,
-            "CASSETTE_MIN_BROWSER_TIMEOUT_SEC": "0",
+            "CASSETTE_MIN_JOB_TIMEOUT_SEC": "0",
         }
     )
     environment.setdefault("CASSETTE_CONFIG_HOME", str(Path(tempfile.mkdtemp()) / "config"))
@@ -152,7 +150,7 @@ async def run(args: argparse.Namespace) -> dict:
             return {
                 "ok": True,
                 "host": args.host,
-                "transport": args.transport,
+                "transport": "api",
                 "session_id": session_id,
                 "job_id": job_id,
                 "phase": status["phase"],

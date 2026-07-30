@@ -38,7 +38,7 @@ For the Codex and Claude local MCP plugin, run:
 python3 scripts/diagnose_local_mcp.py
 ```
 
-It reports runtime bootstrap, protected config, transport, project/media roots, and host-neutral data paths without printing credentials. Common MCP errors are actionable: `auth_required` includes the private setup command, `source_path_not_allowed` identifies the trusted-root problem, and `browser_session_lost` explains when a browser job cannot survive a restart.
+It reports runtime bootstrap, protected config, project/media roots, and host-neutral data paths without printing credentials. Common MCP errors are actionable: `auth_required` includes the private setup command and `source_path_not_allowed` identifies the trusted-root problem.
 
 For Hermes, run:
 
@@ -52,9 +52,8 @@ The diagnostic checks:
 - whether the plugin is enabled in Hermes;
 - `~/.hermes/.env` values, with secrets redacted;
 - `ffmpeg` and `ffprobe`;
-- Playwright in the Hermes Python environment;
 - Cassette URL reachability;
-- Cassette login credentials by opening the Agent page in Chromium;
+- Cassette login credentials against the agent-auth API;
 - Hermes gateway status.
 
 If incoming media fails with `transcoder_missing`, run the installer again so it records explicit `CASSETTE_FFMPEG_BIN` and `CASSETTE_FFPROBE_BIN` paths:
@@ -64,8 +63,7 @@ python3 scripts/install_plugin.py \
   --skip-plugin-enable \
   --skip-cassette-url \
   --skip-cassette-auth \
-  --skip-jamendo-auth \
-  --skip-playwright-install
+  --skip-jamendo-auth
 ```
 
 ## Configuration
@@ -127,8 +125,7 @@ Create a local test environment:
 
 ```bash
 uv venv .venv
-uv pip install --python .venv/bin/python pytest playwright
-.venv/bin/python -m playwright install chromium
+uv pip install --python .venv/bin/python pytest
 ```
 
 Run checks:
@@ -158,27 +155,20 @@ Run the local Cassette E2E harness:
 
 #### Cassette transport
 
-The plugin can reach Cassette two ways, selected by `CASSETTE_TRANSPORT`, and **both are fully supported** — pick whichever fits your deployment:
+There is one transport: direct calls to the Cassette server APIs (auth → media upload → LangGraph agent run → render-from-stored-project export). It reuses your existing `CASSETTE_AUTH_EMAIL`/`CASSETTE_AUTH_PASSWORD`; the API origin defaults to the deployed Cassette (override with `CASSETTE_API_URL` only for self-hosted).
 
-- **`api` (default)** — calls the Cassette server APIs directly (auth → media upload → LangGraph agent run → render-from-stored-project export), no browser. This is the default because it avoids the reliability weakness of DOM scraping and needs no Playwright/Chromium. It reuses your existing `CASSETTE_AUTH_EMAIL`/`CASSETTE_AUTH_PASSWORD`; the API origin defaults to the deployed Cassette (override with `CASSETTE_API_URL` only for self-hosted). **Requirement:** the account must have full API access (for `/api/projects` and `/api/export`) — a `403`/`forbidden` error reported by the transport indicates it does not, in which case set `CASSETTE_TRANSPORT=browser`.
-- **`browser`** — drives the Cassette web UI with Playwright (the original, battle-tested path). Set `CASSETTE_TRANSPORT=browser` to use it. Requires Playwright/Chromium installed. Behavior is byte-identical to the pre-transport-seam plugin.
+A Playwright transport used to sit behind `CASSETTE_TRANSPORT=browser`, kept on the theory that the web UI could reach endpoints the API could not. It could not — the server authorizes by endpoint, and the editor's export button posts to the same endpoints this transport calls — so it was removed along with its Chromium dependency and its restart-fragile session model. `CASSETTE_TRANSPORT` no longer selects anything; a leftover `browser` value is reported once on stderr and ignored.
 
-Switching is a single env var and nothing downstream changes: both transports return the identical job-result dict, so notifications, delivery, and reporting are the same either way.
+Every endpoint the plugin calls, export included, is an agent operation. The plugin never inspects a Cassette access level, so a `403` is relayed as a server-side refusal to report upstream, not as something to reconfigure here.
 
 Uploaded media is linked to the agent run by session id (the upload `x-session-id` equals the run's `mediaSessionId`), and the run carries the same full session/project/run context the editor sends. Before starting the run, the transport waits for uploaded media to be fully processed — analysis evidence/embeddings (which the agent reads) and the render-source derivative (which the export needs) — so it never commits an empty edit or hits an "render-source is missing" export (tunable via `CASSETTE_API_MEDIA_READY_TIMEOUT_SEC`). Cancellation (`/cut`) is honored mid-run, agent timeouts report `timed_out`, and a run whose queue never starts fails fast as `agent_run_not_started` (tunable via `CASSETTE_API_RUN_START_TIMEOUT_SEC`) instead of hanging until the job timeout. The transport requires the Cassette backend's LangGraph run queue to be draining runs and its media render-source pipeline to be healthy.
 
-The API path aims for behavioral parity with the browser path: it honors the user's model choice (mapping the UI label to a model id, and failing loudly under `CASSETTE_REQUIRE_MODEL_SELECTION` if unmappable) and `CASSETTE_DEFAULT_THINKING_LEVEL`; sends the model-selection notice; records live stage progress (`current_stage`, `stage_timings`, `progress_events`) and delivers a periodic **text** progress heartbeat (there is no browser to screenshot); classifies Cassette questions so routine ones auto-continue while genuine choices/missing-assets return `needs_user`; dedupes uploads across a reused session; and, like the browser path, routes a completed edit through the Hermes supervisor completion review (`cassette_review_completion`) before exporting — set `CASSETTE_API_AUTO_EXPORT=1` to export directly on agent success instead. The one irreducible difference is `final_screenshot`: with no browser, the transport substitutes a still frame extracted from the exported mp4 (`CASSETTE_API_EXPORT_THUMBNAIL`).
+The transport honors the user's model choice (mapping the UI label to a model id, and failing loudly under `CASSETTE_REQUIRE_MODEL_SELECTION` if unmappable) and `CASSETTE_DEFAULT_THINKING_LEVEL`; sends the model-selection notice; records live stage progress (`current_stage`, `stage_timings`, `progress_events`) and delivers a periodic **text** progress heartbeat; classifies Cassette questions so routine ones auto-continue while genuine choices/missing-assets return `needs_user`; dedupes uploads across a reused session; and routes a completed edit through the Hermes supervisor completion review (`cassette_review_completion`) before exporting — set `CASSETTE_API_AUTO_EXPORT=1` to export directly on agent success instead. `final_screenshot` is a still frame extracted from the exported mp4 (`CASSETTE_API_EXPORT_THUMBNAIL`).
 
-The same E2E flow can run on either transport, and a parity harness diffs the two outcomes (terminal status, deliverable-output count, error-code set):
+The end-to-end flow against a real Cassette account:
 
 ```bash
-# single transport
-.venv/bin/python scripts/e2e_local_cassette.py --transport api \
-  --media tests/fixtures/sample.mp4 --instruction "Make a short captioned video."
-
-# browser-vs-api parity (requires a full-access account; the render-from-project export endpoint
-# must be live on the Cassette server)
-.venv/bin/python scripts/e2e_transport_parity.py \
+.venv/bin/python scripts/e2e_local_cassette.py \
   --media tests/fixtures/sample.mp4 --instruction "Make a short captioned video."
 ```
 
@@ -187,7 +177,6 @@ Run the web demo service:
 ```bash
 uv venv .venv-web
 uv pip install --python .venv-web/bin/python -r requirements-web.txt
-.venv-web/bin/python -m playwright install chromium
 # Build the browser UI (Vite/React -> web_demo/frontend/dist); requires Node.js + npm.
 ./web_demo/build_frontend.sh
 set -a

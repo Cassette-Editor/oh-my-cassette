@@ -25,7 +25,7 @@ from . import deepseek_client, logging_utils, session_store
 
 load_cassette_package()
 
-from cassette.core import browser, gateway, jobs, manifest, security, tools, transport  # noqa: E402
+from cassette.core import gateway, jobs, manifest, security, tools  # noqa: E402
 from cassette.core.errors import CassetteError  # noqa: E402
 
 
@@ -357,11 +357,6 @@ def _public_job_log(job: dict) -> str:
         for event in job.get("progress_events") or []:
             if isinstance(event, dict):
                 lines.append(json.dumps(event, ensure_ascii=False, sort_keys=True))
-    if job.get("browser_events"):
-        lines.append("\n[browser_events]")
-        for event in job.get("browser_events") or []:
-            if isinstance(event, dict):
-                lines.append(json.dumps(event, ensure_ascii=False, sort_keys=True))
     if job.get("progress_snapshot_notifications"):
         lines.append("\n[progress_snapshot_notifications]")
         lines.append(
@@ -580,11 +575,7 @@ def _active_web_job_for_session(session_id: str) -> dict | None:
 
 
 def _request_web_job_cancel(job_id: str, reason: str) -> dict:
-    return jobs.request_cancel(
-        job_id,
-        close_browser_on_terminal=True,
-        browser_cleanup_reason=reason,
-    )
+    return jobs.request_cancel(job_id, cancel_reason=reason)
 
 
 def _is_cut_command(text: str) -> bool:
@@ -645,7 +636,8 @@ def _parse_job_time(value: Any) -> datetime | None:
 
 def _job_timeout_sec(job: dict) -> int:
     try:
-        return max(1, int(job.get("timeout_sec") or os.getenv("CASSETTE_BROWSER_TIMEOUT_SEC", "1800")))
+        default = os.getenv("CASSETTE_JOB_TIMEOUT_SEC") or os.getenv("CASSETTE_BROWSER_TIMEOUT_SEC", "1800")
+        return max(1, int(job.get("timeout_sec") or default))
     except (TypeError, ValueError):
         return 1800
 
@@ -733,7 +725,6 @@ def _web_job_session_identifiers(job: dict) -> tuple[str, str]:
 
 def _reconcile_stale_web_jobs_globally() -> int:
     timed_out_count = 0
-    worker_abandon_attempted = False
     for path in sorted(jobs.get_jobs_dir().glob("cassette_*.json"), reverse=True):
         try:
             job = jobs.load_job(path.stem)
@@ -748,26 +739,11 @@ def _reconcile_stale_web_jobs_globally() -> int:
             continue
         timed_out_count += 1
         session_id, session_hash = _web_job_session_identifiers(updated)
-        if not worker_abandon_attempted and transport.selected_transport() == transport.TRANSPORT_BROWSER:
-            worker_abandon_attempted = True
-            try:
-                abandoned = bool(browser.abandon_browser_worker())
-            except Exception as exc:
-                abandoned = False
-                logging_utils.log_event(
-                    "web_browser_worker_abandon_failed",
-                    error_type=type(exc).__name__,
-                )
-            if abandoned:
-                logging_utils.log_event("web_browser_worker_abandoned", reason="stale_web_job_timeout")
-        closed, attempts = _close_web_browser_sessions(session_id, session_hash)
         logging_utils.log_event(
-            "web_stale_job_browser_cleanup",
+            "web_stale_job_timed_out",
             session_id=session_id,
             session_hash=session_hash,
             job_id=updated.get("job_id"),
-            browser_sessions_closed=closed,
-            browser_session_cleanup_attempts=attempts,
         )
     return timed_out_count
 
@@ -790,38 +766,6 @@ def _remove_job_record(job_id: str) -> bool:
     return _safe_remove_file(jobs.get_jobs_dir() / f"{job_id}.json")
 
 
-def _browser_session_cleanup_timeout_sec() -> float:
-    try:
-        return max(0.5, float(os.getenv("WEB_BROWSER_SESSION_CLEANUP_TIMEOUT_SEC", "2")))
-    except ValueError:
-        return 2.0
-
-
-def _close_web_browser_sessions(session_id: str, session_hash: str) -> tuple[int, int]:
-    # Under the API transport there is no Playwright session to close — skip so we never spin up a
-    # browser worker just to clean up nothing.
-    if transport.selected_transport() != transport.TRANSPORT_BROWSER:
-        return (0, 0)
-    closed = 0
-    attempts = 0
-    for key in dict.fromkeys([session_id, session_hash]):
-        if not key:
-            continue
-        attempts += 1
-        try:
-            if browser.close_browser_sessions_threaded(key, timeout_sec=_browser_session_cleanup_timeout_sec()):
-                closed += 1
-        except Exception as exc:
-            logging_utils.log_event(
-                "web_browser_session_cleanup_failed",
-                session_id=session_id,
-                session_hash=session_hash,
-                key=key,
-                error_type=type(exc).__name__,
-            )
-    return closed, attempts
-
-
 def _cleanup_web_session(session_id: str, reason: str = "") -> dict[str, Any]:
     try:
         valid_session_id = session_store.validate_session_id(session_id)
@@ -830,9 +774,6 @@ def _cleanup_web_session(session_id: str, reason: str = "") -> dict[str, Any]:
 
     session_hash = manifest.resolve_session_hash(session_id=valid_session_id)
     session_store.close_session(valid_session_id)
-    browser_sessions_closed, browser_session_cleanup_attempts = _close_web_browser_sessions(
-        valid_session_id, session_hash
-    )
 
     removed_uploads = _safe_remove_tree(_web_upload_root() / valid_session_id)
     removed_session_dir = False
@@ -884,8 +825,6 @@ def _cleanup_web_session(session_id: str, reason: str = "") -> dict[str, Any]:
         "removed_jobs": removed_jobs,
         "cancelled_jobs": cancelled_jobs,
         "terminated_workers": terminated_workers,
-        "browser_sessions_closed": browser_sessions_closed,
-        "browser_session_cleanup_attempts": browser_session_cleanup_attempts,
         "reason": reason,
     }
     logging_utils.log_event("web_session_cleanup", **result)

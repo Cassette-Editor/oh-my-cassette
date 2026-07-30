@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from cassette import register
 
 
@@ -42,6 +44,7 @@ def test_plugin_registers_tools_command_hooks_and_skill():
         "cassette_timeline",
         "cassette_edit",
         "cassette_config",
+        "cassette_login",
     }
     assert {command["name"] for command in ctx.commands} == {"cassette", "cut", "cassette_model"}
     assert next(command for command in ctx.commands if command["name"] == "cassette")["args_hint"] == (
@@ -57,3 +60,20 @@ def test_plugin_registers_tools_command_hooks_and_skill():
     assert all(tool.get("check_fn") is None for tool in ctx.tools)
     assert ctx.skills[0]["name"] == "cassette-video-edit"
     assert ctx.skills[0]["path"].exists()
+
+
+def test_login_refuses_to_write_under_the_hermes_adapter(tmp_path, monkeypatch):
+    # Parity is the tool *name*, not the behaviour. Hermes resolves credentials from its
+    # process env and ~/.hermes/.env, and the stored file is only read under the mcp adapter,
+    # so writing one here would create a file nothing ever reads.
+    from cassette.core import tools
+
+    monkeypatch.setenv("CASSETTE_CONFIG_HOME", str(tmp_path / "config"))
+    envelope = json.loads(tools.cassette_login({"email": "person@example.test", "password": "pasted"}))
+
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "auth_unsupported_adapter"
+    assert ".hermes/.env" in envelope["error"]["message"]
+    assert envelope["error"]["recoverable"] is False
+    assert not (tmp_path / "config").exists()
+    assert "pasted" not in json.dumps(envelope)

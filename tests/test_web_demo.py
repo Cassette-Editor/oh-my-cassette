@@ -375,7 +375,7 @@ def test_web_cut_clears_pending_llm_flow(cassette_env, monkeypatch):
     assert any("已请求停止当前 Cassette 流程或剪辑任务" in event.get("text", "") for event in events)
 
 
-def test_web_cut_marks_active_job_browser_for_cleanup(cassette_env):
+def test_web_cut_records_why_the_active_job_was_cancelled(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi
     from fastapi.testclient import TestClient
@@ -400,8 +400,7 @@ def test_web_cut_marks_active_job_browser_for_cleanup(cassette_env):
     assert response.status_code == 200
     saved_job = jobs.load_job(job["job_id"])
     assert saved_job["status"] == "cancel_requested"
-    assert saved_job["close_browser_on_terminal"] is True
-    assert saved_job["browser_cleanup_reason"] == "web_cut"
+    assert saved_job["cancel_reason"] == "web_cut"
 
 
 def test_web_rejects_message_while_job_active(cassette_env):
@@ -487,7 +486,6 @@ def test_web_jobs_expose_owned_job_log(cassette_env):
     job["status"] = "running"
     job["current_stage"] = "editing"
     job["progress_events"] = [{"status": "running", "summary": "Cassette is editing the timeline."}]
-    job["browser_events"] = [{"event": "click", "summary": "Clicked export button"}]
     job["errors"] = [{"code": "sample_warning", "message": "diagnostic only"}]
     job["outputs"] = [{"local_path": str(output_path), "label": "export"}]
     jobs.save_job(job)
@@ -506,7 +504,6 @@ def test_web_jobs_expose_owned_job_log(cassette_env):
     assert prompt not in log_text
     assert "[progress_events]" in log_text
     assert "Cassette is editing the timeline." in log_text
-    assert "[browser_events]" in log_text
     assert "web-job-log.mp4" in log_text
     assert str(output_path) not in log_text
 
@@ -624,15 +621,6 @@ def test_web_session_creation_reconciles_global_stale_web_job(cassette_env, monk
     web_job["started_at"] = "2020-01-01T00:00:00Z"
     web_job["current_stage"] = "export"
     jobs.save_job(web_job)
-    closed_keys = []
-    abandoned = []
-
-    def fake_close(key=None, timeout_sec=None):
-        closed_keys.append((key, timeout_sec))
-        return False
-
-    monkeypatch.setattr(server.browser, "close_browser_sessions_threaded", fake_close)
-    monkeypatch.setattr(server.browser, "abandon_browser_worker", lambda: abandoned.append(True) or True)
     client = TestClient(server.app)
 
     response = client.post("/api/sessions")
@@ -641,8 +629,6 @@ def test_web_session_creation_reconciles_global_stale_web_job(cassette_env, monk
     saved_web_job = jobs.load_job(web_job["job_id"])
     assert saved_web_job["status"] == "timed_out"
     assert saved_web_job["errors"][-1]["code"] == "web_demo_job_timeout"
-    assert closed_keys == [(old_session_id, 2.0), (old_session_hash, 2.0)]
-    assert abandoned == [True]
 
 
 def test_web_session_creation_cleans_previous_web_session(cassette_env):
@@ -724,33 +710,24 @@ def test_web_cleanup_ignores_non_web_jobs(cassette_env):
     assert output_path.exists()
 
 
-def test_web_cleanup_closes_browser_sessions(cassette_env, monkeypatch):
+def test_web_cleanup_reports_what_it_removed(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi
     from fastapi.testclient import TestClient
     from web_demo import server
 
     session_store.reset_all()
-    closed_keys = []
-
-    def fake_close(key=None, timeout_sec=None):
-        del timeout_sec
-        closed_keys.append(key)
-        return key != "missing"
-
-    monkeypatch.setattr(server.browser, "close_browser_sessions_threaded", fake_close)
     client = TestClient(server.app)
     session_id = client.post("/api/sessions").json()["session_id"]
-    session_hash = tools.manifest.resolve_session_hash(session_id=session_id)
 
     response = client.post(f"/api/sessions/{session_id}/cleanup?reason=pagehide")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["browser_sessions_closed"] == 2
-    assert payload["browser_session_cleanup_attempts"] == 2
+    assert payload["ok"] is True
     assert payload["reason"] == "pagehide"
-    assert closed_keys == [session_id, session_hash]
+    # Nothing here reports browser sessions any more; there are none to close.
+    assert not [key for key in payload if "browser" in key]
 
 
 def test_web_cleanup_cancels_active_web_job_without_deleting_record(cassette_env):
@@ -780,11 +757,10 @@ def test_web_cleanup_cancels_active_web_job_without_deleting_record(cassette_env
     assert job_path.exists()
     saved_job = jobs.load_job(job["job_id"])
     assert saved_job["status"] == "cancel_requested"
-    assert saved_job["close_browser_on_terminal"] is True
-    assert saved_job["browser_cleanup_reason"] == "web_session_cleanup:cleanup"
+    assert saved_job["cancel_reason"] == "web_session_cleanup:cleanup"
 
 
-def test_web_cancel_job_marks_browser_for_cleanup(cassette_env):
+def test_web_cancel_job_records_the_cancel_reason(cassette_env):
     fastapi = pytest.importorskip("fastapi")
     del fastapi
     from fastapi.testclient import TestClient
@@ -811,5 +787,4 @@ def test_web_cancel_job_marks_browser_for_cleanup(cassette_env):
     assert response.json()["ok"] is True
     saved_job = jobs.load_job(job["job_id"])
     assert saved_job["status"] == "cancel_requested"
-    assert saved_job["close_browser_on_terminal"] is True
-    assert saved_job["browser_cleanup_reason"] == "web_job_cancel_api"
+    assert saved_job["cancel_reason"] == "web_job_cancel_api"

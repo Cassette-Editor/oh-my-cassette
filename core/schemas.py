@@ -438,3 +438,42 @@ CASSETTE_CONFIG = {
         "additionalProperties": False,
     },
 }
+
+CASSETTE_LOGIN = {
+    "name": "cassette_login",
+    "description": (
+        "Store Cassette credentials for this machine, or request a replacement password by email. "
+        "Pass email and the generated password from the user's Cassette email to sign in. To replace "
+        "a password the user no longer has, pass request_new_password=true together with "
+        "confirm_replace=true — that replaces the account password on every machine and emails a new "
+        "one, so confirm with the user before calling it. Credentials are verified before anything is "
+        "written, so a wrong password leaves an existing working setup untouched. Never invent a "
+        "password: ask the user for it."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "email": {"type": "string", "description": "Cassette account email."},
+            "password": {
+                "type": "string",
+                "description": (
+                    "The generated password from the user's Cassette email. Cassette passwords are "
+                    "always server-generated, never chosen. Required unless request_new_password is set."
+                ),
+            },
+            "request_new_password": {
+                "type": "boolean",
+                "description": "Ask Cassette to replace the account password and email the replacement.",
+            },
+            "confirm_replace": {
+                "type": "boolean",
+                "description": (
+                    "Required alongside request_new_password. Confirms the user accepts that the "
+                    "current password stops working on every machine."
+                ),
+            },
+        },
+        "required": ["email"],
+        "additionalProperties": False,
+    },
+}

@@ -148,49 +148,17 @@ def cassette_answer_question(a: dict, **kw) -> str:
         if is_completion_question and not has_continuation:
             # Post-review user answer: the reviewed turn already completed, so there is no
             # interrupt to resume — route the answer as a follow-up direct-line turn instead.
-            live_browser = False
-            if transport.selected_transport() == transport.TRANSPORT_BROWSER:
-                from . import browser as browser_mod
-
-                live_browser = browser_mod.has_live_browser_session_threaded(job)
-            if not live_browser:
-                answered_quality = dict(quality)
-                answered_quality["completion_question_answered"] = True
-                job.update({"status": "succeeded", "quality": answered_quality, "finished_at": jobs.now_iso()})
-                jobs.save_job(job)
-                follow = _completion_follow_up_turn(job, response, kw)
-                follow_data = follow.get("data") if isinstance(follow.get("data"), dict) else {}
-                return ok(
-                    {"job": _scrub_job(job), "follow_up": follow_data or follow},
-                    job_id=job_id,
-                )
+            answered_quality = dict(quality)
+            answered_quality["completion_question_answered"] = True
+            job.update({"status": "succeeded", "quality": answered_quality, "finished_at": jobs.now_iso()})
+            jobs.save_job(job)
+            follow = _completion_follow_up_turn(job, response, kw)
+            follow_data = follow.get("data") if isinstance(follow.get("data"), dict) else {}
+            return ok(
+                {"job": _scrub_job(job), "follow_up": follow_data or follow},
+                job_id=job_id,
+            )
         if kw.get("runtime_host") == "mcp":
-            if transport.selected_transport() == transport.TRANSPORT_BROWSER:
-                from . import browser
-
-                if not browser.has_live_browser_session_threaded(job):
-                    result = transport.get_transport().resume(job, response)
-                    job = jobs.merge_persisted_runtime_fields(job)
-                    job.update(result)
-                    job["status"] = result.get("status", "failed")
-                    job["finished_at"] = jobs.now_iso()
-                    job.pop("resume_request", None)
-                    job.pop("continuation", None)
-                    jobs.save_job(job)
-                    return ok({"job": _scrub_job(job), "background": False}, job_id=job_id)
-                job["status"] = "running"
-                job["started_at"] = job.get("started_at") or jobs.now_iso()
-                job["finished_at"] = None
-                job["worker_kind"] = "thread"
-                job["resume_request"] = {"response": response}
-                jobs.save_job(job)
-                _gateway_job_executor().submit(
-                    _finish_background_cassette_job,
-                    job_id,
-                    "resume",
-                    response,
-                )
-                return ok({"job": _scrub_job(job), "background": True}, job_id=job_id)
             job = jobs.start_worker(job_id, action="resume", response=response)
             return ok({"job": _scrub_job(job), "background": True}, job_id=job_id)
         result = transport.get_transport().resume(job, response)
@@ -748,6 +716,24 @@ def _gateway_job_executor() -> ThreadPoolExecutor:
         return _GATEWAY_JOB_EXECUTOR
 
 
+def shutdown_gateway_job_executor(*, wait: bool = True) -> None:
+    """Drain the background gateway worker and drop the pool.
+
+    A submitted worker outlives the call that queued it, and it resolves the asset root when
+    it finally writes rather than when it was submitted. Anything that sandboxes the asset
+    root for the duration of a call -- the test suite, most obviously -- therefore has to
+    drain the pool before restoring the environment, or the escaping worker persists its job
+    record into the developer's real Hermes data directory, where it stays visible forever as
+    a running job. A long-lived host never needs this; it wants the pool to keep working.
+    """
+    global _GATEWAY_JOB_EXECUTOR
+    with _GATEWAY_JOB_EXECUTOR_LOCK:
+        executor = _GATEWAY_JOB_EXECUTOR
+        _GATEWAY_JOB_EXECUTOR = None
+    if executor is not None:
+        executor.shutdown(wait=wait)
+
+
 def _should_run_gateway_job_in_background(args: dict, delivery: dict | None) -> bool:
     if not _gateway_background_jobs_enabled():
         return False
@@ -852,7 +838,7 @@ def cassette_run_job(a: dict, **kw) -> str:
             "cassette_session_id": a.get("session_id"),
             "model_selection": _cassette_model_selection(a, delivery),
             "cassette_language": _cassette_language_for_run(a, delivery),
-            # Tri-state: absent keeps the transport default (API: no render; browser: render).
+            # Tri-state: absent means no render, so a turn ends with the edit committed only.
             **({"export_on_complete": "true" if a.get("export") else "false"} if a.get("export") is not None else {}),
         },
     )
@@ -865,16 +851,6 @@ def cassette_run_job(a: dict, **kw) -> str:
                 "background": True,
                 "hermes_next_step": _gateway_background_next_step(),
             },
-            job_id=job["job_id"],
-        )
-    if (
-        kw.get("runtime_host") == "mcp"
-        and a.get("wait", False) is False
-        and transport.selected_transport() == transport.TRANSPORT_BROWSER
-    ):
-        job = _start_inprocess_cassette_job(job, runtime_host="mcp")
-        return ok(
-            {"job": _scrub_job(job), "background": True},
             job_id=job["job_id"],
         )
     if a.get("wait", True) is False:
@@ -952,7 +928,9 @@ def _job_report(job: dict) -> dict:
     elif status == "needs_user":
         user_summary = "Cassette needs user input before it can continue."
     elif status == "cancelled":
-        user_summary = "Cassette job was paused by request; browser state is preserved for retry or follow-up editing instructions."
+        user_summary = (
+            "Cassette job was paused by request; the session is preserved for retry or follow-up editing instructions."
+        )
     elif status == "running" and is_gateway_background:
         user_summary = (
             "Cassette is running in the background. The plugin will send progress screenshots and the final gateway "
@@ -1152,6 +1130,150 @@ def cassette_config(a: dict, **kw) -> str:
             "thinking_level": preference.get("thinking_level") or "Low",
             "source": "session_preference" if preference else "default",
             "options": _cassette_model_options(),
+        }
+    )
+
+
+# Kept beside the handler so every failure the user can actually act on reads as a sentence
+# rather than a status code. Passwords are server-generated and mailed, never chosen, so an
+# invalid one means "stale", not "you mistyped it".
+_AUTH_MESSAGES = {
+    # /api/agent-auth/verify checks the password before the allowlist, so this one really is
+    # about the password and nothing else — an address with no Cassette access answers 403
+    # (auth_not_authorized) once the password checks out.
+    "auth_invalid_password": (
+        "Cassette rejected that password. Passwords are generated and emailed, never chosen, so "
+        "nothing was mistyped — the stored one is stale. Request a new one to replace it."
+    ),
+    "auth_not_authorized": (
+        "That address is not authorised for Cassette, so nothing was stored. The password itself "
+        "was fine — the account has no Cassette access. Request access for it first."
+    ),
+    "auth_rate_limited": "Too many attempts for that address. Wait for the retry window and try again.",
+    "auth_verify_failed": "Cassette could not verify the credentials; nothing was stored.",
+    "auth_password_request_failed": (
+        "Cassette could not send a new password. It mails the replacement before storing it, so "
+        "the previous password should still work — try signing in with it before retrying, "
+        "because every attempt spends the hourly limit."
+    ),
+}
+
+
+@safe_tool
+def cassette_login(a: dict, **kw) -> str:
+    """Verify Cassette credentials and store them privately, or request a replacement by email.
+
+    In-band credential setup, chosen deliberately over the terminal command: the owner
+    accepted that a pasted password reaches the host's transcript in exchange for removing the
+    terminal step entirely. Note that the MCP spec forbids form-mode elicitation for
+    credentials (2025-11-25 elicitation, Security Considerations) and that a tool argument is
+    strictly worse, because the model itself must emit the value. URL-mode elicitation to a
+    loopback page and an OAuth-style device flow were both evaluated and declined -- the first
+    needs a listening port, the second needs backend routes this plugin does not own. Revisit
+    that decision before "fixing" this; it is a product choice, not an oversight.
+    """
+    from . import api_transport
+
+    email = str(a.get("email") or "").strip()
+    if not email:
+        raise CassetteError("missing_required_arg", "email is required")
+    # Strip on write because load_credentials() strips on read: a pasted password carrying a
+    # trailing space would verify here and then reach the transport as a different string.
+    # The generated alphabet contains no whitespace, so this is lossless.
+    password = str(a.get("password") or "").strip()
+    request_new = bool(a.get("request_new_password"))
+
+    if str(kw.get("runtime_host") or "hermes") != "mcp":
+        # Hermes resolves credentials from its process env and ~/.hermes/.env, and
+        # mcp_env_value() reads the stored file only under the mcp adapter -- anything written
+        # here would never be read back. Refuse rather than write somewhere inert.
+        return err(
+            "cassette_login",
+            "auth_unsupported_adapter",
+            "This host reads Cassette credentials from its environment. Set CASSETTE_AUTH_EMAIL "
+            "and CASSETTE_AUTH_PASSWORD in ~/.hermes/.env instead.",
+            {"credential_source": "environment"},
+            recoverable=False,
+        )
+
+    import runtime_config
+
+    try:
+        stored = runtime_config.load_credentials()
+    except runtime_config.RuntimeConfigError as exc:
+        return err(
+            "cassette_login",
+            exc.code,
+            str(exc),
+            {"path": str(exc.path or "")},
+            recoverable=False,
+        )
+    if stored.get("source") == "environment":
+        # Process environment wins over the private config, so storing anything here would
+        # leave those variables shadowing whatever we wrote.
+        return err(
+            "cassette_login",
+            "auth_env_precedence",
+            "Cassette credentials already come from environment variables, which take "
+            "precedence over the private config. Update those variables instead — storing "
+            "credentials here would have no effect.",
+            {"credential_source": "environment"},
+        )
+
+    if request_new:
+        if not bool(a.get("confirm_replace")):
+            # request-code replaces the account password on every machine and spends one of
+            # three hourly attempts. A bound second argument -- not prose in a tool
+            # description -- is what stops an agent firing this casually.
+            return err(
+                "cassette_login",
+                "auth_confirm_required",
+                "Requesting a new password replaces the account password on every machine and "
+                "emails the replacement. Confirm with the user, then re-call with "
+                "confirm_replace=true.",
+                {"replaces_existing": True, "email": email, "limit": "3 per hour"},
+            )
+        outcome = api_transport.request_new_agent_password(email)
+        if outcome.get("ok"):
+            # Not ok=True: the caller asked to be signed in and is not yet, because the new
+            # password only exists in the user's inbox. The agent must collect it next.
+            return err(
+                "cassette_login",
+                "auth_password_emailed",
+                f"A new password was sent to {email}. The previous one no longer works on any "
+                "machine. Ask the user for the new password, then call cassette_login again.",
+                {"replaces_existing": True, "email": email, "limit": "3 per hour"},
+            )
+        details: dict[str, Any] = {"email": email}
+        if outcome.get("retry_after_sec") is not None:
+            details["retry_after_sec"] = outcome["retry_after_sec"]
+        code = str(outcome.get("code") or "auth_password_request_failed")
+        return err("cassette_login", code, _AUTH_MESSAGES.get(code, "Cassette could not send a new password."), details)
+
+    if not password:
+        raise CassetteError("missing_required_arg", "password is required unless request_new_password is set")
+
+    outcome = api_transport.verify_agent_credentials(email, password)
+    if not outcome.get("ok"):
+        # Nothing has been written at this point, so a bad paste leaves an existing working
+        # credential exactly as it was.
+        details = {"email": email}
+        if outcome.get("retry_after_sec") is not None:
+            details["retry_after_sec"] = outcome["retry_after_sec"]
+        code = str(outcome.get("code") or "auth_verify_failed")
+        return err("cassette_login", code, _AUTH_MESSAGES.get(code, "Cassette rejected the credentials."), details)
+
+    verified_at = manifest.now_iso()
+    runtime_config.write_protected_json(
+        runtime_config.credentials_path(),
+        {"email": email, "password": password, "verified_at": verified_at},
+    )
+    return ok(
+        {
+            "email": email,
+            "stored": True,
+            "verified_at": verified_at,
+            "credentials_path": str(runtime_config.credentials_path()),
         }
     )
 
@@ -1574,9 +1696,8 @@ def cassette_timeline(a: dict, **kw) -> str:
     return ok(data)
 
 
-def check_playwright() -> bool:
-    # Transport-readiness gate: under the browser transport this checks Playwright;
-    # under the API transport it checks that the API base URL + credentials are configured.
+def check_transport_ready() -> bool:
+    # Transport-readiness gate: the API base URL and credentials are configured.
     return transport.get_transport().check_available()
 
 
@@ -1752,8 +1873,8 @@ def _save_cassette_model_preference(session_id: str, model: str, thinking_level:
 
 
 def _cassette_model_options(language: str = "zh") -> dict[str, Any]:
-    # Static product list single-sourced from the API transport — no browser scraping, cannot
-    # fail or block. Labels are locale-independent brand names, so `language` is unused.
+    # Static product list single-sourced from the API transport, so it cannot fail or block.
+    # Labels are locale-independent brand names, so `language` is unused.
     from . import api_transport
 
     del language
@@ -2167,7 +2288,7 @@ def _bgm_next_step_guidance(
     if not continue_after_match:
         return (
             "Standalone smart BGM command is complete. Do not call cassette_list_assets, "
-            "cassette_make_prompt, cassette_run_job, or browser automation; only report the saved BGM material status."
+            "cassette_make_prompt, or cassette_run_job; only report the saved BGM material status."
         )
     if optimization_enabled:
         return (

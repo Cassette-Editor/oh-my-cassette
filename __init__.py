@@ -28,6 +28,10 @@ def register(ctx) -> None:
         ("cassette_timeline", schemas.CASSETTE_TIMELINE, tools.cassette_timeline),
         ("cassette_edit", schemas.CASSETTE_EDIT, tools.cassette_edit),
         ("cassette_config", schemas.CASSETTE_CONFIG, tools.cassette_config),
+        # Registered for tool-name parity across adapters. Under Hermes the handler refuses and
+        # points at ~/.hermes/.env, because mcp_env_value() reads the stored credential file
+        # only under the mcp adapter — a file written here would never be read back.
+        ("cassette_login", schemas.CASSETTE_LOGIN, tools.cassette_login),
     )
 
     for name, schema, handler in plugin_tools:
@@ -47,7 +51,7 @@ def register(ctx) -> None:
     ctx.register_command(
         "cut",
         handler=gateway.handle_cut_command,
-        description="Pause the active Cassette browser operation without closing the live session",
+        description="Pause the active Cassette operation without ending the session",
         args_hint="[job_id]",
     )
     ctx.register_command(
@@ -59,8 +63,8 @@ def register(ctx) -> None:
     ctx.register_hook("pre_gateway_dispatch", gateway.ingest_gateway_media)
     ctx.register_hook("pre_llm_call", gateway.inject_cassette_context)
     ctx.register_hook("post_tool_call", gateway.log_cassette_tool_call)
-    ctx.register_hook("on_session_finalize", gateway.close_cassette_browser_sessions)
-    ctx.register_hook("on_session_reset", gateway.close_cassette_browser_sessions)
+    ctx.register_hook("on_session_finalize", gateway.close_cassette_sessions)
+    ctx.register_hook("on_session_reset", gateway.close_cassette_sessions)
 
     # Keep the gateway-specific Hermes workflow out of the native Codex/Claude plugin skill path.
     skill_path = Path(__file__).parent / "hermes" / "skills" / "cassette-video-edit" / "SKILL.md"

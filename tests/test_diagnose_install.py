@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -151,53 +152,85 @@ def test_diagnose_warns_when_cassette_login_credentials_missing(tmp_path):
     assert result["name"] == "cassette_login"
 
 
-def test_diagnose_login_check_redacts_subprocess_output(tmp_path, monkeypatch):
+def test_diagnose_login_check_never_reports_the_credentials_it_sent(tmp_path, monkeypatch):
     diagnose = _load_diagnose_script()
-    python = tmp_path / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"
-    python.parent.mkdir(parents=True)
-    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
 
-    class Proc:
-        returncode = 0
-        stdout = '{"status":"fail","code":"cassette_auth_failed","message":"operator@example.com password=secret"}'
+    def echo_credentials_back(request, timeout=None):
+        # A server that reflects the submitted credentials in its error body is the worst
+        # case for a report users paste into issues.
+        raise diagnose.HTTPError(request.full_url, 401, "operator@example.com password=secret", {}, None)
 
-    def fake_run(*args, **kwargs):
-        assert kwargs["env"]["CASSETTE_DIAG_EMAIL"] == "operator@example.com"
-        assert kwargs["env"]["CASSETTE_DIAG_PASSWORD"] == "secret"
-        return Proc()
-
-    monkeypatch.setattr(diagnose.subprocess, "run", fake_run)
-
+    monkeypatch.setattr(diagnose, "urlopen", echo_credentials_back)
     result = diagnose._check_cassette_login(
-        tmp_path / ".hermes",
-        "https://example.test/agent",
-        "operator@example.com",
-        "secret",
+        tmp_path / ".hermes", "https://api.example.test", "operator@example.com", "secret"
     )
 
     assert result["status"] == "fail"
-    assert "operator@example.com" not in str(result)
-    assert "secret" not in str(result)
+    assert "operator@example.com" not in json.dumps(result)
+    assert "secret" not in json.dumps(result)
 
 
-def test_diagnose_warns_when_auth_form_stays_visible_after_page_submit(tmp_path, monkeypatch):
+class _LoginResponse:
+    def __init__(self, payload: bytes, status: int = 200):
+        self._payload = payload
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self):
+        return self._payload
+
+
+def test_diagnose_reports_ok_when_the_api_accepts_the_credentials(tmp_path, monkeypatch):
     diagnose = _load_diagnose_script()
-    python = tmp_path / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"
-    python.parent.mkdir(parents=True)
-    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    seen = {}
 
-    class Proc:
-        returncode = 0
-        stdout = '{"status":"fail","code":"cassette_auth_form_still_visible","auth_selectors":["#agent-auth-password"]}'
+    def fake_urlopen(request, timeout=None):
+        seen["url"] = request.full_url
+        return _LoginResponse(b'{"session": {"access_token": "tok"}, "isFullUser": true}')
 
-    monkeypatch.setattr(diagnose.subprocess, "run", lambda *args, **kwargs: Proc())
-
+    monkeypatch.setattr(diagnose, "urlopen", fake_urlopen)
     result = diagnose._check_cassette_login(
-        tmp_path / ".hermes",
-        "https://example.test/agent",
-        "operator@example.com",
-        "secret",
+        tmp_path / ".hermes", "https://api.example.test", "operator@example.com", "secret"
     )
 
-    assert result["status"] == "warn"
-    assert result["details"]["code"] == "cassette_auth_form_still_visible"
+    assert seen["url"] == "https://api.example.test/api/agent-auth/verify"
+    assert result["status"] == "ok"
+    # The token proves the login worked; recording it would put a credential in a report.
+    assert "tok" not in json.dumps(result)
+
+
+def test_diagnose_does_not_grade_the_account_access_level(tmp_path, monkeypatch):
+    # An agent account is the only account this plugin is for, so isFullUser=false is not a
+    # finding. Reporting it once sent people to ask for an upgrade they never needed.
+    diagnose = _load_diagnose_script()
+    monkeypatch.setattr(
+        diagnose,
+        "urlopen",
+        lambda request, timeout=None: _LoginResponse(b'{"session": {"access_token": "t"}, "isFullUser": false}'),
+    )
+    result = diagnose._check_cassette_login(
+        tmp_path / ".hermes", "https://api.example.test", "operator@example.com", "secret"
+    )
+
+    assert result["status"] == "ok"
+    assert "full" not in json.dumps(result).lower()
+
+
+def test_diagnose_fails_when_the_api_rejects_the_credentials(tmp_path, monkeypatch):
+    diagnose = _load_diagnose_script()
+
+    def reject(request, timeout=None):
+        raise diagnose.HTTPError(request.full_url, 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(diagnose, "urlopen", reject)
+    result = diagnose._check_cassette_login(
+        tmp_path / ".hermes", "https://api.example.test", "operator@example.com", "secret"
+    )
+
+    assert result["status"] == "fail"
+    assert result["details"]["http_status"] == 401

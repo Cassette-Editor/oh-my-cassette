@@ -1,34 +1,35 @@
-"""Cassette job transport seam.
+"""Cassette job transport.
 
-The plugin can reach Cassette two ways:
+The plugin reaches Cassette one way: call the Cassette server APIs directly
+(auth + media upload + LangGraph agent run + render-from-stored-project export).
 
-* ``api`` (default) — call the Cassette server APIs directly (auth + media upload +
-  LangGraph agent run + render-from-stored-project export), avoiding brittle DOM scraping.
-* ``browser`` — drive the Cassette web UI with Playwright. The original, battle-tested
-  path; ``browser.py`` is unchanged and ``BrowserTransport`` is a pure pass-through, so
-  selecting it is byte-identical to the pre-seam behavior.
+A second transport used to exist — a Playwright path that drove the Cassette web UI —
+kept on the theory that some accounts could get further through the browser than through
+the API. They could not. The server authorizes by endpoint, not by how the request was
+made, and the web UI's export button posts to the same endpoints this module calls. Both
+paths get the identical answer, so the browser path bought nothing while costing a
+Chromium dependency, a second job-result code path, and a restart-fragile session model.
 
-Selection is by the ``CASSETTE_TRANSPORT`` env var (``api`` | ``browser``), default
-``api``. Set ``CASSETTE_TRANSPORT=browser`` to use the Playwright path instead. The env is
-re-read on every ``get_transport()`` call so tests and runtime re-config take effect without
-import-time caching. Both transports return the IDENTICAL job-result dict shape
-(status / outputs / questions / errors / quality / final_screenshot) so everything downstream
-(jobs.save_job, notifier, _scrub_job, _job_report) is unaffected.
+``CASSETTE_TRANSPORT`` is therefore no longer a selector. A stale ``browser`` value is
+reported once on stderr and ignored rather than failing every tool call, because the
+API path is strictly better for everyone who used to set it.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any, Protocol, runtime_checkable
 
 TRANSPORT_ENV = "CASSETTE_TRANSPORT"
-TRANSPORT_BROWSER = "browser"
 TRANSPORT_API = "api"
+
+_RETIRED_NOTICE_SHOWN = False
 
 
 @runtime_checkable
 class Transport(Protocol):
-    """Operation surface the cassette tools depend on, regardless of transport."""
+    """Operation surface the cassette tools depend on."""
 
     def run_job(self, job: dict) -> dict:
         """Run a Cassette edit job to a terminal state and return the result dict."""
@@ -75,49 +76,33 @@ def _read_env(name: str) -> str:
     return str(os.getenv(name, "") or "").strip()
 
 
-def selected_transport() -> str:
-    # Default: api. Only an explicit CASSETTE_TRANSPORT=browser selects the Playwright path.
-    raw = _read_env(TRANSPORT_ENV).lower()
-    return TRANSPORT_BROWSER if raw == TRANSPORT_BROWSER else TRANSPORT_API
+def warn_if_browser_requested() -> bool:
+    """Report a retired ``CASSETTE_TRANSPORT=browser`` once. Returns whether it was set.
 
-
-class BrowserTransport:
-    """Pass-through adapter over the existing Playwright ``browser.*`` entrypoints.
-
-    Intentionally a thin delegate: selecting ``browser`` must behave exactly as before the seam.
-    ``browser`` is imported lazily so the default API transport never requires Playwright.
+    Stderr, never stdout: under MCP, stdout carries protocol frames only.
     """
+    global _RETIRED_NOTICE_SHOWN
+    if _read_env(TRANSPORT_ENV).lower() != "browser":
+        return False
+    if not _RETIRED_NOTICE_SHOWN:
+        _RETIRED_NOTICE_SHOWN = True
+        print(
+            f"oh-my-cassette: {TRANSPORT_ENV}=browser is retired and ignored; "
+            "the API transport is used instead. Remove the setting to silence this.",
+            file=sys.stderr,
+        )
+    return True
 
-    def run_job(self, job: dict) -> dict:
-        from . import browser
 
-        return browser.run_cassette_browser_job_threaded(job)
-
-    def export(self, job: dict, decision: dict[str, Any] | None = None) -> dict:
-        from . import browser
-
-        return browser.export_reviewed_completion_job_threaded(job, decision)
-
-    def resume(self, job: dict, response: str) -> dict:
-        from . import browser
-
-        return browser.resume_cassette_browser_job_threaded(job, response)
-
-    def close_sessions(self, session_key: str | None = None) -> None:
-        from . import browser
-
-        browser.close_browser_sessions_threaded(session_key)
-
-    def check_available(self) -> bool:
-        from . import browser
-
-        return browser.check_playwright()
+def selected_transport() -> str:
+    """Always the API transport. Retained so callers need not care that the choice is gone."""
+    warn_if_browser_requested()
+    return TRANSPORT_API
 
 
 def get_transport() -> Transport:
-    """Return the transport selected by ``CASSETTE_TRANSPORT`` (default api)."""
-    if selected_transport() == TRANSPORT_API:
-        from . import api_transport
+    """Return the Cassette API transport."""
+    warn_if_browser_requested()
+    from . import api_transport
 
-        return api_transport.ApiTransport()
-    return BrowserTransport()
+    return api_transport.ApiTransport()

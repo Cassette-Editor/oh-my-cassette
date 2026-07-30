@@ -14,7 +14,6 @@ python3 -m venv .venv-web
 . .venv-web/bin/activate
 pip install -U pip
 pip install -r requirements-web.txt
-python -m playwright install chromium
 ```
 
 2. 通过进程环境变量配置 Cassette 和 DeepSeek。Web Demo 不要求安装 Hermes Agent，也不要求存在 `~/.hermes/.env`：
@@ -31,7 +30,7 @@ CASSETTE_URL=https://sg.trycassette.online/agent
 CASSETTE_AUTH_EMAIL=you@example.com
 CASSETTE_AUTH_PASSWORD='your-cassette-password'
 CASSETTE_ASSET_ROOT=$HOME/.oh-my-cassette/cassette
-CASSETTE_BROWSER_TIMEOUT_SEC=1800
+CASSETTE_JOB_TIMEOUT_SEC=1800
 
 DEEPSEEK_API_KEY='your_deepseek_api_key'
 DEEPSEEK_BASE_URL=https://api.deepseek.com
@@ -42,7 +41,7 @@ OMC_WEB_LOG_DIR=./web_demo/logs
 ```
 
 如果用 `. ./oh-my-cassette-web.env` 加载配置，包含 shell 特殊字符、空格或 `#` 的值请加引号；systemd 的 `EnvironmentFile` 同样支持带引号的值。
-Cassette 上传/分析等待默认继承 `CASSETTE_BROWSER_TIMEOUT_SEC`。只有需要单独设置上传超时时才配置 `CASSETTE_UPLOAD_TIMEOUT_SEC`；设为 `0` 表示无限等待。
+Cassette 上传/分析等待默认继承 `CASSETTE_JOB_TIMEOUT_SEC`。只有需要单独设置上传超时时才配置 `CASSETTE_UPLOAD_TIMEOUT_SEC`；设为 `0` 表示无限等待。
 
 启动前加载这些变量：
 

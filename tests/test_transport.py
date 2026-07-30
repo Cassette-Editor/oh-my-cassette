@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from cassette.core import browser, jobs, notifier, tools
+from cassette.core import jobs, notifier, tools, transport
 from cassette.core.api_transport import ApiTransport
-from cassette.core.transport import BrowserTransport, Transport, get_transport, selected_transport
+from cassette.core.transport import Transport, get_transport, selected_transport
 
 
 @pytest.fixture(autouse=True)
@@ -14,74 +14,63 @@ def _isolate_hermes_env(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_ENV_FILE", str(tmp_path / "absent.env"))
 
 
-def test_default_transport_is_api(monkeypatch):
-    # The shipped default is the API transport; only an explicit 'browser' selects Playwright.
+@pytest.fixture(autouse=True)
+def _reset_retirement_notice(monkeypatch):
+    # The notice is once-per-process by design, which would make its test order-dependent.
+    monkeypatch.setattr(transport, "_RETIRED_NOTICE_SHOWN", False)
+
+
+def test_the_only_transport_is_the_api_transport(monkeypatch):
     monkeypatch.delenv("CASSETTE_TRANSPORT", raising=False)
     assert selected_transport() == "api"
     assert isinstance(get_transport(), ApiTransport)
-
-
-@pytest.mark.parametrize(
-    "value,is_api",
-    [
-        ("api", True),
-        ("API", True),
-        (" Api ", True),
-        ("browser", False),
-        ("BROWSER", False),
-        (" browser ", False),
-        ("", True),
-        ("weird", True),
-    ],
-)
-def test_transport_selection_is_env_driven(monkeypatch, value, is_api):
-    # Only 'browser' (any case, trimmed) selects the browser path; everything else defaults to api.
-    monkeypatch.setenv("CASSETTE_TRANSPORT", value)
-    t = get_transport()
-    assert isinstance(t, ApiTransport if is_api else BrowserTransport)
-
-
-def test_both_transports_satisfy_protocol():
-    assert isinstance(BrowserTransport(), Transport)
     assert isinstance(ApiTransport(), Transport)
 
 
-def test_browser_transport_is_pure_passthrough(monkeypatch):
-    calls: dict = {}
-    monkeypatch.setattr(
-        browser,
-        "run_cassette_browser_job_threaded",
-        lambda job: {"status": "succeeded", "_via": "browser-run", "job_id": job.get("job_id")},
-    )
-    monkeypatch.setattr(
-        browser,
-        "export_reviewed_completion_job_threaded",
-        lambda job, decision: {"status": "succeeded", "_via": "browser-export", "decision": decision},
-    )
-    monkeypatch.setattr(browser, "close_browser_sessions_threaded", lambda key=None: calls.__setitem__("close", key))
-    monkeypatch.setattr(browser, "check_playwright", lambda: True)
-
-    bt = BrowserTransport()
-    assert bt.run_job({"job_id": "j1"}) == {"status": "succeeded", "_via": "browser-run", "job_id": "j1"}
-    assert bt.export({"job_id": "j1"}, {"decision": "export"})["decision"] == {"decision": "export"}
-    bt.close_sessions("session-key")
-    assert calls["close"] == "session-key"
-    assert bt.check_available() is True
+@pytest.mark.parametrize("value", ["browser", "BROWSER", " browser ", "api", "", "weird"])
+def test_no_env_value_can_select_anything_but_the_api_transport(monkeypatch, value):
+    # CASSETTE_TRANSPORT was the selector. A stale value must not resurrect a second code path,
+    # and must not fail the call either — the API path is what the setting's users wanted anyway.
+    monkeypatch.setenv("CASSETTE_TRANSPORT", value)
+    assert isinstance(get_transport(), ApiTransport)
 
 
-def test_check_playwright_tool_delegates_to_active_transport(monkeypatch):
-    # tools.check_playwright is the readiness gate; under the API transport it reports API readiness
-    # (the API origin defaults to the deployed Cassette, so readiness is credential-gated).
+def test_a_retired_browser_setting_is_reported_on_stderr_and_only_once(monkeypatch, capsys):
+    monkeypatch.setenv("CASSETTE_TRANSPORT", "browser")
+    get_transport()
+    first = capsys.readouterr()
+    # stdout carries MCP protocol frames; a diagnostic there corrupts the session.
+    assert first.out == ""
+    assert "CASSETTE_TRANSPORT=browser is retired" in first.err
+
+    get_transport()
+    assert capsys.readouterr().err == ""
+
+
+def test_no_notice_when_the_setting_is_absent_or_already_api(monkeypatch, capsys):
+    monkeypatch.delenv("CASSETTE_TRANSPORT", raising=False)
+    get_transport()
+    assert capsys.readouterr().err == ""
     monkeypatch.setenv("CASSETTE_TRANSPORT", "api")
-    monkeypatch.delenv("CASSETTE_AUTH_EMAIL", raising=False)
-    monkeypatch.delenv("CASSETTE_AUTH_ACCOUNT", raising=False)
-    monkeypatch.delenv("CASSETTE_EMAIL", raising=False)
-    monkeypatch.delenv("CASSETTE_AUTH_PASSWORD", raising=False)
-    monkeypatch.delenv("CASSETTE_PASSWORD", raising=False)
-    assert tools.check_playwright() is False
+    get_transport()
+    assert capsys.readouterr().err == ""
+
+
+def test_transport_readiness_gate_reports_api_readiness(monkeypatch):
+    # tools.check_transport_ready is the readiness gate; the API origin defaults to the deployed
+    # Cassette, so readiness is credential-gated.
+    for var in (
+        "CASSETTE_AUTH_EMAIL",
+        "CASSETTE_AUTH_ACCOUNT",
+        "CASSETTE_EMAIL",
+        "CASSETTE_AUTH_PASSWORD",
+        "CASSETTE_PASSWORD",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    assert tools.check_transport_ready() is False
     monkeypatch.setenv("CASSETTE_AUTH_EMAIL", "e@x.io")
     monkeypatch.setenv("CASSETTE_AUTH_PASSWORD", "pw")
-    assert tools.check_playwright() is True
+    assert tools.check_transport_ready() is True
 
 
 def test_api_transport_availability_gating(monkeypatch):
@@ -103,7 +92,6 @@ def test_api_transport_availability_gating(monkeypatch):
 
 
 def test_api_transport_run_fails_clean_without_credentials(cassette_env, monkeypatch):
-    monkeypatch.setenv("CASSETTE_TRANSPORT", "api")
     for var in (
         "CASSETTE_AUTH_EMAIL",
         "CASSETTE_AUTH_ACCOUNT",
@@ -115,11 +103,38 @@ def test_api_transport_run_fails_clean_without_credentials(cassette_env, monkeyp
     result = get_transport().run_job(
         {"job_id": "job-x", "session_hash": "s", "cassette_session_id": "s", "prompt": "edit", "asset_paths": []}
     )
-    # Misconfiguration is a structured terminal failure, not a crash — same contract as the browser path.
-    # No network is touched because credentials are validated before any request.
+    # Misconfiguration is a structured terminal failure, not a crash. No network is touched
+    # because credentials are validated before any request.
     assert result["status"] == "failed"
     assert set(result) >= {"status", "outputs", "questions", "errors", "quality", "final_screenshot"}
     assert result["errors"] and result["errors"][0]["code"] == "auth_missing_credentials"
+
+
+def test_connectivity_probe_targets_the_api_origin_health_endpoint(monkeypatch):
+    from cassette.core import api_transport as api_mod
+
+    seen: dict = {}
+
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    def _fake_urlopen(request, timeout=None):
+        seen["url"] = request.full_url
+        seen["method"] = request.get_method()
+        return _Response()
+
+    monkeypatch.setattr(api_mod, "urlopen", _fake_urlopen)
+    result = api_mod.check_cassette_connectivity("https://cassette.example")
+    assert result == {"ok": True, "status": "reachable", "http_status": 200}
+    # /healthz is public, so an unprivileged or expired credential still reports reachable.
+    assert seen["url"] == "https://cassette.example/healthz"
+    assert seen["method"] == "GET"
 
 
 def _make_job():
@@ -132,7 +147,8 @@ def _make_job():
     )
 
 
-def _browser_shaped_succeeded(local_path: str) -> dict:
+def _canonical_succeeded(local_path: str) -> dict:
+    """The job-result shape jobs/notifier/_scrub_job/_job_report consume."""
     return {
         "status": "succeeded",
         "outputs": [
@@ -158,11 +174,11 @@ def _browser_shaped_succeeded(local_path: str) -> dict:
     }
 
 
-def test_result_dicts_share_the_same_contract_keys(cassette_env, tmp_path):
+def test_transport_results_match_the_contract_downstream_expects(cassette_env, tmp_path):
     mp4 = tmp_path / "out.mp4"
     mp4.write_bytes(b"video")
-    browser_result = _browser_shaped_succeeded(str(mp4))
-    api_result = ApiTransport()._result(
+    expected = _canonical_succeeded(str(mp4))
+    produced = ApiTransport()._result(
         "succeeded",
         outputs=[
             {
@@ -177,22 +193,16 @@ def test_result_dicts_share_the_same_contract_keys(cassette_env, tmp_path):
         export_completed=True,
         risk="low",
     )
-    assert set(browser_result) == set(api_result)
-    assert set(browser_result["quality"]) <= set(api_result["quality"]) or set(api_result["quality"]) <= set(
-        browser_result["quality"]
-    )
+    assert set(expected) == set(produced)
+    assert set(expected["quality"]) <= set(produced["quality"])
 
 
-def test_downstream_report_parity_browser_vs_api(cassette_env, tmp_path):
+def test_report_and_output_scrubbing_on_a_succeeded_result(cassette_env, tmp_path):
     mp4 = tmp_path / "out.mp4"
     mp4.write_bytes(b"video")
 
-    jb = _make_job()
-    jb.update(_browser_shaped_succeeded(str(mp4)))
-    jb["status"] = "succeeded"
-
-    ja = _make_job()
-    ja.update(
+    job = _make_job()
+    job.update(
         ApiTransport()._result(
             "succeeded",
             outputs=[
@@ -209,27 +219,24 @@ def test_downstream_report_parity_browser_vs_api(cassette_env, tmp_path):
             risk="low",
         )
     )
-    ja["status"] = "succeeded"
+    job["status"] = "succeeded"
 
-    scrubbed_b = tools._scrub_job(jb)
-    scrubbed_a = tools._scrub_job(ja)
-    # Equivalent outcomes must yield an identical user-facing report.
-    for key in ("status", "user_summary", "output_count", "export_pending"):
-        assert scrubbed_b["report"][key] == scrubbed_a["report"][key], key
-    # Output scrubbing is identical: local_path stripped, downloaded+filename added.
-    for scrubbed in (scrubbed_b, scrubbed_a):
-        out = scrubbed["outputs"][0]
-        assert "local_path" not in out
-        assert out["downloaded"] is True
-        assert out["filename"] == "out.mp4"
+    scrubbed = tools._scrub_job(job)
+    assert scrubbed["report"]["status"] == "succeeded"
+    assert scrubbed["report"]["output_count"] == 1
+    assert scrubbed["report"]["export_pending"] is False
+    # local_path is stripped; downloaded+filename are added.
+    out = scrubbed["outputs"][0]
+    assert "local_path" not in out
+    assert out["downloaded"] is True
+    assert out["filename"] == "out.mp4"
 
 
-def test_notifier_delivery_parity_on_local_path(cassette_env, tmp_path):
+def test_notifier_delivers_only_exports_that_exist_on_disk(cassette_env, tmp_path):
     real = tmp_path / "v.mp4"
     real.write_bytes(b"video")
     missing = tmp_path / "missing.mp4"
 
-    # A real on-disk export is delivered; a missing one is dropped — for either result shape.
     assert notifier._exported_media_paths({"outputs": [{"local_path": str(real), "kind": "video"}]}) == [str(real)]
     assert notifier._exported_media_paths({"outputs": [{"local_path": str(missing), "kind": "video"}]}) == []
 
@@ -316,10 +323,9 @@ def test_api_resume_value_classifies_and_records_interrupts():
     assert needs is False and rv["action"] == "respond"
 
 
-def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeypatch):
+def test_worker_detached_path_routes_through_the_transport(cassette_env, monkeypatch):
     from cassette.core import worker
 
-    monkeypatch.setenv("CASSETTE_TRANSPORT", "api")
     monkeypatch.setattr(worker.notifier, "notify_terminal_job", lambda job: {"delivered": False})
 
     seen: dict = {}
@@ -330,11 +336,6 @@ def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeyp
             return _fake_result("api")
 
     monkeypatch.setattr(worker.transport, "get_transport", lambda: _Recording())
-    monkeypatch.setattr(
-        worker.browser,
-        "run_cassette_browser_job",
-        lambda job: (_ for _ in ()).throw(AssertionError("browser path ran under api transport")),
-    )
 
     jb = _make_job()
     out = worker.run(jb["job_id"])
@@ -342,19 +343,22 @@ def test_worker_detached_path_routes_through_api_transport(cassette_env, monkeyp
     assert out["status"] == "succeeded" and out["_via"] == "api"
 
 
-def test_worker_detached_path_uses_browser_when_selected(cassette_env, monkeypatch):
+def test_worker_resume_also_routes_through_the_transport(cassette_env, monkeypatch):
     from cassette.core import worker
 
-    monkeypatch.setenv("CASSETTE_TRANSPORT", "browser")  # explicit opt-out of the api default
     monkeypatch.setattr(worker.notifier, "notify_terminal_job", lambda job: {})
-    monkeypatch.setattr(worker.browser, "run_cassette_browser_job", lambda job: _fake_result("browser"))
-    # The browser path must NOT construct the API transport at all.
-    monkeypatch.setattr(
-        worker.transport,
-        "get_transport",
-        lambda: (_ for _ in ()).throw(AssertionError("api transport built on browser path")),
-    )
+
+    seen: dict = {}
+
+    class _Recording:
+        def resume(self, job, response):
+            seen["response"] = response
+            return _fake_result("api-resume")
+
+    monkeypatch.setattr(worker.transport, "get_transport", lambda: _Recording())
 
     jb = _make_job()
-    out = worker.run(jb["job_id"])
-    assert out["_via"] == "browser"
+    jobs.update_job(jb["job_id"], resume_request={"response": "use the second take"})
+    out = worker.run(jb["job_id"], action="resume")
+    assert seen["response"] == "use the second take"
+    assert out["_via"] == "api-resume"

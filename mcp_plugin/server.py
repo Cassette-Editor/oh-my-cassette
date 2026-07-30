@@ -29,6 +29,7 @@ from .models import (
     JobStatusInput,
     EditInput,
     ListAssetsInput,
+    LoginInput,
     TimelineInput,
     MakePromptInput,
     MatchBgmInput,
@@ -44,6 +45,33 @@ from . import update_check
 @dataclass
 class McpLifespanContext:
     runtime: LocalMcpRuntime
+    client_profile_logged: bool = False
+
+
+def _startup_auth_notice() -> str:
+    """One line on whether this machine held Cassette credentials when the server started.
+
+    Read at import rather than in the lifespan: `instructions` is captured for the initialize
+    reply before the lifespan body runs, so appending there is a silent no-op (verified against
+    a real stdio client). Import is also the honest moment for a claim about startup.
+
+    Worded as a point-in-time observation, not an instruction: a user who signs in mid-session
+    makes it stale, and every tool re-reads the credential file on each call, so the envelope
+    is always the authoritative answer. Its value is purely proactive — without it the agent
+    cannot know to offer sign-in until the first edit has already failed. Deliberately carries
+    no email: it lands in the model's context on every run.
+    """
+    try:
+        credentials = runtime_config.load_credentials()
+    except Exception:  # noqa: BLE001 — a diagnostic line must never block server startup
+        return ""
+    if not credentials.get("email") or not credentials.get("password"):
+        return (
+            " At startup this machine had no Cassette credentials stored: say so before ingesting "
+            "media and offer to sign in, rather than letting the first edit fail."
+        )
+    verified = str(credentials.get("verified_at") or "").strip()
+    return f" At startup this machine was signed in to Cassette{f' (verified {verified})' if verified else ''}."
 
 
 @asynccontextmanager
@@ -59,10 +87,66 @@ async def lifespan(_: FastMCP) -> AsyncIterator[McpLifespanContext]:
     yield McpLifespanContext(runtime=runtime)
 
 
+def _log_client_profile_once(context: Context) -> None:
+    """Record the negotiated protocol revision and optional capabilities, once per run.
+
+    The elicitation and roots paths below both degrade to silence by design.  That was
+    safe while every host spoke one revision, but 2026-07-28 removes the `initialize`
+    handshake those capability probes read, so against a new-spec client they become
+    permanent no-ops that look identical to a broken server.  Naming the negotiated
+    profile once, on stderr, is what turns "elicitation stopped working after a host
+    upgrade" into a single line the user can read back.
+    """
+    try:
+        lifespan = context.request_context.lifespan_context
+        if lifespan.client_profile_logged:
+            return
+        lifespan.client_profile_logged = True
+        params = getattr(context.session, "client_params", None)
+        capabilities = getattr(params, "capabilities", None)
+        info = getattr(params, "clientInfo", None)
+        negotiated = getattr(params, "protocolVersion", None)
+        elicitation = getattr(capabilities, "elicitation", None) is not None
+        roots = getattr(capabilities, "roots", None) is not None
+        print(
+            "oh-my-cassette: mcp client={name}/{version} protocol={negotiated} "
+            "server_max={supported} elicitation={elicitation} roots={roots}".format(
+                name=getattr(info, "name", None) or "unknown",
+                version=getattr(info, "version", None) or "unknown",
+                negotiated=negotiated or "unnegotiated",
+                supported=types.LATEST_PROTOCOL_VERSION,
+                elicitation="yes" if elicitation else "no",
+                roots="yes" if roots else "no",
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        if not elicitation:
+            print(
+                "oh-my-cassette: this client offers no elicitation capability; needs_user "
+                "questions fall back to the cassette_answer_question round-trip",
+                file=sys.stderr,
+                flush=True,
+            )
+        if not roots:
+            print(
+                "oh-my-cassette: this client offers no roots capability; media paths must "
+                "come from CASSETTE_PROJECT_ROOT or a configured media root",
+                file=sys.stderr,
+                flush=True,
+            )
+    except Exception:  # noqa: BLE001 — diagnostics must never fail a tool call
+        return
+
+
 class ArtifactFastMCP(FastMCP[McpLifespanContext]):
     """Append validated artifact ResourceLink blocks to structured tool output."""
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        try:
+            _log_client_profile_once(self.get_context())
+        except Exception:  # noqa: BLE001 — never let diagnostics block the tool surface
+            pass
         try:
             result = await super().call_tool(name, arguments)
         except ToolError as exc:
@@ -122,7 +206,7 @@ mcp = ArtifactFastMCP(
         "Cassette agent. Call cassette_ingest_media once per source file (reuse the returned "
         "session_id), then for every editing request call cassette_run_job with message set to "
         "the user's VERBATIM words — never rewrite, optimize, or expand them; the agent reads "
-        "the session's media itself (cassette_make_prompt is legacy browser-transport only). "
+        "the session's media itself (cassette_make_prompt is a legacy brief builder — do not call it). "
         "One session = one persistent agent thread with memory. "
         "A turn ends succeeded with the edit committed and nothing rendered, carrying "
         "timeline_delta + quality.timeline_ctl + a contact-sheet artifact as the per-turn "
@@ -151,8 +235,15 @@ mcp = ArtifactFastMCP(
         "cassette_answer_question with approve, revise <feedback>, or reject; if the resume "
         "returns resume_not_waiting_for_user the user already decided in the editor tab — "
         "re-check status. "
-        "If a tool returns auth_required, show error.details.setup_command as a private terminal "
-        "command; never collect credentials in chat." + update_check.notice() + update_check.auto_update_notice()
+        "If a tool returns auth_required, read error.details.recovery and act on the entry whose "
+        "'when' matches the user: cassette_login with the generated password from their Cassette "
+        "email; or, once they confirm a replacement, cassette_login with request_new_password=true "
+        "and confirm_replace=true; or error.details.setup_command as a private terminal command if "
+        "they would rather keep the password out of this conversation. Cassette passwords are always "
+        "server-generated — never invent or guess one, always ask the user for it."
+        + _startup_auth_notice()
+        + update_check.notice()
+        + update_check.auto_update_notice()
     ),
     lifespan=lifespan,
     log_level="WARNING",
@@ -653,6 +744,36 @@ async def cassette_config(
         "cassette_config",
         request.model_dump(exclude_none=True),
     )
+
+
+@mcp.tool(
+    description=(
+        "Sign this machine in to Cassette, or have a replacement password emailed. Pass email plus "
+        "the generated password from the user's Cassette email. Cassette passwords are always "
+        "server-generated, never chosen — ask the user for theirs, never invent one. If they no "
+        "longer have it, confirm with them first, then pass request_new_password=true with "
+        "confirm_replace=true: that replaces the account password on every machine they use and "
+        "emails a new one. Credentials are verified before anything is written, so a wrong password "
+        "leaves an existing working setup untouched."
+    ),
+    structured_output=True,
+)
+async def cassette_login(
+    email: str,
+    ctx: Context,
+    password: str | None = None,
+    request_new_password: bool = False,
+    confirm_replace: bool = False,
+) -> ToolEnvelope:
+    request = LoginInput(
+        email=email,
+        password=password,
+        request_new_password=request_new_password,
+        confirm_replace=confirm_replace,
+    )
+    # exclude_none only: the two booleans must survive as False so the core handler can tell
+    # "not confirmed" from "absent" without re-deriving intent.
+    return await _run_sync(_runtime(ctx).login, request.model_dump(exclude_none=True))
 
 
 def main() -> None:

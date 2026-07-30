@@ -14,11 +14,6 @@ on:
         description: Max seconds to wait for the Cassette job
         required: false
         default: "1500"
-      include-browser:
-        description: Also run the optional Playwright/Chromium transport acceptance
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -36,7 +31,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      CASSETTE_TRANSPORT: api
       CASSETTE_AUTH_EMAIL: ${{ secrets.CASSETTE_AUTH_EMAIL }}
       CASSETTE_AUTH_PASSWORD: ${{ secrets.CASSETTE_AUTH_PASSWORD }}
       # Optional repository variable to override the region/URL defaults.
@@ -79,59 +73,7 @@ jobs:
           TIMEOUT_SEC: ${{ inputs.timeout-sec }}
         run: |
           python scripts/e2e_local_mcp.py \
-            --transport api \
             --host "${{ matrix.host }}" \
-            --media /tmp/e2e-clip.mp4 \
-            --instruction "$INSTRUCTION" \
-            --timeout-sec "$TIMEOUT_SEC"
-
-  mcp-browser-e2e:
-    if: ${{ inputs.include-browser }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    env:
-      CASSETTE_TRANSPORT: browser
-      CASSETTE_AUTH_EMAIL: ${{ secrets.CASSETTE_AUTH_EMAIL }}
-      CASSETTE_AUTH_PASSWORD: ${{ secrets.CASSETTE_AUTH_PASSWORD }}
-      CASSETTE_URL: ${{ vars.CASSETTE_URL }}
-    steps:
-      - name: Require credentials
-        run: |
-          if [ -z "$CASSETTE_AUTH_EMAIL" ] || [ -z "$CASSETTE_AUTH_PASSWORD" ]; then
-            echo "::error::Set the CASSETTE_AUTH_EMAIL / CASSETTE_AUTH_PASSWORD repository secrets first."
-            exit 1
-          fi
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: requirements-browser.lock
-      - name: Install optional browser runtime
-        run: |
-          python -m pip install -r requirements-browser.lock
-          python -m playwright install --with-deps chromium
-          sudo apt-get update -q
-          sudo apt-get install -y -q ffmpeg
-      - name: Isolate host-neutral MCP config and data
-        run: |
-          echo "CASSETTE_CONFIG_HOME=$(mktemp -d)/config" >> "$GITHUB_ENV"
-          echo "CASSETTE_DATA_HOME=$(mktemp -d)/data" >> "$GITHUB_ENV"
-      - name: Generate a realistic test clip
-        run: |
-          ffmpeg -y -v error \
-            -f lavfi -i "testsrc2=duration=8:size=1280x720:rate=30" \
-            -f lavfi -i "sine=frequency=440:duration=8" \
-            -c:v libx264 -pix_fmt yuv420p -preset veryfast -c:a aac -shortest \
-            /tmp/e2e-clip.mp4
-      - name: Run optional browser parity through the local MCP entrypoint
-        env:
-          INSTRUCTION: ${{ inputs.instruction }}
-          TIMEOUT_SEC: ${{ inputs.timeout-sec }}
-        run: |
-          python scripts/e2e_local_mcp.py \
-            --transport browser \
-            --host codex \
             --media /tmp/e2e-clip.mp4 \
             --instruction "$INSTRUCTION" \
             --timeout-sec "$TIMEOUT_SEC"

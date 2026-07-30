@@ -597,7 +597,7 @@ def test_api_interrupt_persists_and_resumes_on_same_thread_after_restart(cassett
         server.server_close()
 
 
-def test_api_transport_forbidden_surfaces_full_access_hint(cassette_env, monkeypatch):
+def test_api_transport_forbidden_surfaces_a_clear_error(cassette_env, monkeypatch):
     """A 403 on an account-scoped call yields a clear 'forbidden' error, not an opaque failure."""
 
     class _Forbidden(_MockCassetteAPI):
@@ -632,7 +632,12 @@ def test_api_transport_forbidden_surfaces_full_access_hint(cassette_env, monkeyp
         )
         assert result["status"] == "failed"
         assert result["errors"][0]["code"] == "forbidden"
-        assert "full API access" in result["errors"][0]["message"]
+        # A 403 is relayed as a server-side refusal. The plugin serves one class of account,
+        # so it must never tell the user their access level is the problem — that sent people
+        # off to request an upgrade instead of reporting a server bug.
+        message = result["errors"][0]["message"]
+        assert "refused this request" in message
+        assert "access" not in message.lower()
     finally:
         server.shutdown()
         server.server_close()

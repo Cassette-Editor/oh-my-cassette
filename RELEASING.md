@@ -44,10 +44,10 @@ Releases carry no uploaded assets on purpose. No host consumes an archive (Claud
    ```
 
 4. Smoke-install from a clean config with the currently supported Codex and Claude CLI versions. Confirm Codex lists `oh-my-cassette@cassette-editor`; confirm Claude reports exactly one host-neutral skill and one `cassette` MCP server.
-5. Trigger the maintainer E2E workflow. It runs a real API edit through the local MCP entrypoint for both host labels; optionally enable browser parity:
+5. Trigger the maintainer E2E workflow. It runs a real edit through the local MCP entrypoint for both host labels:
 
    ```bash
-   gh workflow run e2e.yml -f include-browser=true
+   gh workflow run e2e.yml
    gh run watch
    ```
 
@@ -56,7 +56,7 @@ Releases carry no uploaded assets on purpose. No host consumes an archive (Claud
    ```bash
    CASSETTE_AUTH_EMAIL=… CASSETTE_AUTH_PASSWORD=… \
    .venv/bin/python scripts/e2e_local_mcp.py \
-     --host codex --transport api \
+     --host codex \
      --media /absolute/path/to/a-real-test-clip.mp4 \
      --instruction "Make a short captioned video."
    ```
@@ -66,10 +66,8 @@ Releases carry no uploaded assets on purpose. No host consumes an archive (Claud
    - API auth and one real MCP edit;
    - Codex guided flow;
    - Claude guided flow;
-   - optional browser/API parity;
    - completion review and validated artifact link;
-   - API resume after host restart;
-   - expected `browser_session_lost` after browser-process restart.
+   - resume after host restart.
 
 7. Inspect the complete diff and staged files for credentials, private IDs, media, job state, and absolute acceptance paths. Rotate the live test password if it was ever shared outside the repository secret store.
 8. Ensure the release PR's required checks run. Release PRs created with `GITHUB_TOKEN` may need to be closed/reopened or have a new commit pushed before workflows trigger.
