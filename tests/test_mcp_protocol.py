@@ -761,15 +761,21 @@ def _call_login(environment: dict[str, str], arguments: dict) -> dict:
     return asyncio.run(exercise())
 
 
-def _seed_stored_credentials(environment: dict[str, str], password: str) -> Path:
-    config = Path(environment["CASSETTE_CONFIG_HOME"])
-    config.mkdir(mode=0o700, exist_ok=True)
-    path = config / "credentials.json"
-    path.write_text(
-        json.dumps({"email": "stored@example.test", "password": password, "verified_at": "2026-01-01T00:00:00Z"}),
-        encoding="utf-8",
+def _seed_stored_credentials(environment: dict[str, str], secret: str) -> Path:
+    """Write a credential file exactly as the runtime writes one.
+
+    Seeding by hand produced compact JSON, while the runtime writes it sorted, indented and
+    newline-terminated. Several tests here assert the file is byte-identical after a failed
+    verify, and against a hand-rolled seed that assertion proved nothing about the shape the
+    product actually leaves on disk. Going through the real writer also picks up its private
+    directory, 0600 mode and symlink rejection instead of restating them.
+    """
+    import runtime_config
+
+    path = Path(environment["CASSETTE_CONFIG_HOME"]) / "credentials.json"
+    runtime_config.write_protected_json(
+        path, {"email": "stored@example.test", "password": secret, "verified_at": "2026-01-01T00:00:00Z"}
     )
-    path.chmod(0o600)
     return path
 
 
