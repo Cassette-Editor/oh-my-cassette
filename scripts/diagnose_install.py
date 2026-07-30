@@ -171,15 +171,56 @@ def _check_plugin_enabled(home: Path) -> dict:
     )
 
 
-def _check_env(home: Path) -> dict:
+_RESOLVED_ENV_KEYS = (
+    "CASSETTE_AUTH_EMAIL",
+    "CASSETTE_AUTH_PASSWORD",
+    "CASSETTE_API_URL",
+    "CASSETTE_FFMPEG_BIN",
+    "CASSETTE_FFPROBE_BIN",
+    "JAMENDO_CLIENT_ID",
+    "JAMENDO_CLIENT_SECRET",
+)
+
+
+def _resolved_env_values(home: Path) -> tuple[dict[str, str], list[str]]:
+    """What the plugin will actually read, in the runtime's precedence order.
+
+    Reading only ~/.hermes/.env made this report credentials missing during sessions that
+    authenticated perfectly well: the process environment wins at runtime, so a value
+    exported in the shell that launched Hermes is the one that counts. Returns the merged
+    values and the keys the environment supplied, so the report can say which is which.
+    """
+    values = dict(install_plugin.read_env_values(home / ".env"))
+    from_environment: list[str] = []
+    for key in _RESOLVED_ENV_KEYS:
+        override = (os.getenv(key) or "").strip()
+        if override:
+            values[key] = override
+            from_environment.append(key)
+    return values, from_environment
+
+
+def _check_env(home: Path, values: dict[str, str], from_environment: list[str]) -> dict:
     env_path = home / ".env"
-    values = install_plugin.read_env_values(env_path)
-    missing = [key for key in ("CASSETTE_URL", "CASSETTE_AUTH_EMAIL", "CASSETTE_AUTH_PASSWORD") if not values.get(key)]
+    # CASSETTE_API_URL is intentionally not required: it has a working default.
+    missing = [key for key in ("CASSETTE_AUTH_EMAIL", "CASSETTE_AUTH_PASSWORD") if not values.get(key)]
     status = "ok" if not missing else "warn"
-    message = (
-        "required Cassette environment values are present" if not missing else f"missing values: {', '.join(missing)}"
+    if missing:
+        message = f"missing values: {', '.join(missing)}"
+    elif from_environment:
+        message = (
+            f"required Cassette environment values are present ({', '.join(from_environment)} from the environment)"
+        )
+    else:
+        message = "required Cassette environment values are present"
+    return _check(
+        "env",
+        status,
+        message,
+        path=str(env_path),
+        values=_redacted_env_snapshot(values),
+        from_environment=from_environment,
     )
-    return _check("env", status, message, path=str(env_path), values=_redacted_env_snapshot(values))
 
 
 def _check_binary(name: str, configured: str = "") -> dict:
@@ -190,29 +231,6 @@ def _check_binary(name: str, configured: str = "") -> dict:
     if code != 0:
         return _check(name, "fail", f"{name} exists but did not run successfully", path=path, output=output[-500:])
     return _check(name, "ok", f"{name} is available", path=path, version=output.splitlines()[0] if output else "")
-
-
-def _check_playwright(home: Path) -> dict:
-    python = install_plugin.hermes_python(home)
-    if not python.exists():
-        return _check("playwright", "fail", f"Hermes Python was not found: {python}")
-    code, output = _run([str(python), "-c", "import playwright.sync_api; print('playwright ok')"], timeout=20)
-    if code != 0:
-        return _check(
-            "playwright",
-            "fail",
-            "Python Playwright is not installed in the Hermes environment",
-            python=str(python),
-            output=output[-500:],
-        )
-    code, chromium_output = _run([str(python), "-m", "playwright", "install", "chromium", "--dry-run"], timeout=30)
-    status = "ok" if code == 0 else "warn"
-    message = (
-        "Playwright package is installed"
-        if status == "ok"
-        else "Playwright package is installed, but Chromium dry-run check failed"
-    )
-    return _check("playwright", status, message, python=str(python), output=chromium_output[-500:])
 
 
 def _check_gateway(home: Path) -> dict:
@@ -243,370 +261,80 @@ def _check_gateway(home: Path) -> dict:
 
 
 def _check_cassette_connectivity(url: str) -> dict:
+    """Probe the API origin the plugin actually calls, via its unauthenticated /healthz."""
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
-        return _check("cassette_url", "warn", "Cassette URL is not HTTP(S); connectivity check skipped", url=url)
-    last_error = ""
-    for method in ("HEAD", "GET"):
-        try:
-            request = Request(url, method=method, headers={"User-Agent": "oh-my-cassette-diagnose/1.0"})
-            with urlopen(request, timeout=10) as response:
-                status = int(getattr(response, "status", 200) or 200)
-            if 200 <= status < 400 or status in {401, 403}:
-                return _check("cassette_url", "ok", "Cassette URL is reachable", url=url, http_status=status)
-            return _check(
-                "cassette_url", "fail", "Cassette URL returned an unhealthy status", url=url, http_status=status
-            )
-        except HTTPError as exc:
-            if int(exc.code) in {401, 403}:
-                return _check(
-                    "cassette_url",
-                    "ok",
-                    "Cassette URL is reachable and requires auth",
-                    url=url,
-                    http_status=int(exc.code),
-                )
-            if method == "HEAD" and int(exc.code) in {405, 501}:
-                last_error = f"HTTP {exc.code}"
-                continue
-            return _check("cassette_url", "fail", "Cassette URL request failed", url=url, http_status=int(exc.code))
-        except (TimeoutError, URLError, OSError) as exc:
-            last_error = type(exc).__name__
-            if method == "HEAD":
-                continue
-            return _check("cassette_url", "fail", "Cassette URL is not reachable", url=url, error=last_error)
-    return _check("cassette_url", "fail", "Cassette URL is not reachable", url=url, error=last_error)
-
-
-CASSETTE_LOGIN_CHECK_SCRIPT = r'''
-from __future__ import annotations
-
-import json
-import os
-import time
-
-from playwright.sync_api import sync_playwright
-
-
-def print_result(status, **payload):
-    payload["status"] = status
-    print(json.dumps(payload, ensure_ascii=False))
-
-
-def visible_selectors(page, selectors):
+        return _check("cassette_url", "warn", "Cassette API URL is not HTTP(S); connectivity check skipped", url=url)
+    target = url.rstrip("/") + "/healthz"
     try:
-        return page.evaluate(
-            """(selectors) => {
-                const visible = (el) => {
-                    if (!el) return false;
-                    const style = window.getComputedStyle(el);
-                    if (style.visibility === "hidden" || style.display === "none") return false;
-                    const rect = el.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0;
-                };
-                return selectors.filter((selector) => {
-                    try {
-                        return Array.from(document.querySelectorAll(selector)).some(visible);
-                    } catch (_) {
-                        return false;
-                    }
-                });
-            }""",
-            selectors,
-        )
-    except Exception:
-        return []
-
-
-def auth_element_state(page):
-    try:
-        return page.evaluate(
-            """() => {
-                const visible = (el) => {
-                    if (!el) return false;
-                    const style = window.getComputedStyle(el);
-                    if (style.visibility === "hidden" || style.display === "none") return false;
-                    const rect = el.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0;
-                };
-                const signupEmail = document.querySelector("#agent-auth-email");
-                const loginEmail = document.querySelector("#agent-auth-email-login");
-                const password = document.querySelector("#agent-auth-password");
-                return {
-                    signup_email_visible: visible(signupEmail),
-                    login_email_visible: visible(loginEmail),
-                    password_visible: visible(password),
-                };
-            }"""
-        )
-    except Exception:
-        return {}
-
-
-def page_requires_auth(page):
-    state = auth_element_state(page)
-    return bool(
-        state.get("signup_email_visible")
-        or (state.get("login_email_visible") and state.get("password_visible"))
-    )
-
-
-def switch_to_login_form(page):
-    state = auth_element_state(page)
-    if state.get("login_email_visible") and state.get("password_visible"):
-        return
-    if not state.get("signup_email_visible"):
-        return
-    try:
-        page.evaluate(
-            """() => {
-                const visible = (el) => {
-                    if (!el) return false;
-                    const style = window.getComputedStyle(el);
-                    if (style.visibility === "hidden" || style.display === "none") return false;
-                    const rect = el.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0;
-                };
-                const signupEmail = document.querySelector("#agent-auth-email");
-                const form = signupEmail?.closest("form");
-                const root = form?.parentElement || signupEmail?.closest("main,section") || document.body;
-                const formRect = form?.getBoundingClientRect();
-                const buttons = Array.from(root.querySelectorAll("button[type='button'],button:not([type])"))
-                    .filter((button) => {
-                        if (!visible(button) || button.disabled || button.getAttribute("aria-disabled") === "true") return false;
-                        if (button.closest("form")) return false;
-                        if (formRect) {
-                            const rect = button.getBoundingClientRect();
-                            if (rect.bottom > formRect.top + 2) return false;
-                        }
-                        return true;
-                    });
-                const labels = (button) => [
-                    button.getAttribute("aria-label"),
-                    button.getAttribute("title"),
-                    button.getAttribute("data-value"),
-                    button.getAttribute("value"),
-                    button.id,
-                    button.name,
-                    button.innerText,
-                    button.textContent,
-                ].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim().toLowerCase();
-                const target = buttons.find((button) => {
-                    const label = labels(button);
-                    return /(^|\\b)(log in|login|sign in|signin)(\\b|$)/.test(label) || /登录|登入|登陆/.test(label);
-                }) || (() => {
-                    const wideButtons = buttons.filter((button) => {
-                        const rect = button.getBoundingClientRect();
-                        return rect.width * rect.height >= 1200;
-                    });
-                    const tabButtons = wideButtons.length >= 2 ? wideButtons : buttons;
-                    return tabButtons.length >= 2 ? tabButtons[1] : null;
-                })();
-                if (target) target.click();
-            }"""
-        )
-    except Exception:
-        pass
-
-
-def agent_ui_ready(page):
-    matches = visible_selectors(
-        page,
-        [
-            "[data-testid='agent-upload-status']",
-            "[data-testid='agent-export-button']",
-            "[data-testid='agent-chat-input']",
-            "[data-testid='chat-input']",
-            "textarea[placeholder*='Describe']",
-            "textarea[placeholder*='描述']",
-            "textarea",
-            "[role='textbox']",
-            "[contenteditable='true']",
-        ],
-    )
-    return bool(matches) and not page_requires_auth(page)
-
-
-def wait_state(page, timeout_sec, auth_immediate=True):
-    deadline = time.monotonic() + timeout_sec
-    saw_auth = False
-    while time.monotonic() < deadline:
-        auth_visible = page_requires_auth(page)
-        if auth_visible:
-            saw_auth = True
-        if auth_visible and auth_immediate:
-            return "auth"
-        if agent_ui_ready(page):
-            return "ready"
-        time.sleep(0.25)
-    return "auth" if saw_auth else "unknown"
-
-
-def first_visible_locator(page, selectors, timeout_sec=5):
-    deadline = time.monotonic() + timeout_sec
-    while time.monotonic() < deadline:
-        for selector in selectors:
-            try:
-                locators = page.locator(selector)
-                count = min(locators.count(), 20)
-            except Exception:
-                continue
-            for index in range(count):
-                locator = locators.nth(index)
-                try:
-                    if locator.is_visible():
-                        return locator
-                except Exception:
-                    continue
-        time.sleep(0.1)
-    return None
-
-
-def main():
-    url = os.environ["CASSETTE_DIAG_URL"]
-    email = os.environ["CASSETTE_DIAG_EMAIL"]
-    password = os.environ["CASSETTE_DIAG_PASSWORD"]
-    no_sandbox = os.environ.get("CASSETTE_NO_SANDBOX", "").lower() in {"1", "true", "yes", "on"}
-    launch_args = ["--no-sandbox"] if no_sandbox else []
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True, args=launch_args)
-        page = browser.new_page()
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            state = wait_state(page, 20)
-            if state == "ready":
-                print_result("ok", code="already_authenticated_or_no_auth")
-                return
-            if state != "auth":
-                print_result("fail", code="cassette_ui_not_ready")
-                return
-
-            switch_to_login_form(page)
-            login_deadline = time.monotonic() + 5
-            while time.monotonic() < login_deadline:
-                state = auth_element_state(page)
-                if state.get("login_email_visible") and state.get("password_visible"):
-                    break
-                time.sleep(0.1)
-            email_input = first_visible_locator(
-                page,
-                [
-                    "#agent-auth-email-login",
-                    "input[type='email'][autocomplete='email']",
-                    "input[type='email']",
-                ],
-                timeout_sec=5,
-            )
-            password_input = first_visible_locator(page, ["#agent-auth-password", "input[type='password']"], timeout_sec=5)
-            if not email_input or not password_input:
-                print_result("fail", code="cassette_auth_form_missing", auth_state=auth_element_state(page))
-                return
-            email_input.fill(email)
-            password_input.fill(password)
-            password_input.press("Enter")
-            post_auth_state = wait_state(page, 45, auth_immediate=False)
-            if post_auth_state == "ready":
-                print_result("ok", code="authenticated")
-                return
-            if page_requires_auth(page):
-                visible_auth = visible_selectors(
-                    page,
-                    [
-                        "#agent-auth-password",
-                        "#agent-auth-email-login",
-                        "#agent-auth-email",
-                        "input[type='password']",
-                    ],
-                )
-                if visible_auth:
-                    print_result("fail", code="cassette_auth_form_still_visible", auth_selectors=visible_auth)
-                    return
-                print_result("fail", code="cassette_post_auth_ui_not_ready")
-                return
-            print_result("fail", code="cassette_post_auth_ui_not_ready")
-        finally:
-            browser.close()
-
-
-try:
-    main()
-except Exception as exc:
-    print_result("fail", code=type(exc).__name__)
-'''
+        request = Request(target, method="GET", headers={"User-Agent": "oh-my-cassette-diagnose/1.0"})
+        with urlopen(request, timeout=10) as response:
+            status = int(getattr(response, "status", 200) or 200)
+        if 200 <= status < 400:
+            return _check("cassette_url", "ok", "Cassette API is reachable", url=url, http_status=status)
+        return _check("cassette_url", "fail", "Cassette API returned an unhealthy status", url=url, http_status=status)
+    except HTTPError as exc:
+        status = int(getattr(exc, "code", 0) or 0)
+        if status and status < 500:
+            return _check("cassette_url", "ok", "Cassette API is reachable", url=url, http_status=status)
+        return _check("cassette_url", "fail", "Cassette API request failed", url=url, http_status=status)
+    except (TimeoutError, URLError, OSError) as exc:
+        return _check("cassette_url", "fail", "Cassette API is not reachable", url=url, error=type(exc).__name__)
 
 
 def _check_cassette_login(home: Path, url: str, email: str, password: str) -> dict:
+    """Verify credentials against the same endpoint the plugin authenticates with.
+
+    ``home`` is unused now that this is a direct API call rather than a subprocess in the
+    Hermes interpreter; it stays in the signature so callers and tests are unaffected.
+    """
     if not email or not password:
         return _check(
             "cassette_login", "warn", "Cassette login credentials are not configured; login verification skipped"
         )
-    python = install_plugin.hermes_python(home)
-    if not python.exists():
-        return _check("cassette_login", "fail", f"Hermes Python was not found: {python}")
-    env = os.environ.copy()
-    env.update(
-        {
-            "CASSETTE_DIAG_URL": url,
-            "CASSETTE_DIAG_EMAIL": email,
-            "CASSETTE_DIAG_PASSWORD": password,
-        }
+    body = json.dumps({"email": email, "password": password}).encode("utf-8")
+    request = Request(
+        url.rstrip("/") + "/api/agent-auth/verify",
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
     try:
-        proc = subprocess.run(
-            [str(python), "-c", CASSETTE_LOGIN_CHECK_SCRIPT],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=90,
-            check=False,
-            env=env,
+        with urlopen(request, timeout=60) as response:
+            status = int(getattr(response, "status", 200) or 200)
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        if int(exc.code) in {400, 401, 403}:
+            return _check("cassette_login", "fail", "Cassette rejected the credentials", http_status=int(exc.code))
+        return _check("cassette_login", "fail", "Cassette credential verification failed", http_status=int(exc.code))
+    except (TimeoutError, URLError, OSError) as exc:
+        return _check(
+            "cassette_login",
+            "fail",
+            "Cassette credential verification could not reach the API",
+            error=type(exc).__name__,
         )
-    except subprocess.TimeoutExpired:
-        return _check("cassette_login", "fail", "Cassette login verification timed out")
-    except Exception as exc:
-        return _check("cassette_login", "fail", f"Cassette login verification failed to run: {type(exc).__name__}")
+    except ValueError:
+        return _check("cassette_login", "fail", "Cassette credential verification returned invalid JSON")
 
-    output = _sanitize_text((proc.stdout or "").strip())
-    data: dict = {}
-    if output:
-        try:
-            data = json.loads(output.splitlines()[-1])
-        except json.JSONDecodeError:
-            data = {}
-    if proc.returncode != 0 and not data:
-        return _check("cassette_login", "fail", "Cassette login verification process failed", output=output[-1000:])
-    code = str(data.get("code") or "unknown")
-    if data.get("status") == "ok":
-        return _check("cassette_login", "ok", "Cassette login credentials were accepted", code=code)
-    if code == "cassette_ui_not_ready":
-        return _check(
-            "cassette_login",
-            "warn",
-            "Cassette page loaded but login/agent UI was not ready during verification",
-            code=code,
-        )
-    if code in {"cassette_auth_form_missing", "cassette_auth_form_still_visible", "cassette_post_auth_ui_not_ready"}:
-        return _check(
-            "cassette_login",
-            "warn",
-            "Cassette credentials were not rejected, but the diagnostic browser did not reach the agent UI",
-            code=code,
-            output=output[-1000:],
-        )
-    message = "Cassette login credentials were rejected or login did not complete"
-    return _check("cassette_login", "fail", message, code=code, output=output[-1000:])
+    session = payload.get("session") if isinstance(payload, dict) else {}
+    if status != 200 or not isinstance(session, dict) or not session.get("access_token"):
+        return _check("cassette_login", "fail", "Cassette rejected the credentials", http_status=status)
+    # Only whether a token was issued is recorded, never the token. The response also carries
+    # an access level; it is not reported, because it does not describe anything the plugin
+    # does — every operation here is an agent operation.
+    return _check("cassette_login", "ok", "Cassette login credentials were accepted")
 
 
 def diagnose(home: Path, repo: Path) -> list[dict]:
-    env_values = install_plugin.read_env_values(home / ".env")
-    url = env_values.get("CASSETTE_URL") or install_plugin.CASSETTE_DEFAULT_URL
+    env_values, from_environment = _resolved_env_values(home)
+    url = env_values.get("CASSETTE_API_URL") or install_plugin.CASSETTE_DEFAULT_API_URL
     return [
         _check_plugin(home, repo),
         _check_plugin_enabled(home),
-        _check_env(home),
+        _check_env(home, env_values, from_environment),
         _check_binary("ffmpeg", env_values.get("CASSETTE_FFMPEG_BIN", "")),
         _check_binary("ffprobe", env_values.get("CASSETTE_FFPROBE_BIN", "")),
-        _check_playwright(home),
         _check_cassette_connectivity(url),
         _check_cassette_login(
             home,

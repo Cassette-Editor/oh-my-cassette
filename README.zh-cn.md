@@ -308,7 +308,7 @@ curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/rele
 hermes plugins install Cassette-Editor/oh-my-cassette
 ```
 
-Hermes 安装器会提示输入你的 Cassette 账号邮箱和密码，并保存到 `~/.hermes/.env`。随后运行完成设置命令——它会在 Hermes Python 环境中安装 Playwright Chromium、检测 `ffmpeg`/`ffprobe` 路径，并让你选择 Cassette 地区——然后启用插件：
+Hermes 安装器会提示输入你的 Cassette 账号邮箱和密码，并保存到 `~/.hermes/.env`。随后运行完成设置命令——它会检测 `ffmpeg`/`ffprobe` 路径，并让你选择 Cassette 地区——然后启用插件：
 
 ```bash
 python3 ~/.hermes/plugins/cassette/scripts/install_plugin.py --setup-only
@@ -338,7 +338,6 @@ python3 scripts/install_plugin.py
   - `https://trycassette.online/agent`（美洲）
 - 可选地把 Cassette 登录信息和 Jamendo 凭据保存到 `~/.hermes/.env`；
 - 检测服务环境中的 `ffmpeg` 和 `ffprobe` 路径；
-- 在 Hermes Python 环境中安装 Python Playwright 和 Chromium；
 - 重启 Hermes 网关服务。
 
 如果希望复制文件而不是创建符号链接：
@@ -366,35 +365,47 @@ Codex 与 Claude 使用同一套自包含运行时。本文所说的 **MCP serve
 
 ### 首次身份验证
 
-没有凭据也不会阻止 MCP 进程启动。第一个需要连接 Cassette 的工具会返回 `auth_required`，其中包含一条应在私人终端中运行的完整设置命令。该命令通过 `getpass` 隐藏密码输入，先验证账号，再把凭据写入操作系统标准的 Oh My Cassette 配置目录。
+Cassette 的密码由服务端生成并发送到你的邮箱。你不能自己设定密码，插件也绝不会替你编一个。
 
-如果从 git 检出目录运行，对应命令是：
+没有凭据也不会阻止 MCP 进程启动。把密码交给插件有两种方式。
+
+**在对话里。** 把邮件里的密码粘贴到对话中，让 Agent 帮你登录；它会调用 `cassette_login` 工具，先向 Cassette 验证账号，通过后才写入本地。除此之外什么都不需要——不用开终端，也不用开浏览器。代价必须说清楚：密码会留在 Agent 客户端本地的对话记录里，并且在这次对话的后续每一轮都会发给模型提供方。如果你不接受这一点，就走终端那条路。
+
+**在私人终端里。** 这条路完全不会让密码进入对话记录：命令通过 `getpass` 隐藏输入，先验证账号，再把凭据写入操作系统标准的 Oh My Cassette 配置目录。每个 `auth_required` 都会附带适配你安装方式的完整命令；如果从 git 检出目录运行，对应命令是：
 
 ```bash
 python3 scripts/setup_local_mcp.py --email you@example.com
 ```
 
-也可以通过进程环境变量提供凭据；环境变量优先于受保护的本地配置。导入现有 Hermes `.env` 必须显式执行，并非运行时依赖：
+也可以通过进程环境变量提供凭据；环境变量优先于受保护的本地配置，所以当环境变量已经设置时，`cassette_login` 会拒绝写入一个注定被覆盖的文件。导入现有 Hermes `.env` 必须显式执行，并非运行时依赖：
 
 ```bash
 python3 scripts/setup_local_mcp.py --import-hermes
 ```
 
-设置命令会以 `0700` 权限创建配置目录、以 `0600` 权限保存凭据文件，并拒绝符号链接或权限过宽的文件。访问令牌和刷新令牌只缓存在内存中，不会持久化。如果账号没有完整 API 权限，设置程序会提示可选的浏览器方案，而不是静默切换传输方式。
+两条路都会以 `0700` 权限创建配置目录、以 `0600` 权限保存凭据文件，并拒绝符号链接或权限过宽的文件。访问令牌和刷新令牌只缓存在内存中，不会持久化。
 
 ### 重置密码
 
-如果保存的密码失效，`auth_required` 与 `auth_failed` 都会附带重置命令：
+新密码同样由 Cassette 生成并发到账号邮箱，你无法指定。你可以直接让 Agent 申请新密码，它会带上 `request_new_password` 与 `confirm_replace` 调用 `cassette_login`；也可以在终端里执行：
 
 ```bash
 python3 scripts/setup_local_mcp.py --reset-password
 ```
 
-该命令会在所有设备上替换账号密码，并把新密码保存到 `credentials.json`：
+两条路都会先要你确认，因为这个操作不可撤销：**它会在所有设备上替换账号密码**，每小时只允许几次，而且服务端是先替换密码再发邮件——即使邮件发送失败，旧密码也已经作废。重试之前先去收件箱看一眼。
+
+重置只负责把新密码寄给你；还要把它粘回来（在对话里，或在终端提示处）才算完成这台机器的登录。验证过的密码保存在 `credentials.json`：
 
 - macOS：`~/Library/Application Support/Oh My Cassette/credentials.json`
 - Linux：`~/.config/oh-my-cassette/credentials.json`（设置了 `XDG_CONFIG_HOME` 时以该目录为准）
 - Windows：`%APPDATA%\Oh My Cassette\credentials.json`
+
+如果只想让这台机器忘掉已保存的密码，而不改动账号本身：
+
+```bash
+python3 scripts/setup_local_mcp.py --logout
+```
 
 ### 用法：让它找到你的素材
 
@@ -438,27 +449,21 @@ python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
 
 导出文件位于共享 Oh My Cassette 数据目录下的 `cassette/exports/<job_id>/`。插件只会返回对应任务专属目录中的文件。
 
-### API 与可选浏览器传输
+### 插件如何连接 Cassette
 
-默认使用 API 传输，直接连接独立的 Cassette 后端。遇到 `401` 时只重试一次身份验证，访问令牌只保存在内存中。API 任务会持久化续跑元数据，因此 Codex 或 Claude 重启后仍能继续暂停中的任务。
+只有一条路径：直接调用独立的 Cassette 后端。遇到 `401` 时只重试一次身份验证，访问令牌只保存在内存中；续跑元数据会持久化，因此 Codex 或 Claude 重启后仍能继续暂停中的任务。
 
-浏览器传输是为没有完整 API 权限的账号和传输一致性诊断准备的显式备选方案。只在需要时安装固定版本的 Playwright 与 Chromium：
-
-```bash
-python3 scripts/setup_local_mcp.py --with-browser
-```
-
-只要 MCP 进程仍然存活，浏览器任务就可以继续回答问题；客户端重启后会返回 `browser_session_lost`，因为活动浏览器对象无法持久化。
+不需要安装、驱动或维持任何浏览器。原先由 `CASSETTE_TRANSPORT=browser` 选择的 Playwright 传输已被移除；如果环境里还留着这个变量，运行时只会在 stderr 提示一次，然后照常走 API。
 
 ### MCP 工具
 
-本地 MCP 运行时与 Hermes 保持完全相同的 14 个工具名：
+本地 MCP 运行时与 Hermes 保持完全相同的 15 个工具名：
 
 | 工具 | 用途 |
 |---|---|
 | `cassette_ingest_media` | 把可信项目素材安全地导入隔离会话 |
 | `cassette_list_assets` | 读取会话素材清单 |
-| `cassette_make_prompt` | （旧版，仅浏览器传输）生成完整剪辑需求 |
+| `cassette_make_prompt` | （旧版）生成完整剪辑需求——已被逐字转达取代 |
 | `cassette_match_bgm` | 匹配 Free To Use 背景音乐 |
 | `cassette_match_exact_bgm` | 按明确的曲名和艺人匹配音乐 |
 | `jamendo_music_matcher` | 按结构化偏好匹配 Jamendo 音乐 |
@@ -470,6 +475,7 @@ python3 scripts/setup_local_mcp.py --with-browser
 | `cassette_timeline` | 读取实时项目时间线文本摘要（可选缩略图拼版） |
 | `cassette_edit` | 手动指令通道的精准无 LLM 剪辑/撤销（需 `CASSETTE_DIRECT_EDIT=1`） |
 | `cassette_config` | 查询/设置会话的模型与思考等级（静态产品列表，下一轮生效） |
+| `cassette_login` | 验证并私密保存本机凭据，或申请一封新密码邮件（仅 MCP 宿主可用） |
 
 每个工具都会返回结构化结果，其中包含 `ok`、带类型的 `data` 或 `error`、`session_id`、`job_id`、当前阶段，以及由运行时状态推导出的 `next_action`。
 
@@ -500,7 +506,7 @@ python3 scripts/setup_local_mcp.py --with-browser
 
 * 同一会话中的素材和视频状态会被保留。你可以继续发送消息，对剪辑结果做进一步修改。
 
-* 使用 `/new` 或 `/reset` 可以开始一个新的 Hermes 会话，并清空该会话中的 Cassette 浏览器状态和素材。
+* 使用 `/new` 或 `/reset` 可以开始一个新的 Hermes 会话，并清空该会话中的 Cassette 会话状态和素材。
 
 * 默认情况下，QQ 使用中文，Telegram 使用英文。你也可以通过 `/cassette language zh/en` 手动切换语言。
 
@@ -551,7 +557,7 @@ codex plugin add oh-my-cassette@cassette-editor
 curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/release/scripts/install_opencode.py | python3 -
 ```
 
-以上任一方式更新后，本地启动器都会在下次运行时自动更新由插件管理、依赖版本锁定的虚拟环境。浏览器组件仍只在明确要求时安装。
+以上任一方式更新后，本地启动器都会在下次运行时自动更新由插件管理、依赖版本锁定的虚拟环境。
 
 ### Hermes
 

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import json
 import threading
 from pathlib import Path
 from types import SimpleNamespace
 
-from cassette.core import browser, jobs, tools
+from cassette.core import api_transport, jobs, tools
 from cassette.core import gateway as gateway_mod
 
 
@@ -59,6 +58,31 @@ def _cassette_debug_events(asset_root: Path) -> list[dict]:
         if isinstance(payload, dict) and payload.get("event"):
             events.append(payload)
     return events
+
+
+def _stub_transport(monkeypatch, *, run_job=None, resume=None, export=None):
+    """Install a stub for the one transport, so tool behavior is tested without a network."""
+
+    class _Stub:
+        def run_job(self, job):
+            assert run_job is not None, "this test did not stub run_job"
+            return run_job(job)
+
+        def resume(self, job, response):
+            assert resume is not None, "this test did not stub resume"
+            return resume(job, response)
+
+        def export(self, job, decision=None):
+            assert export is not None, "this test did not stub export"
+            return export(job, decision)
+
+        def close_sessions(self, session_key=None):
+            return None
+
+        def check_available(self):
+            return True
+
+    monkeypatch.setattr(tools.transport, "get_transport", lambda: _Stub())
 
 
 def test_all_handlers_return_json_string(cassette_env):
@@ -185,7 +209,7 @@ def test_ingest_gateway_media_binds_followup_instruction_to_saved_assets(cassett
 def test_ingest_gateway_media_pings_cassette_before_prompt_choice(cassette_env, monkeypatch):
     monkeypatch.setenv("CASSETTE_PING_ON_GATEWAY_INSTRUCTION", "1")
     monkeypatch.setattr(
-        browser,
+        api_transport,
         "check_cassette_connectivity",
         lambda: {"ok": False, "code": "cassette_unreachable"},
     )
@@ -2616,10 +2640,10 @@ def test_jamendo_non_auth_api_error_does_not_disable_provider(cassette_env, monk
     assert tools._JAMENDO_DISABLED_CODE is None
 
 
-def test_run_job_wait_true_persists_running_before_browser_finishes(cassette_env, monkeypatch):
+def test_run_job_wait_true_persists_running_before_the_transport_finishes(cassette_env, monkeypatch):
     observed = {}
 
-    def fake_browser_run(job):
+    def fake_run(job):
         saved = jobs.load_job(job["job_id"])
         observed["status"] = saved["status"]
         observed["started_at"] = saved["started_at"]
@@ -2632,7 +2656,7 @@ def test_run_job_wait_true_persists_running_before_browser_finishes(cassette_env
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
 
     payload = json.loads(tools.cassette_run_job({"prompt": "Make a short edit", "session_id": "sync"}))
 
@@ -2644,7 +2668,7 @@ def test_run_job_wait_true_persists_running_before_browser_finishes(cassette_env
 def test_run_job_chat_message_only_uses_normal_job_path(cassette_env, monkeypatch):
     observed = {}
 
-    def fake_browser_run(job):
+    def fake_run(job):
         observed["prompt"] = job["prompt"]
         observed["chat_message"] = job["chat_message"]
         return {
@@ -2656,7 +2680,7 @@ def test_run_job_chat_message_only_uses_normal_job_path(cassette_env, monkeypatc
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     payload = json.loads(tools.cassette_run_job({"chat_message": "请剪成 10 秒", "session_id": "sync"}))
 
     assert payload["ok"] is True
@@ -2688,11 +2712,11 @@ def test_gateway_run_job_forces_inprocess_background_to_keep_cut_responsive(cass
         jobs.save_job(job)
         return job
 
-    def fail_sync_browser(job):
-        raise AssertionError("gateway jobs must not block in synchronous browser automation")
+    def fail_sync_run(job):
+        raise AssertionError("gateway jobs must not block on a synchronous transport call")
 
     monkeypatch.setattr(tools, "_start_inprocess_cassette_job", fake_start)
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fail_sync_browser)
+    _stub_transport(monkeypatch, run_job=fail_sync_run)
 
     payload = json.loads(
         tools.cassette_run_job(
@@ -2766,7 +2790,7 @@ def test_completion_review_context_injected_for_hermes_supervisor(cassette_env):
     assert 'decision="export"' in context
 
 
-def test_completion_review_export_uses_browser_session(cassette_env, monkeypatch):
+def test_completion_review_export_goes_through_the_transport(cassette_env, monkeypatch):
     job = jobs.create_job(
         session_hash="review-export",
         prompt="internal",
@@ -2791,7 +2815,7 @@ def test_completion_review_export_uses_browser_session(cassette_env, monkeypatch
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "export_reviewed_completion_job_threaded", fake_export)
+    _stub_transport(monkeypatch, export=fake_export)
     monkeypatch.setattr(tools.notifier, "notify_terminal_job", lambda job: {"status": "skipped"})
 
     payload = json.loads(
@@ -2899,43 +2923,15 @@ def test_answer_question_routes_completion_question_as_follow_up_turn(cassette_e
     assert stub.run_jobs[0]["cassette_session_id"] == "try-session-continue"
 
 
-def test_run_job_browser_automation_uses_dedicated_thread(cassette_env, monkeypatch):
+def test_run_job_runs_the_transport_on_the_calling_thread(cassette_env, monkeypatch):
+    # The retired Playwright path pinned every job to one worker thread, because a browser
+    # cannot be driven from several. HTTP has no such constraint, so the call now happens
+    # inline and hosts decide their own concurrency. Blocking an event loop is the caller's
+    # job to avoid: mcp_plugin.server wraps every tool in asyncio.to_thread.
+    caller = threading.get_ident()
     observed_thread_ids = []
 
-    def fake_browser_run(job):
-        observed_thread_ids.append(threading.get_ident())
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            observed_no_loop = True
-        else:
-            observed_no_loop = False
-        return {
-            "status": "succeeded",
-            "outputs": [],
-            "questions": [],
-            "errors": [],
-            "quality": {"observed_no_loop": observed_no_loop},
-            "final_screenshot": None,
-        }
-
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
-
-    async def run_inside_event_loop():
-        return json.loads(tools.cassette_run_job({"prompt": "internal", "session_id": "async-loop"}))
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        payload = executor.submit(lambda: asyncio.run(run_inside_event_loop())).result()
-
-    assert payload["ok"] is True
-    assert len(set(observed_thread_ids)) == 1
-    assert payload["data"]["job"]["quality"]["observed_no_loop"] is True
-
-
-def test_run_job_reuses_same_browser_worker_across_caller_threads(cassette_env, monkeypatch):
-    observed_thread_ids = []
-
-    def fake_browser_run(job):
+    def fake_run(job):
         observed_thread_ids.append(threading.get_ident())
         return {
             "status": "succeeded",
@@ -2946,7 +2942,32 @@ def test_run_job_reuses_same_browser_worker_across_caller_threads(cassette_env, 
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
+    payload = json.loads(tools.cassette_run_job({"prompt": "internal", "session_id": "inline"}))
+
+    assert payload["ok"] is True
+    assert observed_thread_ids == [caller]
+
+
+def test_concurrent_callers_are_not_serialized_through_one_worker(cassette_env, monkeypatch):
+    observed_thread_ids = []
+    barrier = threading.Barrier(2, timeout=10)
+
+    def fake_run(job):
+        observed_thread_ids.append(threading.get_ident())
+        # Deadlocks unless both jobs are genuinely in flight at once, which the single
+        # browser worker could never do.
+        barrier.wait()
+        return {
+            "status": "succeeded",
+            "outputs": [],
+            "questions": [],
+            "errors": [],
+            "quality": {},
+            "final_screenshot": None,
+        }
+
+    _stub_transport(monkeypatch, run_job=fake_run)
 
     def call_tool(index):
         return json.loads(
@@ -2957,8 +2978,7 @@ def test_run_job_reuses_same_browser_worker_across_caller_threads(cassette_env, 
         results = list(executor.map(call_tool, [1, 2]))
 
     assert all(result["ok"] for result in results)
-    assert len(observed_thread_ids) == 2
-    assert len(set(observed_thread_ids)) == 1
+    assert len(set(observed_thread_ids)) == 2
 
 
 def test_run_job_rejects_second_active_job_for_same_session(cassette_env):
@@ -2984,7 +3004,7 @@ def test_run_job_rejects_second_active_job_for_same_session(cassette_env):
 def test_run_job_defaults_to_thirty_minute_timeout(cassette_env, monkeypatch):
     observed = {}
 
-    def fake_browser_run(job):
+    def fake_run(job):
         observed["timeout_sec"] = job["timeout_sec"]
         return {
             "status": "succeeded",
@@ -2995,8 +3015,9 @@ def test_run_job_defaults_to_thirty_minute_timeout(cassette_env, monkeypatch):
             "final_screenshot": None,
         }
 
+    monkeypatch.delenv("CASSETTE_JOB_TIMEOUT_SEC", raising=False)
     monkeypatch.delenv("CASSETTE_BROWSER_TIMEOUT_SEC", raising=False)
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     payload = json.loads(tools.cassette_run_job({"prompt": "Make a short edit", "session_id": "default-timeout"}))
 
     assert payload["ok"] is True
@@ -3004,10 +3025,10 @@ def test_run_job_defaults_to_thirty_minute_timeout(cassette_env, monkeypatch):
 
 
 def test_run_job_clamps_short_timeout_to_runtime_minimum(cassette_env, monkeypatch):
-    monkeypatch.setenv("CASSETTE_MIN_BROWSER_TIMEOUT_SEC", "1200")
+    monkeypatch.setenv("CASSETTE_MIN_JOB_TIMEOUT_SEC", "1200")
     observed = {}
 
-    def fake_browser_run(job):
+    def fake_run(job):
         observed["timeout_sec"] = job["timeout_sec"]
         return {
             "status": "succeeded",
@@ -3018,7 +3039,7 @@ def test_run_job_clamps_short_timeout_to_runtime_minimum(cassette_env, monkeypat
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     payload = json.loads(
         tools.cassette_run_job({"prompt": "Make a short edit", "session_id": "sync", "timeout_sec": 600})
     )
@@ -3027,8 +3048,8 @@ def test_run_job_clamps_short_timeout_to_runtime_minimum(cassette_env, monkeypat
     assert observed["timeout_sec"] == 1200
 
 
-def test_run_job_preserves_browser_progress_events(cassette_env, monkeypatch):
-    def fake_browser_run(job):
+def test_run_job_preserves_transport_progress_events(cassette_env, monkeypatch):
+    def fake_run(job):
         jobs.update_job(
             job["job_id"],
             progress_events=[
@@ -3049,7 +3070,7 @@ def test_run_job_preserves_browser_progress_events(cassette_env, monkeypatch):
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     payload = json.loads(tools.cassette_run_job({"prompt": "Make a short edit", "session_id": "sync"}))
     job = jobs.load_job(payload["job_id"])
 
@@ -3059,7 +3080,7 @@ def test_run_job_preserves_browser_progress_events(cassette_env, monkeypatch):
 
 
 def test_job_status_includes_user_report(cassette_env, monkeypatch):
-    def fake_browser_run(job):
+    def fake_run(job):
         return {
             "status": "succeeded",
             "outputs": [],
@@ -3069,7 +3090,7 @@ def test_job_status_includes_user_report(cassette_env, monkeypatch):
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     payload = json.loads(
         tools.cassette_run_job({"prompt": "internal", "chat_message": "请剪成 10 秒", "session_id": "report"})
     )
@@ -3085,7 +3106,7 @@ def test_job_status_includes_user_report(cassette_env, monkeypatch):
 def test_run_job_does_not_hardcode_default_model(cassette_env, monkeypatch):
     observed = {}
 
-    def fake_browser_run(job):
+    def fake_run(job):
         observed["model_selection"] = job["model_selection"]
         return {
             "status": "succeeded",
@@ -3096,7 +3117,7 @@ def test_run_job_does_not_hardcode_default_model(cassette_env, monkeypatch):
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     payload = json.loads(
         tools.cassette_run_job({"prompt": "internal", "chat_message": "请剪成 10 秒", "session_id": "model-default"})
     )
@@ -3110,7 +3131,7 @@ def test_run_job_does_not_hardcode_default_model(cassette_env, monkeypatch):
 def test_run_job_accepts_user_specified_cassette_model(cassette_env, monkeypatch):
     observed = {}
 
-    def fake_browser_run(job):
+    def fake_run(job):
         observed["model_selection"] = job["model_selection"]
         return {
             "status": "succeeded",
@@ -3121,7 +3142,7 @@ def test_run_job_accepts_user_specified_cassette_model(cassette_env, monkeypatch
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     json.loads(
         tools.cassette_run_job(
             {
@@ -3140,7 +3161,7 @@ def test_run_job_accepts_user_specified_cassette_model(cassette_env, monkeypatch
 def test_run_job_does_not_treat_editing_words_as_thinking_level(cassette_env, monkeypatch):
     observed = {}
 
-    def fake_browser_run(job):
+    def fake_run(job):
         observed["model_selection"] = job["model_selection"]
         return {
             "status": "succeeded",
@@ -3151,7 +3172,7 @@ def test_run_job_does_not_treat_editing_words_as_thinking_level(cassette_env, mo
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     json.loads(
         tools.cassette_run_job(
             {
@@ -3181,7 +3202,7 @@ def test_gateway_run_job_uses_session_model_preference_over_prompt_text(cassette
     session_id = gateway_mod._gateway_session_id(SimpleNamespace(source=source), None)
     tools._save_cassette_model_preference(session_id, "Kimi K2.6", "Medium", source="test")
 
-    def fake_browser_run(job):
+    def fake_run(job):
         observed["model_selection"] = job["model_selection"]
         return {
             "status": "succeeded",
@@ -3193,7 +3214,7 @@ def test_gateway_run_job_uses_session_model_preference_over_prompt_text(cassette
         }
 
     monkeypatch.setenv("CASSETTE_GATEWAY_BACKGROUND_JOBS", "false")
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     json.loads(
         tools.cassette_run_job(
             {
@@ -3223,7 +3244,7 @@ def test_job_status_scrubs_raw_delivery_target(cassette_env, monkeypatch):
         }
     )
 
-    def fake_browser_run(job):
+    def fake_run(job):
         assert job["delivery"]["chat_id"] == "wxid_chat_raw"
         return {
             "status": "succeeded",
@@ -3234,7 +3255,7 @@ def test_job_status_scrubs_raw_delivery_target(cassette_env, monkeypatch):
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     payload = json.loads(
         tools.cassette_run_job({"prompt": "internal", "chat_message": "请剪成 10 秒", "session_id": "delivery"})
     )
@@ -3255,7 +3276,7 @@ def test_run_job_accepts_manifest_session_hash_from_list_assets(cassette_env, mo
     manifest_hash = listed["data"]["manifest"]["session_hash"]
     observed = {}
 
-    def fake_browser_run(job):
+    def fake_run(job):
         observed["asset_paths"] = job["asset_paths"]
         return {
             "status": "needs_user",
@@ -3266,7 +3287,7 @@ def test_run_job_accepts_manifest_session_hash_from_list_assets(cassette_env, mo
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     payload = json.loads(tools.cassette_run_job({"prompt": "internal", "session_id": manifest_hash}))
 
     assert payload["ok"] is True
@@ -3297,7 +3318,7 @@ def test_ingest_gateway_media_skips_unauthorized_video(cassette_env):
 def test_run_job_message_only_is_verbatim_and_sufficient(cassette_env, monkeypatch):
     observed = {}
 
-    def fake_browser_run(job):
+    def fake_run(job):
         observed["job"] = dict(job)
         return {
             "status": "succeeded",
@@ -3308,7 +3329,7 @@ def test_run_job_message_only_is_verbatim_and_sufficient(cassette_env, monkeypat
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     payload = json.loads(tools.cassette_run_job({"message": "把开头两秒剪掉", "session_id": "verbatim"}))
 
     assert payload["ok"] is True
@@ -3320,7 +3341,7 @@ def test_run_job_message_only_is_verbatim_and_sufficient(cassette_env, monkeypat
 def test_run_job_export_flag_sets_per_turn_export_intent(cassette_env, monkeypatch):
     observed = {}
 
-    def fake_browser_run(job):
+    def fake_run(job):
         observed["job"] = dict(job)
         return {
             "status": "succeeded",
@@ -3331,7 +3352,7 @@ def test_run_job_export_flag_sets_per_turn_export_intent(cassette_env, monkeypat
             "final_screenshot": None,
         }
 
-    monkeypatch.setattr(browser, "run_cassette_browser_job", fake_browser_run)
+    _stub_transport(monkeypatch, run_job=fake_run)
     assert json.loads(tools.cassette_run_job({"message": "导出", "export": True, "session_id": "exp1"}))["ok"]
     assert observed["job"]["export_on_complete"] == "true"
     assert json.loads(tools.cassette_run_job({"message": "继续", "export": False, "session_id": "exp2"}))["ok"]

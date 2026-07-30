@@ -36,8 +36,6 @@ jobs:
               - 'requirements-web.txt'
               - 'requirements-mcp.in'
               - 'requirements-mcp.lock'
-              - 'requirements-browser.in'
-              - 'requirements-browser.lock'
               - 'pytest.ini'
               - 'plugin.yaml'
               - 'after-install.md'
@@ -62,8 +60,6 @@ jobs:
               - 'version.txt'
               - 'requirements-mcp.in'
               - 'requirements-mcp.lock'
-              - 'requirements-browser.in'
-              - 'requirements-browser.lock'
               - 'scripts/run_local_mcp.py'
               - 'scripts/local_mcp_bootstrap.py'
               - 'scripts/setup_local_mcp.py'
@@ -135,29 +131,13 @@ jobs:
           cache: pip
           cache-dependency-path: |
             requirements-web.txt
-            requirements-browser.lock
+            requirements-mcp.lock
       - name: Install dependencies
-        run: python -m pip install -r requirements-web.txt -r requirements-browser.lock pytest pytest-xdist
-      - name: Resolve Playwright version
-        id: playwright
-        run: echo "version=$(python -c 'from importlib.metadata import version; print(version("playwright"))')" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      - name: Install Chromium
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: python -m playwright install --with-deps chromium
-      - name: Install Chromium system deps (cached browser)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: python -m playwright install-deps chromium
+        run: python -m pip install -r requirements-web.txt -r requirements-mcp.lock pytest pytest-xdist
       - name: Compile check
         run: python -m compileall -q .
       - name: Run tests
-        # The suite is mostly waiting (browser timeouts, sleeps); xdist cuts
-        # wall time several-fold. loadfile keeps same-file tests together.
+        # xdist cuts wall time several-fold; loadfile keeps same-file tests together.
         run: python -m pytest -q -rs -n 4 --dist loadfile
 
   mcp-macos-smoke:
@@ -328,7 +308,7 @@ jobs:
       - name: setup-only finisher and diagnose against the CLI clone
         run: |
           python3 "$HERMES_HOME/plugins/cassette/scripts/install_plugin.py" --setup-only \
-            --skip-playwright-install --skip-gateway-restart
+            --skip-gateway-restart
           # diagnose exits 1 because gateway/login checks legitimately fail in
           # CI; we assert on the JSON contents of the plugin check instead.
           python3 "$HERMES_HOME/plugins/cassette/scripts/diagnose_install.py" --json > /tmp/diagnose.json || true

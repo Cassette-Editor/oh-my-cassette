@@ -20,21 +20,23 @@ Branch from `main` and target `main`. The `release` branch is machine-owned — 
 ```bash
 uv venv --python 3.13 .venv
 uv pip install --python .venv/bin/python \
-  -r requirements-web.txt -r requirements-browser.lock pytest pytest-xdist
-.venv/bin/python -m playwright install chromium
+  -r requirements-web.txt pytest pytest-xdist
 ```
 
 Run the CI-equivalent checks:
 
 ```bash
-uvx ruff check .
-uvx ruff format --check .
+uvx ruff@0.15.22 check .
+uvx ruff@0.15.22 format --check .
 .venv/bin/python -m compileall -q .
 .venv/bin/python -m pytest -q -rs -n 4 --dist loadfile
 ./web_demo/build_frontend.sh
 ```
 
-`ruff format .` fixes formatting in place; configuration lives in `pyproject.toml`.
+`ruff format .` fixes formatting in place; configuration lives in `pyproject.toml`. The
+version is pinned because ruff's default rule set changes between minor releases — an
+unpinned `uvx ruff` reports hundreds of findings CI does not. `pyproject.toml` sets
+`required-version`, so a mismatched ruff refuses to run instead of inventing errors.
 
 Validate native packaging with supported host CLIs:
 
@@ -89,11 +91,9 @@ For the Codex side, follow the `Smoke-install with Codex CLI` step in `.github/w
 ```bash
 uv pip compile --python-version 3.11 --universal --no-emit-index-url \
   requirements-mcp.in -o requirements-mcp.lock
-uv pip compile --python-version 3.11 --universal --no-emit-index-url \
-  requirements-browser.in -o requirements-browser.lock
 ```
 
-The launcher hashes the lock and reconciles its plugin-managed environment on first start or upgrade. Browser dependencies and Chromium remain optional.
+The launcher hashes the lock and reconciles its plugin-managed environment on first start or upgrade.
 
 ## Tests and live acceptance
 
@@ -118,6 +118,6 @@ Use a realistic non-sensitive clip and ephemeral environment variables. Never pa
 - Update `plugin.yaml` when Hermes tool/hook registration changes.
 - Adapt `.env.example`, security, release, CI, and troubleshooting docs when configuration changes.
 - Preserve unrelated working-tree changes and never commit runtime state.
-- Include verification evidence, the tested Codex/Claude CLI versions, and the intentional browser-restart limitation in the PR body.
+- Include verification evidence and the tested Codex/Claude CLI versions in the PR body.
 
 See [SECURITY.md](./SECURITY.md) before handling credentials or media.

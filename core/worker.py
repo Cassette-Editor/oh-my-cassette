@@ -7,7 +7,7 @@ import traceback
 from pathlib import Path
 
 if __package__:
-    from . import browser, jobs, notifier, transport
+    from . import jobs, notifier, transport
 else:
     # Detached subprocess: load the plugin root under the same `cassette` name the
     # parent process used, so this worker sees one module identity, not a second.
@@ -28,7 +28,7 @@ else:
     sys.modules["cassette"] = module
     assert spec.loader is not None
     spec.loader.exec_module(module)
-    from cassette.core import browser, jobs, notifier, transport
+    from cassette.core import jobs, notifier, transport
 
 
 def run(job_id: str, action: str = "run") -> dict:
@@ -39,16 +39,12 @@ def run(job_id: str, action: str = "run") -> dict:
             job["notification"] = notifier.notify_terminal_job(job)
             jobs.save_job(job)
             return job
-        # Detached subprocess: keep the browser path on the original non-threaded entrypoint
-        # (byte-identical); route only the API transport through the seam.
         if action == "resume":
             request = job.get("resume_request") if isinstance(job.get("resume_request"), dict) else {}
             response = str(request.get("response") or "")
             result = transport.get_transport().resume(job, response)
-        elif transport.selected_transport() == transport.TRANSPORT_API:
-            result = transport.get_transport().run_job(job)
         else:
-            result = browser.run_cassette_browser_job(job)
+            result = transport.get_transport().run_job(job)
         job = jobs.merge_persisted_runtime_fields(job)
         job.update(result)
         job["status"] = result.get("status", "failed")

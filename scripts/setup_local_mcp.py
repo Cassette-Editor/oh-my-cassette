@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private first-run authentication and optional browser setup."""
+"""Private first-run authentication and media-root setup."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ if str(PLUGIN_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
 
 import runtime_config  # noqa: E402
-from local_mcp_bootstrap import BootstrapError, bootstrap_runtime  # noqa: E402
 
 
 DEFAULT_API_URL = "https://remotion-canvas-server-5tdb2hkb4q-as.a.run.app"
@@ -32,11 +31,11 @@ class SetupError(RuntimeError):
 
 
 class CredentialsRejected(SetupError):
-    """The API answered, and the password was wrong.
+    """The API answered, and the password was rejected.
 
-    Distinct from a transport failure so the reset flow only falls back to the destructive
-    email path when the password is genuinely dead — a network blip must not replace a
-    working account password.
+    Kept distinct from a transport failure so the two produce different advice: a rejected
+    password needs replacing, an unreachable API needs retrying. Cassette passwords are
+    generated and mailed, never chosen, so "rejected" means stale rather than mistyped.
     """
 
 
@@ -55,18 +54,16 @@ def _post_json(
     path: str,
     payload: dict,
     *,
-    token: str | None = None,
     timeout: float = 60.0,
 ) -> tuple[int, dict, str | None]:
     """POST JSON and return (status, body, retry-after).
 
     HTTP error statuses come back as values rather than exceptions so callers can tell 401
-    from 429 from 500; only transport and decode failures raise.
+    from 429 from 500; only transport and decode failures raise. Unauthenticated by design:
+    every call this script makes is a pre-sign-in one.
     """
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
     request = Request(api_url.rstrip("/") + path, data=body, method="POST", headers=headers)
     try:
         with urlopen(request, timeout=timeout) as response:
@@ -123,7 +120,7 @@ def _read_hermes_env(path: Path) -> dict[str, str]:
     return values
 
 
-def verify_credentials(api_url: str, email: str, password: str, *, timeout: float = 60.0) -> dict:
+def verify_credentials(api_url: str, email: str, password: str, *, timeout: float = 60.0) -> None:
     body = json.dumps({"email": email, "password": password}).encode("utf-8")
     request = Request(
         api_url.rstrip("/") + "/api/agent-auth/verify",
@@ -154,12 +151,9 @@ def verify_credentials(api_url: str, email: str, password: str, *, timeout: floa
     session = payload.get("session") if isinstance(payload, dict) else {}
     if status != 200 or not isinstance(session, dict) or not session.get("access_token"):
         raise CredentialsRejected("Cassette rejected the credentials; no credentials were written.")
-    # access_token is returned for the caller's immediate use only. It must never reach
-    # _write_credentials, which is why that helper takes named fields instead of a dict.
-    return {
-        "full_api_access": bool(payload.get("isFullUser")),
-        "access_token": str(session["access_token"]),
-    }
+    # The reply carries access and refresh tokens and an access level. None are returned: this
+    # function answers "does this password work", and handing a token back to a caller in a
+    # module that writes credential files is how one ends up persisted by accident.
 
 
 def _canonical_media_roots(values: list[str]) -> list[str]:
@@ -174,20 +168,21 @@ def _canonical_media_roots(values: list[str]) -> list[str]:
     return roots
 
 
-def _write_credentials(*, email: str, password: str, full_api_access: bool, api_url: str) -> None:
+def _write_credentials(*, email: str, password: str) -> None:
     """Commit credentials, building the payload from named fields only.
 
     Not a dict splat on purpose: session tokens flow through this module, and a `{**result}`
     anywhere upstream would silently persist one. With explicit fields it cannot happen.
+
+    No api_url: nothing ever read the copy stored here, and it could silently disagree with
+    the authoritative value in settings.json. The origin belongs in one place.
     """
     runtime_config.write_protected_json(
         runtime_config.credentials_path(),
         {
             "email": email,
             "password": password,
-            "full_api_access": full_api_access,
             "verified_at": _now_iso(),
-            "api_url": api_url,
         },
     )
 
@@ -228,13 +223,50 @@ def _request_new_password(api_url: str, email: str) -> None:
         )
 
 
-def reset_password(args: argparse.Namespace) -> str:
-    """Replace the account password and store the new one privately.
+def _confirm_password_replacement(email: str, *, assume_yes: bool) -> None:
+    """Refuse to replace an account password without an explicit yes.
 
-    Two routes. If the stored password still works, the account is rotated through an
-    authenticated call that returns the replacement inline, so nothing is typed and a running
-    MCP host picks it up on its next call. If the stored password is already dead — the usual
-    reason for running this — that route is unreachable, so fall back to email delivery.
+    The action is irreversible, applies to every machine the account is set up on, and spends
+    one of three hourly attempts. The server also replaces the password *before* it attempts
+    delivery, so even a failed send leaves the old one dead. This used to print the warning and
+    fire immediately, which gave the user nothing to stop.
+    """
+    print(
+        f"This requests a new generated password for {email} and emails it to you.\n"
+        "The current password stops working everywhere, including on your other machines.",
+        file=sys.stderr,
+    )
+    if assume_yes:
+        return
+    if not sys.stdin.isatty():
+        raise SetupError(
+            "Refusing to replace the account password without confirmation. Re-run with --yes "
+            "if there is no terminal to prompt on."
+        )
+    if input("Continue? [y/N] ").strip().lower() not in {"y", "yes"}:
+        raise SetupError("Cancelled. The account password is unchanged.")
+
+
+def logout() -> str:
+    """Forget the stored credentials on this machine, leaving the account untouched."""
+    path = runtime_config.credentials_path()
+    if not path.exists() and not path.is_symlink():
+        return f"No stored Cassette credentials at {path}."
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise SetupError(f"Could not remove {path} ({type(exc).__name__}).") from exc
+    return f"Removed {path}.\nThe account password is unchanged — this machine simply no longer holds it."
+
+
+def reset_password(args: argparse.Namespace) -> str:
+    """Replace the account password by email and store the new one privately.
+
+    Email delivery is the only route. An earlier version first tried to rotate a still-working
+    password inline, which changed it with no email, returned a value the user never saw, and
+    silently broke every other machine they had set up — the opposite of what someone typing
+    "reset my password" while troubleshooting wants. Rotation is fine where it is invisible and
+    beneficial; it is not the answer to this command.
     """
     api_url = _reset_api_url()
     credentials = runtime_config.load_credentials()
@@ -255,32 +287,7 @@ def reset_password(args: argparse.Namespace) -> str:
     if not email:
         raise SetupError("An account email is required to reset the password.")
 
-    stored_password = str(credentials.get("password") or "")
-    if stored_password:
-        try:
-            verification = verify_credentials(api_url, email, stored_password)
-        except CredentialsRejected:
-            verification = None  # already stale; only email delivery can recover it
-        if verification is not None:
-            print("Rotating the account password. This replaces it everywhere, including other machines.")
-            status, body, _ = _post_json(
-                api_url,
-                "/api/agent-auth/rotate-password",
-                {},
-                token=verification["access_token"],
-            )
-            new_password = str(body.get("password") or "").strip() if status == 200 else ""
-            if new_password:
-                _write_credentials(
-                    email=email,
-                    password=new_password,
-                    full_api_access=bool(verification["full_api_access"]),
-                    api_url=api_url,
-                )
-                return "rotated"
-            # A deployment without the rotate route (or one that refused) still resets by email.
-
-    print(f"Sending a new password to {email}. This replaces it everywhere, including other machines.")
+    _confirm_password_replacement(email, assume_yes=args.yes)
     _request_new_password(api_url, email)
     password = getpass.getpass("Paste the new password from your email: ").strip()
     if not password:
@@ -288,13 +295,8 @@ def reset_password(args: argparse.Namespace) -> str:
             "No password was entered. The account password has already been replaced, so re-run "
             "this command with the password from your email."
         )
-    verification = verify_credentials(api_url, email, password)
-    _write_credentials(
-        email=email,
-        password=password,
-        full_api_access=bool(verification["full_api_access"]),
-        api_url=api_url,
-    )
+    verify_credentials(api_url, email, password)
+    _write_credentials(email=email, password=password)
     return "emailed"
 
 
@@ -353,7 +355,7 @@ def enable_claude_auto_update(*, skip: bool, assume_yes: bool = False) -> str:
     return f"Claude Code will now auto-update {CLAUDE_MARKETPLACE} plugins. Change it in {path}."
 
 
-def configure(args: argparse.Namespace) -> dict:
+def configure(args: argparse.Namespace) -> None:
     imported: dict[str, str] = {}
     if args.import_hermes is not None:
         imported = _read_hermes_env(args.import_hermes)
@@ -390,36 +392,19 @@ def configure(args: argparse.Namespace) -> dict:
         or imported.get("CASSETTE_API_URL")
         or DEFAULT_API_URL
     ).rstrip("/")
-    verification = verify_credentials(api_url, email, password)
+    verify_credentials(api_url, email, password)
 
     existing_settings = runtime_config.read_protected_json(runtime_config.settings_path())
     roots = _canonical_media_roots(args.allowed_root)
     settings = {
         **existing_settings,
-        "transport": "browser" if args.with_browser else args.transport,
         "media_roots": roots if args.allowed_root else existing_settings.get("media_roots", []),
         "api_url": api_url,
     }
 
     # Verification is complete; only now are credentials committed atomically.
-    _write_credentials(
-        email=email,
-        password=password,
-        full_api_access=bool(verification["full_api_access"]),
-        api_url=api_url,
-    )
+    _write_credentials(email=email, password=password)
     runtime_config.write_protected_json(runtime_config.settings_path(), settings)
-
-    if args.with_browser:
-        try:
-            bootstrap_runtime(with_browser=True, output=sys.stderr)
-        except BootstrapError as exc:
-            raise SetupError(f"Credentials were saved, but optional browser setup failed: {exc}") from exc
-
-    return {
-        "transport": settings["transport"],
-        "full_api_access": verification["full_api_access"],
-    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -428,7 +413,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--email", help="Cassette account email; password is never accepted as a command-line argument")
     parser.add_argument("--api-url", help="Cassette API origin")
-    parser.add_argument("--transport", choices=("api", "browser"), default="api")
     parser.add_argument("--allowed-root", action="append", default=[], help="Additional trusted media directory")
     parser.add_argument(
         "--import-hermes",
@@ -438,11 +422,6 @@ def parse_args() -> argparse.Namespace:
         help="Explicitly import Cassette credentials from a Hermes .env file",
     )
     parser.add_argument(
-        "--with-browser",
-        action="store_true",
-        help="Install pinned Playwright and Chromium, then select browser transport",
-    )
-    parser.add_argument(
         "--use-environment",
         action="store_true",
         help="Read credentials from ephemeral environment variables (intended for maintainer acceptance only)",
@@ -450,7 +429,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reset-password",
         action="store_true",
-        help="Replace the account password and store the new one privately",
+        help="Have Cassette email a new generated password and store it privately",
+    )
+    parser.add_argument(
+        "--logout",
+        action="store_true",
+        help="Forget the stored credentials on this machine; the account password is unchanged",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt when replacing the account password",
     )
     parser.add_argument(
         "--no-auto-update",
@@ -460,25 +449,25 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _reject_reset_password_conflicts(args: argparse.Namespace) -> None:
-    """A reset only replaces the stored password; silently ignoring setup flags is worse."""
+def _reject_mode_conflicts(args: argparse.Namespace, mode: str) -> None:
+    """A reset or logout touches only the stored password; silently ignoring setup flags is worse."""
     conflicts = [
         name
         for name, used in (
             ("--api-url", bool(args.api_url)),
-            ("--transport", args.transport != "api"),
             ("--allowed-root", bool(args.allowed_root)),
             ("--import-hermes", args.import_hermes is not None),
-            ("--with-browser", args.with_browser),
             ("--use-environment", args.use_environment),
             ("--no-auto-update", args.no_auto_update),
+            ("--email", bool(args.email) and mode == "--logout"),
+            ("--yes", args.yes and mode == "--logout"),
         )
         if used
     ]
     if conflicts:
         raise SetupError(
-            f"--reset-password does not accept {', '.join(conflicts)}; it only replaces the "
-            "stored password. Run those separately."
+            f"{mode} does not accept {', '.join(conflicts)}; it only touches the stored "
+            "credentials on this machine. Run those separately."
         )
 
 
@@ -488,25 +477,28 @@ def main() -> None:
     # of a value that had passed through the password flow, which is both harder to follow
     # and what CodeQL's clear-text-logging rule objected to.
     try:
+        if args.reset_password and args.logout:
+            raise SetupError("--reset-password and --logout do opposite things; pick one.")
+        if args.logout:
+            _reject_mode_conflicts(args, "--logout")
+            print(logout())
+            return
         if args.reset_password:
-            _reject_reset_password_conflicts(args)
-            delivery = reset_password(args)
-            print("Password rotated." if delivery == "rotated" else "New password stored.")
+            _reject_mode_conflicts(args, "--reset-password")
+            reset_password(args)
+            print("New password stored.")
             print(f"Saved at {runtime_config.credentials_path()}.")
             return
-        setup = configure(args)
+        configure(args)
     except (SetupError, runtime_config.RuntimeConfigError) as exc:
         path = getattr(exc, "path", None)
         location = f" ({path})" if path else ""
         print(f"oh-my-cassette setup: {exc}{location}", file=sys.stderr)
         raise SystemExit(1) from exc
     print(f"Verified credentials saved privately at {runtime_config.credentials_path()}.")
-    print(f"Selected transport: {setup['transport']}.")
     auto_update = enable_claude_auto_update(skip=args.no_auto_update)
     if auto_update:
         print(auto_update)
-    if not setup["full_api_access"] and setup["transport"] == "api":
-        print("This account lacks full API access. Run this command again with --with-browser.")
 
 
 if __name__ == "__main__":

@@ -4,12 +4,11 @@ import json
 
 import runtime_config
 from cassette.core import jobs, tools
-from cassette.core.transport import BrowserTransport
 from mcp_plugin.models import SessionPhase
 from mcp_plugin.runtime import LocalMcpRuntime
 
 
-def _runtime(tmp_path, monkeypatch, *, full_api_access=True):
+def _runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("CASSETTE_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("CASSETTE_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("CASSETTE_ASSET_ROOT", str(tmp_path / "data" / "cassette"))
@@ -28,7 +27,6 @@ def _runtime(tmp_path, monkeypatch, *, full_api_access=True):
         {
             "email": "private@example.test",
             "password": "private-password",
-            "full_api_access": full_api_access,
         },
     )
     return LocalMcpRuntime(runtime_config.configure_mcp_process_environment())
@@ -149,12 +147,20 @@ def test_completion_review_requires_review_phase_before_auth(tmp_path, monkeypat
     assert result.phase == SessionPhase.RUNNING
 
 
-def test_free_api_account_returns_explicit_browser_setup_path(tmp_path, monkeypatch):
-    runtime = _runtime(tmp_path, monkeypatch, full_api_access=False)
+def test_the_auth_gate_checks_only_that_credentials_exist(tmp_path, monkeypatch):
+    # The plugin serves agent accounts, and every tool it exposes — export included — is an
+    # operation they are entitled to. This seeds the access-level field an older setup wrote,
+    # at its most restrictive, to pin that no gate reads it back: an account that is configured
+    # is never turned away here.
+    runtime = _runtime(tmp_path, monkeypatch)
+    runtime_config.write_protected_json(
+        runtime_config.credentials_path(),
+        {"email": "private@example.test", "password": "private-password", "full_api_access": False},
+    )
     result = runtime.run_job({"prompt": "edit", "session_id": "session", "wait": False})
     assert result.ok is False
-    assert result.error.code == "api_access_unavailable"
-    assert result.error.details["browser_setup_command"].endswith("setup_local_mcp.py --with-browser")
+    # It fails for the ordinary reason instead: no session has been opened yet.
+    assert result.error.code == "invalid_transition"
 
 
 def test_run_job_requires_session_and_typed_ready_phase(tmp_path, monkeypatch):
@@ -169,47 +175,6 @@ def test_run_job_requires_session_and_typed_ready_phase(tmp_path, monkeypatch):
     assert not_ready.ok is False
     assert not_ready.error.code == "invalid_transition"
     assert not_ready.phase == SessionPhase.NEW
-
-
-def test_browser_resume_after_process_restart_has_typed_error():
-    result = BrowserTransport().resume(
-        {
-            "job_id": "missing-browser-session",
-            "cassette_session_id": "session",
-            "status": "needs_user",
-            "questions": [],
-            "errors": [],
-            "quality": {},
-        },
-        "continue",
-    )
-    assert result["status"] == "failed"
-    assert result["errors"][0]["code"] == "browser_session_lost"
-
-
-def test_mcp_browser_resume_after_restart_returns_typed_envelope(tmp_path, monkeypatch):
-    runtime = _runtime(tmp_path, monkeypatch)
-    monkeypatch.setenv("CASSETTE_TRANSPORT", "browser")
-    job = jobs.create_job(
-        session_hash="hash",
-        prompt="edit",
-        instruction=None,
-        asset_paths=[],
-        options={"cassette_session_id": "browser-session"},
-    )
-    job.update(
-        {
-            "status": "needs_user",
-            "questions": [{"question": "Choose a title", "requires_user": True}],
-            "quality": {},
-        }
-    )
-    jobs.save_job(job)
-
-    result = runtime.answer_question({"job_id": job["job_id"], "response": "Blue"})
-    assert result.ok is False
-    assert result.error.code == "browser_session_lost"
-    assert result.phase == SessionPhase.FAILED
 
 
 def test_direct_core_and_mcp_adapter_preserve_ingest_success_contract(tmp_path, monkeypatch):
@@ -410,7 +375,7 @@ def test_stale_password_failure_carries_the_reset_password_command(tmp_path, mon
     assert result.error.details["credential_source"] == "local_config"
 
 
-def test_browser_auth_failure_also_carries_the_reset_password_command(tmp_path, monkeypatch):
+def test_core_auth_failure_also_carries_the_reset_password_command(tmp_path, monkeypatch):
     runtime = _runtime(tmp_path, monkeypatch)
     result = runtime._envelope_from_core(
         {"ok": False, "error": {"code": "cassette_auth_failed", "message": "login timed out"}},

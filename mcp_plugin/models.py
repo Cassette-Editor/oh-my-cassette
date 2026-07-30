@@ -184,7 +184,8 @@ class JamendoMatcherInput(StrictModel):
 
 class RunJobInput(StrictModel):
     message: str | None = None
-    # None = not provided: the transport keeps its own default (API: no render; browser: render).
+    # None = not provided: the transport keeps its default, which is to commit the edit and
+    # render nothing. Only an explicit True asks for a render.
     export: bool | None = None
     prompt: str | None = None
     chat_message: str | None = None
@@ -213,6 +214,27 @@ class ConfigInput(StrictModel):
     session_id: str
     model: str | None = None
     thinking_level: Literal["off", "minimal", "low", "medium", "high", "xhigh"] | None = None
+
+
+class LoginInput(StrictModel):
+    email: str
+    password: str | None = None
+    request_new_password: bool = False
+    # A bound argument rather than wording in the tool description, because requesting a new
+    # password replaces the account password on every machine and spends one of three hourly
+    # attempts. Gate decisions have to be mechanical here, never prompt-enforced.
+    confirm_replace: bool = False
+
+    @model_validator(mode="after")
+    def _require_one_mode(self) -> LoginInput:
+        if not (self.email or "").strip():
+            raise ValueError("cassette_login requires email")
+        has_password = bool((self.password or "").strip())
+        if self.request_new_password and has_password:
+            raise ValueError("cassette_login takes either password or request_new_password, not both")
+        if not self.request_new_password and not has_password:
+            raise ValueError("cassette_login requires password, or request_new_password=true to have one emailed")
+        return self
 
 
 class JobStatusInput(StrictModel):
