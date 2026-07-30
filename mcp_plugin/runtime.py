@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import mimetypes
 import os
 import secrets
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import runtime_config
 
@@ -31,9 +33,29 @@ UNSETTLED_JOB_DROP_KEYS = frozenset(
 UNSETTLED_QUALITY_KEEP_KEYS = frozenset({"current_stage", "progress_summary"})
 
 # A stored password that no longer works. The API transport raises auth_failed off
-# /api/agent-auth/verify; the browser transport raises cassette_auth_failed off its login
-# timeout. Both mean the same thing to the user, and neither is fixed by re-running setup.
+# /api/agent-auth/verify. cassette_auth_failed is retained only because jobs persisted by
+# versions that still had the browser transport carry it; both mean the same thing to the user,
+# and neither is fixed by re-running setup — the password itself has to be replaced.
 STALE_AUTH_CODES = frozenset({"auth_failed", "cassette_auth_failed"})
+
+# Secrets that exist for the duration of one call only. _redaction_secrets() reads *stored*
+# credentials, so a password that fails verification is in no file and would otherwise be free
+# to echo back inside an error envelope. A ContextVar rather than an attribute because tool
+# calls run concurrently on a thread pool, each with its own copied context.
+_CALL_SECRETS: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar("cassette_call_secrets", default=())
+
+
+@contextlib.contextmanager
+def _call_secrets(*values: str) -> Iterator[None]:
+    present = tuple(value for value in values if value)
+    if not present:
+        yield
+        return
+    token = _CALL_SECRETS.set(present)
+    try:
+        yield
+    finally:
+        _CALL_SECRETS.reset(token)
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -89,12 +111,33 @@ class LocalMcpRuntime:
                 session_id=session_id,
             )
         if not credentials.get("email") or not credentials.get("password"):
-            # Two ways out, and the user knows which applies: run setup if they still have
-            # their password, reset if they do not. Offering only setup strands the second.
+            # Labelled by the condition each option answers, so the agent relays a decision
+            # rather than a menu of commands. cassette_login comes first because it needs no
+            # terminal; the reset option has to stay reachable from here too, because someone
+            # granted access weeks ago may have lost the welcome email and never signed in at
+            # all. The terminal command stays as the option that puts nothing in the transcript,
+            # for users who would rather not paste a password into a conversation.
             return self._failure(
                 "auth_required",
-                "Cassette authentication is required for this operation.",
+                "Cassette is not signed in on this machine.",
                 details={
+                    "recovery": [
+                        {
+                            "when": "the user has the generated password from their Cassette email",
+                            "action": "call cassette_login with email and password",
+                        },
+                        {
+                            "when": "the user no longer has that password",
+                            "action": "confirm with the user, then call cassette_login with "
+                            "request_new_password=true and confirm_replace=true",
+                            "consequence": "replaces the account password on every machine and emails a new one",
+                        },
+                        {
+                            "when": "the user would rather not paste a password into this conversation",
+                            "action": runtime_config.setup_command(PLUGIN_ROOT),
+                            "consequence": "private terminal prompt; the password never enters the transcript",
+                        },
+                    ],
                     "setup_command": runtime_config.setup_command(PLUGIN_ROOT),
                     "reset_password_command": runtime_config.reset_password_command(PLUGIN_ROOT),
                 },
@@ -106,7 +149,7 @@ class LocalMcpRuntime:
         return None
 
     def _redaction_secrets(self) -> list[str]:
-        values: list[str] = []
+        values: list[str] = list(_CALL_SECRETS.get())
         token = str(os.getenv("CASSETTE_AUTH_TOKEN", "") or "")
         if token:
             values.append(token)
@@ -168,7 +211,16 @@ class LocalMcpRuntime:
         credentials from env vars, rewriting the private config would leave those env vars
         shadowing the new password, so only this side can tell the user which one to fix.
         """
-        hint = {"reset_password_command": runtime_config.reset_password_command(PLUGIN_ROOT)}
+        hint = {
+            "reset_password_command": runtime_config.reset_password_command(PLUGIN_ROOT),
+            # The password is generated and mailed, never chosen, so "stale" is the accurate
+            # diagnosis and replacing it is the only fix. cassette_login does it without a
+            # terminal; the command above is for users who prefer to keep it out of the chat.
+            "recovery": (
+                "confirm with the user, then call cassette_login with request_new_password=true "
+                "and confirm_replace=true to have a replacement emailed"
+            ),
+        }
         try:
             hint["credential_source"] = str(runtime_config.load_credentials().get("source") or "")
         except runtime_config.RuntimeConfigError:
@@ -502,6 +554,22 @@ class LocalMcpRuntime:
         if artifact_error:
             return artifact_error
         return self._envelope_from_core(payload, session_id=session_id, job_id=job_id, phase=phase, artifacts=artifacts)
+
+    def login(self, args: dict[str, Any]) -> ToolEnvelope:
+        """Store verified credentials for this machine.
+
+        Deliberately session-less: this is machine-level setup, not work on an edit, so it must
+        stay callable before any session exists. It is also the one tool that must not go
+        through _auth_error — it is how a machine stops being unauthenticated.
+        """
+        config_error = self._config_error()
+        if config_error:
+            return config_error
+        # Hold the pasted password in the redaction set for this call only. Nothing has stored
+        # it yet, so without this an error envelope could echo it straight back to the host.
+        with _call_secrets(str(args.get("password") or "").strip()):
+            payload = self._invoke_core("cassette_login", args, session_id=None)
+            return self._envelope_from_core(payload, session_id=None)
 
     def simple_session_tool(self, name: str, args: dict[str, Any]) -> ToolEnvelope:
         session_id = str(args.get("session_id") or "").strip() or None

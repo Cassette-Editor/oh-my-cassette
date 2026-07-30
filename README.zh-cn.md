@@ -365,35 +365,47 @@ Codex 与 Claude 使用同一套自包含运行时。本文所说的 **MCP serve
 
 ### 首次身份验证
 
-没有凭据也不会阻止 MCP 进程启动。第一个需要连接 Cassette 的工具会返回 `auth_required`，其中包含一条应在私人终端中运行的完整设置命令。该命令通过 `getpass` 隐藏密码输入，先验证账号，再把凭据写入操作系统标准的 Oh My Cassette 配置目录。
+Cassette 的密码由服务端生成并发送到你的邮箱。你不能自己设定密码，插件也绝不会替你编一个。
 
-如果从 git 检出目录运行，对应命令是：
+没有凭据也不会阻止 MCP 进程启动。把密码交给插件有两种方式。
+
+**在对话里。** 把邮件里的密码粘贴到对话中，让 Agent 帮你登录；它会调用 `cassette_login` 工具，先向 Cassette 验证账号，通过后才写入本地。除此之外什么都不需要——不用开终端，也不用开浏览器。代价必须说清楚：密码会留在 Agent 客户端本地的对话记录里，并且在这次对话的后续每一轮都会发给模型提供方。如果你不接受这一点，就走终端那条路。
+
+**在私人终端里。** 这条路完全不会让密码进入对话记录：命令通过 `getpass` 隐藏输入，先验证账号，再把凭据写入操作系统标准的 Oh My Cassette 配置目录。每个 `auth_required` 都会附带适配你安装方式的完整命令；如果从 git 检出目录运行，对应命令是：
 
 ```bash
 python3 scripts/setup_local_mcp.py --email you@example.com
 ```
 
-也可以通过进程环境变量提供凭据；环境变量优先于受保护的本地配置。导入现有 Hermes `.env` 必须显式执行，并非运行时依赖：
+也可以通过进程环境变量提供凭据；环境变量优先于受保护的本地配置，所以当环境变量已经设置时，`cassette_login` 会拒绝写入一个注定被覆盖的文件。导入现有 Hermes `.env` 必须显式执行，并非运行时依赖：
 
 ```bash
 python3 scripts/setup_local_mcp.py --import-hermes
 ```
 
-设置命令会以 `0700` 权限创建配置目录、以 `0600` 权限保存凭据文件，并拒绝符号链接或权限过宽的文件。访问令牌和刷新令牌只缓存在内存中，不会持久化。
+两条路都会以 `0700` 权限创建配置目录、以 `0600` 权限保存凭据文件，并拒绝符号链接或权限过宽的文件。访问令牌和刷新令牌只缓存在内存中，不会持久化。
 
 ### 重置密码
 
-如果保存的密码失效，`auth_required` 与 `auth_failed` 都会附带重置命令：
+新密码同样由 Cassette 生成并发到账号邮箱，你无法指定。你可以直接让 Agent 申请新密码，它会带上 `request_new_password` 与 `confirm_replace` 调用 `cassette_login`；也可以在终端里执行：
 
 ```bash
 python3 scripts/setup_local_mcp.py --reset-password
 ```
 
-该命令会在所有设备上替换账号密码，并把新密码保存到 `credentials.json`：
+两条路都会先要你确认，因为这个操作不可撤销：**它会在所有设备上替换账号密码**，每小时只允许几次，而且服务端是先替换密码再发邮件——即使邮件发送失败，旧密码也已经作废。重试之前先去收件箱看一眼。
+
+重置只负责把新密码寄给你；还要把它粘回来（在对话里，或在终端提示处）才算完成这台机器的登录。验证过的密码保存在 `credentials.json`：
 
 - macOS：`~/Library/Application Support/Oh My Cassette/credentials.json`
 - Linux：`~/.config/oh-my-cassette/credentials.json`（设置了 `XDG_CONFIG_HOME` 时以该目录为准）
 - Windows：`%APPDATA%\Oh My Cassette\credentials.json`
+
+如果只想让这台机器忘掉已保存的密码，而不改动账号本身：
+
+```bash
+python3 scripts/setup_local_mcp.py --logout
+```
 
 ### 用法：让它找到你的素材
 
@@ -445,7 +457,7 @@ python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
 
 ### MCP 工具
 
-本地 MCP 运行时与 Hermes 保持完全相同的 14 个工具名：
+本地 MCP 运行时与 Hermes 保持完全相同的 15 个工具名：
 
 | 工具 | 用途 |
 |---|---|
@@ -463,6 +475,7 @@ python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
 | `cassette_timeline` | 读取实时项目时间线文本摘要（可选缩略图拼版） |
 | `cassette_edit` | 手动指令通道的精准无 LLM 剪辑/撤销（需 `CASSETTE_DIRECT_EDIT=1`） |
 | `cassette_config` | 查询/设置会话的模型与思考等级（静态产品列表，下一轮生效） |
+| `cassette_login` | 验证并私密保存本机凭据，或申请一封新密码邮件（仅 MCP 宿主可用） |
 
 每个工具都会返回结构化结果，其中包含 `ok`、带类型的 `data` 或 `error`、`session_id`、`job_id`、当前阶段，以及由运行时状态推导出的 `next_action`。
 

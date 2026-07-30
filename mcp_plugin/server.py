@@ -29,6 +29,7 @@ from .models import (
     JobStatusInput,
     EditInput,
     ListAssetsInput,
+    LoginInput,
     TimelineInput,
     MakePromptInput,
     MatchBgmInput,
@@ -45,6 +46,32 @@ from . import update_check
 class McpLifespanContext:
     runtime: LocalMcpRuntime
     client_profile_logged: bool = False
+
+
+def _startup_auth_notice() -> str:
+    """One line on whether this machine held Cassette credentials when the server started.
+
+    Read at import rather than in the lifespan: `instructions` is captured for the initialize
+    reply before the lifespan body runs, so appending there is a silent no-op (verified against
+    a real stdio client). Import is also the honest moment for a claim about startup.
+
+    Worded as a point-in-time observation, not an instruction: a user who signs in mid-session
+    makes it stale, and every tool re-reads the credential file on each call, so the envelope
+    is always the authoritative answer. Its value is purely proactive — without it the agent
+    cannot know to offer sign-in until the first edit has already failed. Deliberately carries
+    no email: it lands in the model's context on every run.
+    """
+    try:
+        credentials = runtime_config.load_credentials()
+    except Exception:  # noqa: BLE001 — a diagnostic line must never block server startup
+        return ""
+    if not credentials.get("email") or not credentials.get("password"):
+        return (
+            " At startup this machine had no Cassette credentials stored: say so before ingesting "
+            "media and offer to sign in, rather than letting the first edit fail."
+        )
+    verified = str(credentials.get("verified_at") or "").strip()
+    return f" At startup this machine was signed in to Cassette{f' (verified {verified})' if verified else ''}."
 
 
 @asynccontextmanager
@@ -208,8 +235,15 @@ mcp = ArtifactFastMCP(
         "cassette_answer_question with approve, revise <feedback>, or reject; if the resume "
         "returns resume_not_waiting_for_user the user already decided in the editor tab — "
         "re-check status. "
-        "If a tool returns auth_required, show error.details.setup_command as a private terminal "
-        "command; never collect credentials in chat." + update_check.notice() + update_check.auto_update_notice()
+        "If a tool returns auth_required, read error.details.recovery and act on the entry whose "
+        "'when' matches the user: cassette_login with the generated password from their Cassette "
+        "email; or, once they confirm a replacement, cassette_login with request_new_password=true "
+        "and confirm_replace=true; or error.details.setup_command as a private terminal command if "
+        "they would rather keep the password out of this conversation. Cassette passwords are always "
+        "server-generated — never invent or guess one, always ask the user for it."
+        + _startup_auth_notice()
+        + update_check.notice()
+        + update_check.auto_update_notice()
     ),
     lifespan=lifespan,
     log_level="WARNING",
@@ -710,6 +744,36 @@ async def cassette_config(
         "cassette_config",
         request.model_dump(exclude_none=True),
     )
+
+
+@mcp.tool(
+    description=(
+        "Sign this machine in to Cassette, or have a replacement password emailed. Pass email plus "
+        "the generated password from the user's Cassette email. Cassette passwords are always "
+        "server-generated, never chosen — ask the user for theirs, never invent one. If they no "
+        "longer have it, confirm with them first, then pass request_new_password=true with "
+        "confirm_replace=true: that replaces the account password on every machine they use and "
+        "emails a new one. Credentials are verified before anything is written, so a wrong password "
+        "leaves an existing working setup untouched."
+    ),
+    structured_output=True,
+)
+async def cassette_login(
+    email: str,
+    ctx: Context,
+    password: str | None = None,
+    request_new_password: bool = False,
+    confirm_replace: bool = False,
+) -> ToolEnvelope:
+    request = LoginInput(
+        email=email,
+        password=password,
+        request_new_password=request_new_password,
+        confirm_replace=confirm_replace,
+    )
+    # exclude_none only: the two booleans must survive as False so the core handler can tell
+    # "not confirmed" from "absent" without re-deriving intent.
+    return await _run_sync(_runtime(ctx).login, request.model_dump(exclude_none=True))
 
 
 def main() -> None:

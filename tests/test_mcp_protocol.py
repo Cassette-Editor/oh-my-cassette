@@ -36,6 +36,7 @@ EXPECTED_TOOLS = {
     "cassette_timeline",
     "cassette_edit",
     "cassette_config",
+    "cassette_login",
 }
 
 
@@ -326,6 +327,9 @@ def test_real_stdio_process_initializes_and_calls_every_tool(tmp_path):
                         "input": {"clipId": "c1"},
                     },
                     "cassette_config": {"session_id": session_id, "model": "GPT-5.4 Mini"},
+                    # The one login mode that issues no HTTP request at all, so this offline
+                    # sweep can cover the tool without reaching the real Cassette API.
+                    "cassette_login": {"email": "person@example.test", "request_new_password": True},
                 }
                 seen = {"cassette_ingest_media"}
                 results = {}
@@ -340,6 +344,7 @@ def test_real_stdio_process_initializes_and_calls_every_tool(tmp_path):
                 assert results["cassette_run_job"].structuredContent["error"]["code"] == "auth_required"
                 assert results["cassette_config"].structuredContent["ok"] is True
                 assert results["cassette_config"].structuredContent["data"]["model"] == "GPT-5.4 Mini"
+                assert results["cassette_login"].structuredContent["error"]["code"] == "auth_confirm_required"
                 command = results["cassette_run_job"].structuredContent["error"]["details"]["setup_command"]
                 assert command.endswith("scripts/setup_local_mcp.py")
 
@@ -697,3 +702,415 @@ def test_job_status_elicits_needs_user_answer_when_client_supports_it():
     elicited.clear()
     result = asyncio.run(server_module._maybe_elicit_needs_user(_context(object()), answered))
     assert result is answered and elicited == []
+
+
+class _LoginApi(BaseHTTPRequestHandler):
+    """The two unauthenticated agent-auth routes cassette_login uses, over a real socket.
+
+    Scripted per test through `server.script`, and every request is recorded so a test can
+    assert that a mode which must send nothing really sent nothing.
+    """
+
+    def log_message(self, *_args):
+        pass
+
+    @property
+    def script(self):
+        return self.server.script  # type: ignore[attr-defined]
+
+    def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except ValueError:
+            body = {}
+        self.script["requests"].append({"path": path, "body": body})
+        status, payload, retry_after = self.script.get(path, (404, {"error": "not found"}, None))
+        encoded = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(encoded)))
+        if retry_after is not None:
+            self.send_header("Retry-After", str(retry_after))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+
+def _login_environment(tmp_path: Path, script: dict) -> tuple[dict[str, str], ThreadingHTTPServer]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _LoginApi)
+    script.setdefault("requests", [])
+    server.script = script  # type: ignore[attr-defined]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    _, port = server.server_address
+    project = tmp_path / "project"
+    project.mkdir()
+    environment = _environment(tmp_path, project)
+    environment["CASSETTE_API_URL"] = f"http://127.0.0.1:{port}"
+    return environment, server
+
+
+def _call_login(environment: dict[str, str], arguments: dict) -> dict:
+    async def exercise() -> dict:
+        async with stdio_client(_server_parameters(environment)) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool("cassette_login", arguments)
+                return result.structuredContent
+
+    return asyncio.run(exercise())
+
+
+def _seed_stored_credentials(environment: dict[str, str], password: str) -> Path:
+    config = Path(environment["CASSETTE_CONFIG_HOME"])
+    config.mkdir(mode=0o700, exist_ok=True)
+    path = config / "credentials.json"
+    path.write_text(
+        json.dumps({"email": "stored@example.test", "password": password, "verified_at": "2026-01-01T00:00:00Z"}),
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+    return path
+
+
+def test_protocol_login_verifies_then_stores_credentials_privately(tmp_path):
+    password = "protocol-emailed-password"
+    environment, server = _login_environment(
+        tmp_path,
+        {"/api/agent-auth/verify": (200, {"session": {"access_token": "ephemeral"}}, None)},
+    )
+    try:
+        envelope = _call_login(environment, {"email": "person@example.test", "password": f"  {password}  "})
+    finally:
+        server.shutdown()
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["stored"] is True
+    # The pasted value is already in the transcript; the envelope must not add another copy,
+    # and neither must the redaction placeholder be needed to achieve that.
+    assert password not in json.dumps(envelope)
+    stored_path = Path(envelope["data"]["credentials_path"])
+    assert stored_path.stat().st_mode & 0o777 == 0o600
+    stored = json.loads(stored_path.read_text(encoding="utf-8"))
+    # Exact key set: no token, and no api_url that could silently disagree with settings.json.
+    assert set(stored) == {"email", "password", "verified_at"}
+    # Whitespace is stripped on write because load_credentials() strips on read; otherwise a
+    # pasted password with a trailing space would verify here and fail on the next call.
+    assert stored["password"] == password
+    assert server.script["requests"] == [
+        {"path": "/api/agent-auth/verify", "body": {"email": "person@example.test", "password": password}}
+    ]
+
+
+def test_protocol_login_clears_auth_required_for_the_other_tools(tmp_path):
+    environment, server = _login_environment(
+        tmp_path,
+        {"/api/agent-auth/verify": (200, {"session": {"access_token": "ephemeral"}}, None)},
+    )
+
+    # cassette_timeline reaches the transport, which resolves credentials itself. Probing with
+    # it therefore proves the stored file is picked up all the way down, not just past the
+    # runtime's gate. Both errors after sign-in come from the stub API having no project.
+    probe = ("cassette_timeline", {"session_id": "login-session"})
+    auth_codes = {"auth_missing_credentials", "auth_required", "auth_failed"}
+
+    async def exercise():
+        async with stdio_client(_server_parameters(environment)) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                before = await session.call_tool(*probe)
+                assert before.structuredContent["error"]["code"] == "auth_missing_credentials"
+                signed_in = await session.call_tool(
+                    "cassette_login", {"email": "person@example.test", "password": "protocol-emailed-password"}
+                )
+                assert signed_in.structuredContent["ok"] is True
+                # Same process, same session: credentials are re-read on every call, so the
+                # machine stops being unauthenticated without a host restart.
+                after = await session.call_tool(*probe)
+                assert after.structuredContent["error"]["code"] not in auth_codes
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        server.shutdown()
+
+
+def test_protocol_login_rejects_a_stale_password_and_keeps_the_working_one(tmp_path):
+    environment, server = _login_environment(
+        tmp_path, {"/api/agent-auth/verify": (401, {"error": "Invalid credentials"}, None)}
+    )
+    stored_path = _seed_stored_credentials(environment, "still-works")
+    before = stored_path.read_bytes()
+    try:
+        envelope = _call_login(environment, {"email": "person@example.test", "password": "stale-paste"})
+    finally:
+        server.shutdown()
+
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "auth_invalid_password"
+    # Verify-before-write: a bad paste must not cost the user a credential that still works.
+    assert stored_path.read_bytes() == before
+    serialized = json.dumps(envelope)
+    assert "stale-paste" not in serialized
+    assert "still-works" not in serialized
+
+
+def test_protocol_login_reports_an_address_without_access(tmp_path):
+    environment, server = _login_environment(tmp_path, {"/api/agent-auth/verify": (403, {"error": "Forbidden"}, None)})
+    try:
+        envelope = _call_login(environment, {"email": "outsider@example.test", "password": "any-password"})
+    finally:
+        server.shutdown()
+
+    assert envelope["error"]["code"] == "auth_not_authorized"
+    assert not (Path(environment["CASSETTE_CONFIG_HOME"]) / "credentials.json").exists()
+
+
+def test_protocol_login_surfaces_the_retry_window_when_rate_limited(tmp_path):
+    environment, server = _login_environment(
+        tmp_path, {"/api/agent-auth/verify": (429, {"error": "Too many requests"}, 90)}
+    )
+    try:
+        envelope = _call_login(environment, {"email": "person@example.test", "password": "any-password"})
+    finally:
+        server.shutdown()
+
+    assert envelope["error"]["code"] == "auth_rate_limited"
+    # A number, not prose: the agent has to be able to tell the user how long to wait.
+    assert envelope["error"]["details"]["retry_after_sec"] == 90
+
+
+def test_protocol_login_refuses_to_replace_a_password_without_confirmation(tmp_path):
+    environment, server = _login_environment(tmp_path, {})
+    try:
+        envelope = _call_login(environment, {"email": "person@example.test", "request_new_password": True})
+    finally:
+        server.shutdown()
+
+    assert envelope["error"]["code"] == "auth_confirm_required"
+    assert envelope["error"]["details"]["replaces_existing"] is True
+    # The point of the guard: with a real server listening, nothing reached it. The account
+    # password is only safe if the refusal happens before the request, not after.
+    assert server.script["requests"] == []
+
+
+def test_protocol_login_requests_a_new_password_and_asks_for_it_back(tmp_path):
+    environment, server = _login_environment(tmp_path, {"/api/agent-auth/request-code": (200, {"sent": True}, None)})
+    stored_path = _seed_stored_credentials(environment, "about-to-die")
+    try:
+        envelope = _call_login(
+            environment,
+            {"email": "person@example.test", "request_new_password": True, "confirm_replace": True},
+        )
+    finally:
+        server.shutdown()
+
+    # ok=False on purpose: the caller asked to be signed in, and it is not — the replacement
+    # exists only in the user's inbox, so the agent still has to collect it.
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "auth_password_emailed"
+    assert envelope["error"]["details"]["replaces_existing"] is True
+    assert server.script["requests"] == [
+        {"path": "/api/agent-auth/request-code", "body": {"email": "person@example.test"}}
+    ]
+    # The reset does not sign this machine in, so the dead password stays on disk until the
+    # user pastes the new one. auth_failed on the next real call is what surfaces it.
+    assert json.loads(stored_path.read_text(encoding="utf-8"))["password"] == "about-to-die"
+
+
+def test_protocol_login_reset_reports_an_unlisted_address_without_claiming_a_replacement(tmp_path):
+    # The backend answers 200 sent=false for an address it will not confirm, and touches no
+    # password in that case, so this is the one negative that must not warn about replacement.
+    environment, server = _login_environment(
+        tmp_path, {"/api/agent-auth/request-code": (200, {"sent": False, "reason": "not_allowed"}, None)}
+    )
+    try:
+        envelope = _call_login(
+            environment,
+            {"email": "outsider@example.test", "request_new_password": True, "confirm_replace": True},
+        )
+    finally:
+        server.shutdown()
+
+    assert envelope["error"]["code"] == "auth_not_authorized"
+    assert "password_replaced" not in envelope["error"]["details"]
+
+
+def test_protocol_login_reset_warns_the_password_died_when_delivery_fails(tmp_path):
+    # The server replaces the password before it tries to send, so a 500 from the mail step
+    # still leaves the old password dead. Reporting this as a plain failure would send the user
+    # back to a password that no longer exists.
+    environment, server = _login_environment(
+        tmp_path, {"/api/agent-auth/request-code": (500, {"error": "email provider unavailable"}, None)}
+    )
+    try:
+        envelope = _call_login(
+            environment,
+            {"email": "person@example.test", "request_new_password": True, "confirm_replace": True},
+        )
+    finally:
+        server.shutdown()
+
+    assert envelope["error"]["code"] == "auth_password_request_failed"
+    assert envelope["error"]["details"]["password_replaced"] is True
+
+
+def test_protocol_login_refuses_when_credentials_come_from_the_environment(tmp_path):
+    environment, server = _login_environment(tmp_path, {})
+    environment.update({"CASSETTE_AUTH_EMAIL": "env@example.test", "CASSETTE_AUTH_PASSWORD": "from-env"})
+    try:
+        envelope = _call_login(environment, {"email": "person@example.test", "password": "pasted"})
+    finally:
+        server.shutdown()
+
+    assert envelope["error"]["code"] == "auth_env_precedence"
+    assert envelope["error"]["details"]["credential_source"] == "environment"
+    # Writing the file would leave those variables shadowing it, so refuse before verifying.
+    assert server.script["requests"] == []
+    assert not (Path(environment["CASSETTE_CONFIG_HOME"]) / "credentials.json").exists()
+
+
+def test_protocol_login_rejects_incoherent_argument_combinations(tmp_path):
+    environment, server = _login_environment(tmp_path, {})
+
+    async def exercise():
+        async with stdio_client(_server_parameters(environment)) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                for arguments in (
+                    {"email": "person@example.test"},  # neither a password nor a reset request
+                    {"email": "   "},  # blank after stripping
+                    {  # both modes at once: which one would win is not something to guess
+                        "email": "person@example.test",
+                        "password": "pasted",
+                        "request_new_password": True,
+                    },
+                ):
+                    result = await session.call_tool("cassette_login", arguments)
+                    assert result.structuredContent["ok"] is False
+                    assert result.structuredContent["error"]["code"] == "validation_error"
+                    assert "pasted" not in json.dumps(result.structuredContent)
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        server.shutdown()
+
+    assert server.script["requests"] == []
+
+
+def test_protocol_auth_required_labels_every_recovery_option(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    environment = _environment(tmp_path, project)
+
+    async def exercise() -> dict:
+        async with stdio_client(_server_parameters(environment)) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool("cassette_run_job", {"prompt": "edit", "session_id": "no-creds"})
+                return result.structuredContent
+
+    envelope = asyncio.run(exercise())
+    assert envelope["error"]["code"] == "auth_required"
+    details = envelope["error"]["details"]
+    recovery = details["recovery"]
+    # Each option carries the condition it answers, so the agent relays a decision rather than
+    # reading out a menu of two commands and letting the user guess.
+    assert [entry["when"] for entry in recovery] == [
+        "the user has the generated password from their Cassette email",
+        "the user no longer has that password",
+        "the user would rather not paste a password into this conversation",
+    ]
+    assert "cassette_login" in recovery[0]["action"]
+    assert "confirm_replace=true" in recovery[1]["action"]
+    # Only the destructive option states a consequence, and it names the blast radius.
+    assert "every machine" in recovery[1]["consequence"]
+    assert recovery[2]["action"].endswith("scripts/setup_local_mcp.py")
+    # The flat keys stay for hosts and skills pinned to the older shape.
+    assert details["setup_command"].endswith("scripts/setup_local_mcp.py")
+    assert "--reset-password" in details["reset_password_command"]
+
+
+def test_protocol_initialize_reports_whether_this_machine_is_signed_in(tmp_path):
+    # Without this the agent cannot know to offer sign-in until an edit has already failed,
+    # which is exactly the moment the user has just uploaded four clips. It has to arrive in
+    # the initialize reply, so it is asserted on the wire rather than on the FastMCP object.
+    project = tmp_path / "project"
+    project.mkdir()
+    environment = _environment(tmp_path, project)
+
+    def instructions() -> str:
+        reply = _speak_raw(environment, [_initialize_request("2025-11-25")]).get(1)
+        assert reply is not None, "the server never answered initialize"
+        return reply["result"].get("instructions") or ""
+
+    unconfigured = instructions()
+    assert "had no Cassette credentials stored" in unconfigured
+    assert "offer to sign in" in unconfigured
+
+    _seed_stored_credentials(environment, "protocol-stored-password")
+    configured = instructions()
+    assert "was signed in to Cassette" in configured
+    assert "verified 2026-01-01T00:00:00Z" in configured
+    # It lands in the model's context on every single run, so it carries no address and,
+    # obviously, no password.
+    assert "stored@example.test" not in configured
+    assert "protocol-stored-password" not in configured
+
+
+def test_protocol_login_reports_an_unexpected_verify_status_without_guessing(tmp_path):
+    # A 500 says nothing about the password, so it must not be reported as a rejected one --
+    # that would send the user to burn a reset over a server-side blip.
+    environment, server = _login_environment(tmp_path, {"/api/agent-auth/verify": (500, {"error": "upstream"}, None)})
+    stored_path = _seed_stored_credentials(environment, "still-works")
+    before = stored_path.read_bytes()
+    try:
+        envelope = _call_login(environment, {"email": "person@example.test", "password": "probably-fine"})
+    finally:
+        server.shutdown()
+
+    assert envelope["error"]["code"] == "auth_verify_failed"
+    assert stored_path.read_bytes() == before
+
+
+def test_protocol_login_reset_surfaces_the_hourly_limit(tmp_path):
+    # request-code allows three an hour and spends an attempt even for an address with no
+    # access, so the wait has to reach the user as a number rather than "try again later".
+    environment, server = _login_environment(
+        tmp_path, {"/api/agent-auth/request-code": (429, {"error": "Too many password requests"}, 1800)}
+    )
+    try:
+        envelope = _call_login(
+            environment,
+            {"email": "person@example.test", "request_new_password": True, "confirm_replace": True},
+        )
+    finally:
+        server.shutdown()
+
+    assert envelope["error"]["code"] == "auth_rate_limited"
+    assert envelope["error"]["details"]["retry_after_sec"] == 1800
+    # Rate limiting happens before the password is touched, so this must not warn about one.
+    assert "password_replaced" not in envelope["error"]["details"]
+
+
+def test_protocol_login_reports_an_unreachable_api_without_touching_credentials(tmp_path):
+    # No server at all: the failure has to arrive as a typed envelope rather than a traceback,
+    # and a network blip must never cost a working stored password.
+    project = tmp_path / "project"
+    project.mkdir()
+    environment = _environment(tmp_path, project)
+    # A port nothing is listening on. Bound and released so the number is real but dead.
+    closed = ThreadingHTTPServer(("127.0.0.1", 0), _LoginApi)
+    port = closed.server_address[1]
+    closed.server_close()
+    environment["CASSETTE_API_URL"] = f"http://127.0.0.1:{port}"
+    stored_path = _seed_stored_credentials(environment, "still-works")
+    before = stored_path.read_bytes()
+
+    envelope = _call_login(environment, {"email": "person@example.test", "password": "pasted"})
+
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "cassette_unreachable"
+    assert stored_path.read_bytes() == before
+    assert "pasted" not in json.dumps(envelope)

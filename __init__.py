@@ -28,6 +28,10 @@ def register(ctx) -> None:
         ("cassette_timeline", schemas.CASSETTE_TIMELINE, tools.cassette_timeline),
         ("cassette_edit", schemas.CASSETTE_EDIT, tools.cassette_edit),
         ("cassette_config", schemas.CASSETTE_CONFIG, tools.cassette_config),
+        # Registered for tool-name parity across adapters. Under Hermes the handler refuses and
+        # points at ~/.hermes/.env, because mcp_env_value() reads the stored credential file
+        # only under the mcp adapter — a file written here would never be read back.
+        ("cassette_login", schemas.CASSETTE_LOGIN, tools.cassette_login),
     )
 
     for name, schema, handler in plugin_tools:

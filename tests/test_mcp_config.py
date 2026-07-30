@@ -185,6 +185,10 @@ def _reset_args(**overrides) -> argparse.Namespace:
         import_hermes=None,
         use_environment=False,
         reset_password=True,
+        logout=False,
+        # Defaults to False so any test that means to replace a password has to say so, the same
+        # way a user does. Nothing destructive happens by omission.
+        yes=False,
         no_auto_update=False,
     )
     base.update(overrides)
@@ -223,39 +227,12 @@ def test_reset_password_refuses_environment_sourced_credentials(local_config, mo
     assert not runtime_config.credentials_path().exists()
 
 
-def test_reset_password_rotates_in_place_without_prompting(local_config, monkeypatch):
+def test_reset_password_never_rotates_a_working_password_in_place(local_config, monkeypatch):
+    # A still-valid stored password used to be rotated inline: no email, a replacement the user
+    # never saw, and every other machine silently broken. Email delivery is now the only route,
+    # so the rotate route must never be touched however healthy the stored password looks.
     _seed_credentials("still-works")
-    monkeypatch.setattr(
-        setup_local_mcp,
-        "verify_credentials",
-        lambda *_a, **_k: {"access_token": "tok-123"},
-    )
-    calls = []
-
-    def post(api_url, path, payload, *, token=None, **_kwargs):
-        calls.append((path, token))
-        return 200, {"password": "  rotated-secret  ", "email": "person@example.test"}, None
-
-    monkeypatch.setattr(setup_local_mcp, "_post_json", post)
-    monkeypatch.setattr(setup_local_mcp.getpass, "getpass", _explode)
-
-    result = setup_local_mcp.reset_password(_reset_args())
-
-    assert result == "rotated"
-    assert calls == [("/api/agent-auth/rotate-password", "tok-123")]
-    stored = runtime_config.read_protected_json(runtime_config.credentials_path())
-    assert stored["password"] == "rotated-secret"
-
-
-def test_reset_password_falls_back_to_email_when_the_stored_password_is_dead(local_config, monkeypatch):
-    _seed_credentials("already-rotated-elsewhere")
-
-    def verify(_api_url, _email, password, **_kwargs):
-        if password == "already-rotated-elsewhere":
-            raise setup_local_mcp.CredentialsRejected("nope")
-        return {"access_token": "tok-456"}
-
-    monkeypatch.setattr(setup_local_mcp, "verify_credentials", verify)
+    monkeypatch.setattr(setup_local_mcp, "verify_credentials", lambda *_a, **_k: None)
     paths = []
 
     def post(_api_url, path, _payload, **_kwargs):
@@ -265,29 +242,54 @@ def test_reset_password_falls_back_to_email_when_the_stored_password_is_dead(loc
     monkeypatch.setattr(setup_local_mcp, "_post_json", post)
     monkeypatch.setattr(setup_local_mcp.getpass, "getpass", lambda _prompt: "  emailed-secret  ")
 
-    result = setup_local_mcp.reset_password(_reset_args())
+    result = setup_local_mcp.reset_password(_reset_args(yes=True))
 
     assert result == "emailed"
-    # The rotate route needs a session the dead password cannot mint, so it is never tried.
     assert paths == ["/api/agent-auth/request-code"]
     stored = runtime_config.read_protected_json(runtime_config.credentials_path())
     assert stored["password"] == "emailed-secret"
 
 
-def test_reset_password_does_not_fall_back_when_the_api_is_unreachable(local_config, monkeypatch):
-    # A transport failure must not be read as "password is dead" — that would replace a
-    # perfectly good account password because the network blipped.
+def test_reset_password_refuses_without_confirmation_on_a_non_tty(local_config, monkeypatch):
+    # Replacing the password is irreversible, hits every machine, and spends one of three hourly
+    # attempts — and the server replaces it before delivery can fail. With no terminal to prompt
+    # on, refusing is the only safe answer.
+    _seed_credentials("still-works")
+    monkeypatch.setattr(setup_local_mcp, "_post_json", _explode)
+    monkeypatch.setattr(setup_local_mcp.getpass, "getpass", _explode)
+    monkeypatch.setattr(setup_local_mcp.sys.stdin, "isatty", lambda: False, raising=False)
+
+    with pytest.raises(setup_local_mcp.SetupError, match="--yes"):
+        setup_local_mcp.reset_password(_reset_args())
+
+    assert runtime_config.load_credentials()["password"] == "still-works"
+
+
+def test_reset_password_aborts_when_the_user_declines_the_prompt(local_config, monkeypatch):
+    _seed_credentials("still-works")
+    monkeypatch.setattr(setup_local_mcp, "_post_json", _explode)
+    monkeypatch.setattr(setup_local_mcp.getpass, "getpass", _explode)
+    monkeypatch.setattr(setup_local_mcp.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr("builtins.input", lambda *_a: "n")
+
+    with pytest.raises(setup_local_mcp.SetupError, match="unchanged"):
+        setup_local_mcp.reset_password(_reset_args())
+
+    assert runtime_config.load_credentials()["password"] == "still-works"
+
+
+def test_reset_password_keeps_the_stored_password_when_the_api_is_unreachable(local_config, monkeypatch):
+    # A transport failure must leave the stored password alone rather than half-resetting.
     _seed_credentials("still-works")
 
-    def verify(*_a, **_k):
+    def post(*_a, **_k):
         raise setup_local_mcp.SetupError("Could not reach the Cassette API (URLError).")
 
-    monkeypatch.setattr(setup_local_mcp, "verify_credentials", verify)
-    monkeypatch.setattr(setup_local_mcp, "_post_json", _explode)
+    monkeypatch.setattr(setup_local_mcp, "_post_json", post)
     monkeypatch.setattr(setup_local_mcp.getpass, "getpass", _explode)
 
     with pytest.raises(setup_local_mcp.SetupError):
-        setup_local_mcp.reset_password(_reset_args())
+        setup_local_mcp.reset_password(_reset_args(yes=True))
 
     assert runtime_config.load_credentials()["password"] == "still-works"
 
@@ -302,24 +304,21 @@ def test_reset_password_stops_when_the_email_is_not_allowlisted(local_config, mo
     monkeypatch.setattr(setup_local_mcp.getpass, "getpass", _explode)
 
     with pytest.raises(setup_local_mcp.SetupError, match="not authorised"):
-        setup_local_mcp.reset_password(_reset_args())
+        setup_local_mcp.reset_password(_reset_args(yes=True))
 
 
-def test_reset_password_stores_no_session_tokens(local_config, monkeypatch):
-    _seed_credentials("still-works")
-    monkeypatch.setattr(
-        setup_local_mcp,
-        "verify_credentials",
-        lambda *_a, **_k: {"access_token": "tok-123"},
-    )
-    monkeypatch.setattr(setup_local_mcp, "_post_json", lambda *_a, **_k: (200, {"password": "rotated-secret"}, None))
+def test_reset_password_stores_no_session_tokens_and_drops_the_legacy_api_url(local_config, monkeypatch):
+    _seed_credentials("still-works")  # a legacy file, carrying the api_url that used to be written
+    monkeypatch.setattr(setup_local_mcp, "verify_credentials", lambda *_a, **_k: None)
+    monkeypatch.setattr(setup_local_mcp, "_post_json", lambda *_a, **_k: (200, {"sent": True}, None))
+    monkeypatch.setattr(setup_local_mcp.getpass, "getpass", lambda _prompt: "emailed-secret")
 
-    setup_local_mcp.reset_password(_reset_args())
+    setup_local_mcp.reset_password(_reset_args(yes=True))
 
     stored = runtime_config.read_protected_json(runtime_config.credentials_path())
-    # An exact key set, not two `not in` checks: this also fails if some future field starts
-    # smuggling a secret onto disk.
-    assert set(stored) == {"email", "password", "verified_at", "api_url"}
+    # An exact key set, not a couple of `not in` checks: this fails if some future field starts
+    # smuggling a secret onto disk, and it pins the removal of the api_url nothing ever read.
+    assert set(stored) == {"email", "password", "verified_at"}
 
 
 def test_reset_password_uses_the_settings_api_url_not_the_stored_copy(local_config, monkeypatch):
@@ -329,18 +328,37 @@ def test_reset_password_uses_the_settings_api_url_not_the_stored_copy(local_conf
     )
     seen = {}
 
-    def verify(api_url, *_a, **_k):
+    def post(api_url, _path, _payload, **_kwargs):
         seen["api_url"] = api_url
-        return {"access_token": "tok-123"}
+        return 200, {"sent": True}, None
 
-    monkeypatch.setattr(setup_local_mcp, "verify_credentials", verify)
-    monkeypatch.setattr(setup_local_mcp, "_post_json", lambda *_a, **_k: (200, {"password": "rotated-secret"}, None))
+    monkeypatch.setattr(setup_local_mcp, "_post_json", post)
+    monkeypatch.setattr(setup_local_mcp, "verify_credentials", lambda *_a, **_k: None)
+    monkeypatch.setattr(setup_local_mcp.getpass, "getpass", lambda _prompt: "emailed-secret")
 
-    setup_local_mcp.reset_password(_reset_args())
+    setup_local_mcp.reset_password(_reset_args(yes=True))
 
     assert seen["api_url"] == "https://settings.test"
     # A reset replaces a password; it must not rewrite settings it was not asked about.
     assert runtime_config.load_settings()["media_roots"] == ["/srv/footage"]
+
+
+def test_logout_removes_the_stored_credentials_without_touching_the_account(local_config, monkeypatch):
+    _seed_credentials("still-works")
+    monkeypatch.setattr(setup_local_mcp, "_post_json", _explode)
+
+    message = setup_local_mcp.logout()
+
+    assert not runtime_config.credentials_path().exists()
+    assert "unchanged" in message
+
+
+def test_logout_is_a_no_op_when_nothing_is_stored(local_config, monkeypatch):
+    monkeypatch.setattr(setup_local_mcp, "_post_json", _explode)
+
+    message = setup_local_mcp.logout()
+
+    assert "No stored Cassette credentials" in message
 
 
 def _claude_settings(tmp_path, monkeypatch, payload: dict) -> Path:
@@ -411,4 +429,19 @@ def test_reset_password_rejects_the_auto_update_flag(local_config):
     args = _reset_args()
     args.no_auto_update = True
     with pytest.raises(setup_local_mcp.SetupError):
-        setup_local_mcp._reject_reset_password_conflicts(args)
+        setup_local_mcp._reject_mode_conflicts(args, "--reset-password")
+
+
+def test_logout_rejects_flags_it_would_silently_ignore(local_config):
+    # --yes and --email belong to the reset flow. Accepting them on a logout would imply it
+    # confirms something or targets an account, and it does neither.
+    for overrides in ({"yes": True}, {"email": "person@example.test"}, {"allowed_root": ["/srv"]}):
+        args = _reset_args(reset_password=False, logout=True, **overrides)
+        with pytest.raises(setup_local_mcp.SetupError):
+            setup_local_mcp._reject_mode_conflicts(args, "--logout")
+
+
+def test_reset_password_accepts_the_yes_flag_it_defines(local_config):
+    # The mirror of the test above: --yes is the reset flow's own flag, so it must not be
+    # rejected as a conflict there.
+    setup_local_mcp._reject_mode_conflicts(_reset_args(yes=True), "--reset-password")

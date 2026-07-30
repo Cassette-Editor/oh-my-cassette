@@ -1116,6 +1116,153 @@ def cassette_config(a: dict, **kw) -> str:
     )
 
 
+# Kept beside the handler so every failure the user can actually act on reads as a sentence
+# rather than a status code. Passwords are server-generated and mailed, never chosen, so an
+# invalid one means "stale", not "you mistyped it".
+_AUTH_MESSAGES = {
+    # Deliberately does not blame the password: /api/agent-auth/verify answers 401 both for a
+    # stale password and for an address with no Cassette access. Requesting a new password is
+    # the right next step either way — it succeeds for the first case and reports
+    # auth_not_authorized for the second, which is how the two get told apart.
+    "auth_invalid_password": (
+        "Cassette rejected that sign-in — either the password is stale or the address has no "
+        "Cassette access. Passwords are generated and emailed, never chosen, so nothing was "
+        "mistyped; requesting a new one resolves it either way."
+    ),
+    "auth_not_authorized": (
+        "That address is not authorised for Cassette, so nothing was sent or stored. Request access for it first."
+    ),
+    "auth_rate_limited": "Too many attempts for that address. Wait for the retry window and try again.",
+    "auth_verify_failed": "Cassette could not verify the credentials; nothing was stored.",
+    "auth_password_request_failed": (
+        "Cassette could not send a new password. The account password may already have been "
+        "replaced, so check the inbox before retrying — every attempt spends the hourly limit."
+    ),
+}
+
+
+@safe_tool
+def cassette_login(a: dict, **kw) -> str:
+    """Verify Cassette credentials and store them privately, or request a replacement by email.
+
+    In-band credential setup, chosen deliberately over the terminal command: the owner
+    accepted that a pasted password reaches the host's transcript in exchange for removing the
+    terminal step entirely. Note that the MCP spec forbids form-mode elicitation for
+    credentials (2025-11-25 elicitation, Security Considerations) and that a tool argument is
+    strictly worse, because the model itself must emit the value. URL-mode elicitation to a
+    loopback page and an OAuth-style device flow were both evaluated and declined -- the first
+    needs a listening port, the second needs backend routes this plugin does not own. Revisit
+    that decision before "fixing" this; it is a product choice, not an oversight.
+    """
+    from . import api_transport
+
+    email = str(a.get("email") or "").strip()
+    if not email:
+        raise CassetteError("missing_required_arg", "email is required")
+    # Strip on write because load_credentials() strips on read: a pasted password carrying a
+    # trailing space would verify here and then reach the transport as a different string.
+    # The generated alphabet contains no whitespace, so this is lossless.
+    password = str(a.get("password") or "").strip()
+    request_new = bool(a.get("request_new_password"))
+
+    if str(kw.get("runtime_host") or "hermes") != "mcp":
+        # Hermes resolves credentials from its process env and ~/.hermes/.env, and
+        # mcp_env_value() reads the stored file only under the mcp adapter -- anything written
+        # here would never be read back. Refuse rather than write somewhere inert.
+        return err(
+            "cassette_login",
+            "auth_unsupported_adapter",
+            "This host reads Cassette credentials from its environment. Set CASSETTE_AUTH_EMAIL "
+            "and CASSETTE_AUTH_PASSWORD in ~/.hermes/.env instead.",
+            {"credential_source": "environment"},
+            recoverable=False,
+        )
+
+    import runtime_config
+
+    try:
+        stored = runtime_config.load_credentials()
+    except runtime_config.RuntimeConfigError as exc:
+        return err(
+            "cassette_login",
+            exc.code,
+            str(exc),
+            {"path": str(exc.path or "")},
+            recoverable=False,
+        )
+    if stored.get("source") == "environment":
+        # Process environment wins over the private config, so storing anything here would
+        # leave those variables shadowing whatever we wrote.
+        return err(
+            "cassette_login",
+            "auth_env_precedence",
+            "Cassette credentials already come from environment variables, which take "
+            "precedence over the private config. Update those variables instead — storing "
+            "credentials here would have no effect.",
+            {"credential_source": "environment"},
+        )
+
+    if request_new:
+        if not bool(a.get("confirm_replace")):
+            # request-code replaces the account password on every machine and spends one of
+            # three hourly attempts, and the server replaces it *before* delivery can fail, so
+            # even an error leaves the old password dead. A bound second argument -- not prose
+            # in a tool description -- is what stops an agent firing this casually.
+            return err(
+                "cassette_login",
+                "auth_confirm_required",
+                "Requesting a new password replaces the account password on every machine and "
+                "emails the replacement. Confirm with the user, then re-call with "
+                "confirm_replace=true.",
+                {"replaces_existing": True, "email": email, "limit": "3 per hour"},
+            )
+        outcome = api_transport.request_new_agent_password(email)
+        if outcome.get("ok"):
+            # Not ok=True: the caller asked to be signed in and is not yet, because the new
+            # password only exists in the user's inbox. The agent must collect it next.
+            return err(
+                "cassette_login",
+                "auth_password_emailed",
+                f"A new password was sent to {email}. The previous one no longer works on any "
+                "machine. Ask the user for the new password, then call cassette_login again.",
+                {"replaces_existing": True, "email": email, "limit": "3 per hour"},
+            )
+        details: dict[str, Any] = {"email": email}
+        if outcome.get("retry_after_sec") is not None:
+            details["retry_after_sec"] = outcome["retry_after_sec"]
+        if outcome.get("password_replaced"):
+            details["password_replaced"] = True
+        code = str(outcome.get("code") or "auth_password_request_failed")
+        return err("cassette_login", code, _AUTH_MESSAGES.get(code, "Cassette could not send a new password."), details)
+
+    if not password:
+        raise CassetteError("missing_required_arg", "password is required unless request_new_password is set")
+
+    outcome = api_transport.verify_agent_credentials(email, password)
+    if not outcome.get("ok"):
+        # Nothing has been written at this point, so a bad paste leaves an existing working
+        # credential exactly as it was.
+        details = {"email": email}
+        if outcome.get("retry_after_sec") is not None:
+            details["retry_after_sec"] = outcome["retry_after_sec"]
+        code = str(outcome.get("code") or "auth_verify_failed")
+        return err("cassette_login", code, _AUTH_MESSAGES.get(code, "Cassette rejected the credentials."), details)
+
+    verified_at = manifest.now_iso()
+    runtime_config.write_protected_json(
+        runtime_config.credentials_path(),
+        {"email": email, "password": password, "verified_at": verified_at},
+    )
+    return ok(
+        {
+            "email": email,
+            "stored": True,
+            "verified_at": verified_at,
+            "credentials_path": str(runtime_config.credentials_path()),
+        }
+    )
+
+
 def _previews_dir(session_id: str) -> Path:
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", session_id)[:120] or "session"
     return Path(os.getenv("CASSETTE_ASSET_ROOT", str(manifest.get_asset_root()))) / "previews" / safe

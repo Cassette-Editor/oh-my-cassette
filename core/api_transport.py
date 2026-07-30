@@ -256,6 +256,114 @@ def check_cassette_connectivity(url: str | None = None, timeout_sec: float | Non
         return {"ok": False, "code": "cassette_unreachable", "details": {"type": type(exc).__name__}}
 
 
+# ── credential setup (unauthenticated /api/agent-auth) ────────────────────────
+# scripts/setup_local_mcp.py duplicates these two calls with its own urllib helper on
+# purpose: it runs before this package's virtualenv exists, so it may import only
+# runtime_config. Keep both in step rather than trying to share code across that boundary.
+_AGENT_AUTH_TIMEOUT_SEC = 60.0
+
+
+def _post_agent_auth(path: str, payload: dict[str, Any], *, timeout_sec: float | None = None) -> tuple[int, dict, str]:
+    """POST an unauthenticated /api/agent-auth call; return (status, body, retry_after).
+
+    HTTP error statuses are returned rather than raised so callers can tell 401 from 403
+    from 429. Only transport failures raise.
+    """
+    body = json.dumps(payload).encode("utf-8")
+    target = _api_base() + path
+    request = Request(
+        target,
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    timeout = timeout_sec or _AGENT_AUTH_TIMEOUT_SEC
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            status = int(getattr(response, "status", 200) or 200)
+            raw = response.read().decode("utf-8", "replace")
+            retry_after = response.headers.get("retry-after") or ""
+    except HTTPError as exc:
+        status = int(exc.code)
+        raw = exc.read().decode("utf-8", "replace")
+        retry_after = (exc.headers.get("retry-after") if exc.headers else "") or ""
+    except (TimeoutError, URLError, OSError) as exc:
+        raise ApiTransportError(
+            "cassette_unreachable", f"Could not reach the Cassette API ({type(exc).__name__})."
+        ) from exc
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except ValueError:
+        parsed = {}
+    return status, parsed if isinstance(parsed, dict) else {}, str(retry_after)
+
+
+def _retry_after_seconds(value: str) -> int | None:
+    try:
+        return max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def verify_agent_credentials(email: str, password: str, *, timeout_sec: float | None = None) -> dict[str, Any]:
+    """Prove an email/password pair signs in. Stores nothing and returns no token.
+
+    The reply carries an access token and a refresh token; both are deliberately dropped.
+    Nothing in this plugin persists tokens, and handing one back here would invite a caller
+    to write it next to the credentials.
+
+    One asymmetry worth knowing: this route answers 401 for an address that is not on the
+    allowlist as well as for a wrong password -- the allowlist check throws inside the same
+    try block as the sign-in. So auth_invalid_password cannot claim the password is at fault,
+    and the 403 branch below is defensive only. request-code is what separates the two cases:
+    it answers 200 sent=false for an address with no access.
+    """
+    status, body, retry_after = _post_agent_auth(
+        "/api/agent-auth/verify", {"email": email, "password": password}, timeout_sec=timeout_sec
+    )
+    if status == 200 and isinstance(body.get("session"), dict) and body["session"].get("access_token"):
+        return {"ok": True}
+    if status == 429:
+        return {
+            "ok": False,
+            "code": "auth_rate_limited",
+            "http_status": status,
+            "retry_after_sec": _retry_after_seconds(retry_after),
+        }
+    if status == 403:  # not produced by this route today; kept for proxies that gate ahead of it
+        return {"ok": False, "code": "auth_not_authorized", "http_status": status}
+    if status in {400, 401}:
+        return {"ok": False, "code": "auth_invalid_password", "http_status": status}
+    return {"ok": False, "code": "auth_verify_failed", "http_status": status}
+
+
+def request_new_agent_password(email: str, *, timeout_sec: float | None = None) -> dict[str, Any]:
+    """Ask the server to replace the account password and mail the replacement.
+
+    DESTRUCTIVE, including when it reports failure: the server replaces the stored password
+    before it attempts delivery, so a mail-send error still leaves the previous password
+    dead. Upstream rate limit is 3/hour per (ip, email) and is spent before the allowlist is
+    consulted, so an unauthorized address still costs an attempt.
+    """
+    status, body, retry_after = _post_agent_auth(
+        "/api/agent-auth/request-code", {"email": email}, timeout_sec=timeout_sec
+    )
+    if status == 429:
+        return {
+            "ok": False,
+            "code": "auth_rate_limited",
+            "http_status": status,
+            "retry_after_sec": _retry_after_seconds(retry_after),
+        }
+    if status == 200:
+        # 200 with sent=false is the server refusing to confirm who has an account; no mail
+        # is coming and no password was touched, so this is the one safe negative here.
+        if body.get("sent") is True:
+            return {"ok": True}
+        return {"ok": False, "code": "auth_not_authorized", "http_status": status, "password_replaced": False}
+    return {"ok": False, "code": "auth_password_request_failed", "http_status": status, "password_replaced": True}
+
+
 def _parse_volume_levels(ffmpeg_stderr: str) -> dict | None:
     """Mean and peak dBFS from an ffmpeg volumedetect pass.
 
@@ -934,7 +1042,12 @@ class ApiTransport:
             "POST", "/api/agent-auth/verify", json_body={"email": email, "password": password}, authed=False
         )
         if status != 200 or not isinstance(body, dict):
-            raise ApiTransportError("auth_failed", f"Cassette sign-in failed (HTTP {status})")
+            # "Stale", not "wrong": Cassette passwords are server-generated and mailed, never
+            # chosen, so the user did not mistype anything. Replacing it is the only fix.
+            raise ApiTransportError(
+                "auth_failed",
+                f"The stored Cassette password is no longer valid (HTTP {status}); it needs replacing.",
+            )
         session = body.get("session") or {}
         token = session.get("access_token")
         if not token:
