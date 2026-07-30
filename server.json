@@ -3,7 +3,7 @@
   "name": "io.github.Cassette-Editor/oh-my-cassette",
   "title": "Oh My Cassette",
   "description": "Chat-driven AI video montage: beat-synced cuts, auto-matched music, subtitles, transitions.",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "websiteUrl": "https://github.com/Cassette-Editor/oh-my-cassette",
   "repository": {
     "url": "https://github.com/Cassette-Editor/oh-my-cassette",
