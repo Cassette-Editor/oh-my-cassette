@@ -171,16 +171,56 @@ def _check_plugin_enabled(home: Path) -> dict:
     )
 
 
-def _check_env(home: Path) -> dict:
+_RESOLVED_ENV_KEYS = (
+    "CASSETTE_AUTH_EMAIL",
+    "CASSETTE_AUTH_PASSWORD",
+    "CASSETTE_API_URL",
+    "CASSETTE_FFMPEG_BIN",
+    "CASSETTE_FFPROBE_BIN",
+    "JAMENDO_CLIENT_ID",
+    "JAMENDO_CLIENT_SECRET",
+)
+
+
+def _resolved_env_values(home: Path) -> tuple[dict[str, str], list[str]]:
+    """What the plugin will actually read, in the runtime's precedence order.
+
+    Reading only ~/.hermes/.env made this report credentials missing during sessions that
+    authenticated perfectly well: the process environment wins at runtime, so a value
+    exported in the shell that launched Hermes is the one that counts. Returns the merged
+    values and the keys the environment supplied, so the report can say which is which.
+    """
+    values = dict(install_plugin.read_env_values(home / ".env"))
+    from_environment: list[str] = []
+    for key in _RESOLVED_ENV_KEYS:
+        override = (os.getenv(key) or "").strip()
+        if override:
+            values[key] = override
+            from_environment.append(key)
+    return values, from_environment
+
+
+def _check_env(home: Path, values: dict[str, str], from_environment: list[str]) -> dict:
     env_path = home / ".env"
-    values = install_plugin.read_env_values(env_path)
     # CASSETTE_API_URL is intentionally not required: it has a working default.
     missing = [key for key in ("CASSETTE_AUTH_EMAIL", "CASSETTE_AUTH_PASSWORD") if not values.get(key)]
     status = "ok" if not missing else "warn"
-    message = (
-        "required Cassette environment values are present" if not missing else f"missing values: {', '.join(missing)}"
+    if missing:
+        message = f"missing values: {', '.join(missing)}"
+    elif from_environment:
+        message = (
+            f"required Cassette environment values are present ({', '.join(from_environment)} from the environment)"
+        )
+    else:
+        message = "required Cassette environment values are present"
+    return _check(
+        "env",
+        status,
+        message,
+        path=str(env_path),
+        values=_redacted_env_snapshot(values),
+        from_environment=from_environment,
     )
-    return _check("env", status, message, path=str(env_path), values=_redacted_env_snapshot(values))
 
 
 def _check_binary(name: str, configured: str = "") -> dict:
@@ -287,12 +327,12 @@ def _check_cassette_login(home: Path, url: str, email: str, password: str) -> di
 
 
 def diagnose(home: Path, repo: Path) -> list[dict]:
-    env_values = install_plugin.read_env_values(home / ".env")
+    env_values, from_environment = _resolved_env_values(home)
     url = env_values.get("CASSETTE_API_URL") or install_plugin.CASSETTE_DEFAULT_API_URL
     return [
         _check_plugin(home, repo),
         _check_plugin_enabled(home),
-        _check_env(home),
+        _check_env(home, env_values, from_environment),
         _check_binary("ffmpeg", env_values.get("CASSETTE_FFMPEG_BIN", "")),
         _check_binary("ffprobe", env_values.get("CASSETTE_FFPROBE_BIN", "")),
         _check_cassette_connectivity(url),

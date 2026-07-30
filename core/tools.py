@@ -716,6 +716,24 @@ def _gateway_job_executor() -> ThreadPoolExecutor:
         return _GATEWAY_JOB_EXECUTOR
 
 
+def shutdown_gateway_job_executor(*, wait: bool = True) -> None:
+    """Drain the background gateway worker and drop the pool.
+
+    A submitted worker outlives the call that queued it, and it resolves the asset root when
+    it finally writes rather than when it was submitted. Anything that sandboxes the asset
+    root for the duration of a call -- the test suite, most obviously -- therefore has to
+    drain the pool before restoring the environment, or the escaping worker persists its job
+    record into the developer's real Hermes data directory, where it stays visible forever as
+    a running job. A long-lived host never needs this; it wants the pool to keep working.
+    """
+    global _GATEWAY_JOB_EXECUTOR
+    with _GATEWAY_JOB_EXECUTOR_LOCK:
+        executor = _GATEWAY_JOB_EXECUTOR
+        _GATEWAY_JOB_EXECUTOR = None
+    if executor is not None:
+        executor.shutdown(wait=wait)
+
+
 def _should_run_gateway_job_in_background(args: dict, delivery: dict | None) -> bool:
     if not _gateway_background_jobs_enabled():
         return False

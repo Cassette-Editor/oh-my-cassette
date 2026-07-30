@@ -36,6 +36,22 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
+def _no_gateway_worker_outlives_its_test(monkeypatch):
+    # A background gateway job resolves the asset root when it writes, not when it is
+    # submitted. Left running, it finishes after the environment has been restored and
+    # persists its record into the real ~/.hermes/cassette/jobs, where it shows up in
+    # /cassette recent as a job that is running and never finishes.
+    #
+    # Depending on monkeypatch is what orders this correctly: pytest finalizes in reverse
+    # setup order, so requesting it here forces monkeypatch to be created first and undone
+    # last, leaving the sandboxed roots in place while the worker drains.
+    yield
+    from cassette.core import tools
+
+    tools.shutdown_gateway_job_executor()
+
+
+@pytest.fixture(autouse=True)
 def _no_inherited_transport_setting(monkeypatch):
     # There is one transport, so nothing here selects it. The variable is still deleted: a
     # developer with a leftover CASSETTE_TRANSPORT=browser in their shell would otherwise

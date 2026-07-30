@@ -650,9 +650,12 @@ def _fixed_cut_requested_message(active: bool, language: str = "zh") -> str:
         if active:
             return "Requested a stop for the current Cassette operation. If the Cassette agent is still running, I will request a stop; the session is preserved for retry or the next edit instruction."
         return "Cassette has no active edit operation right now. The session is preserved; send a retry or the next edit instruction to continue."
+    # Both strings described the retired browser transport -- a page stop button to click and
+    # a browser left paused. There is no browser: a stop is a cancel request to Cassette, and
+    # what survives it is the session, whose media and project state the next turn reuses.
     if active:
-        return "已请求停止当前 Cassette 操作。若 Cassette agent 仍在执行，我会触发页面停止按钮；浏览器状态会保留，等待你发送重试或下一步剪辑指令。"
-    return "Cassette 当前没有正在运行的剪辑任务，已保持浏览器状态暂停。你可以发送重试或下一步剪辑指令继续。"
+        return "已请求停止当前 Cassette 操作。若 Cassette agent 仍在执行，我会向 Cassette 发出停止请求；会话会保留，等待你发送重试或下一步剪辑指令。"
+    return "Cassette 当前没有正在运行的剪辑任务。会话已保留，你可以发送重试或下一步剪辑指令继续。"
 
 
 def _reject_busy_flow(
