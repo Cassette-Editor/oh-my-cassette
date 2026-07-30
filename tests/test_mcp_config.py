@@ -252,8 +252,7 @@ def test_reset_password_never_rotates_a_working_password_in_place(local_config, 
 
 def test_reset_password_refuses_without_confirmation_on_a_non_tty(local_config, monkeypatch):
     # Replacing the password is irreversible, hits every machine, and spends one of three hourly
-    # attempts — and the server replaces it before delivery can fail. With no terminal to prompt
-    # on, refusing is the only safe answer.
+    # attempts. With no terminal to prompt on, refusing is the only safe answer.
     _seed_credentials("still-works")
     monkeypatch.setattr(setup_local_mcp, "_post_json", _explode)
     monkeypatch.setattr(setup_local_mcp.getpass, "getpass", _explode)

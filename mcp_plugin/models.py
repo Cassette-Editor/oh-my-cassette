@@ -221,9 +221,8 @@ class LoginInput(StrictModel):
     password: str | None = None
     request_new_password: bool = False
     # A bound argument rather than wording in the tool description, because requesting a new
-    # password replaces the account password on every machine, spends one of three hourly
-    # attempts, and is destructive even when the server reports failure. Gate decisions have to
-    # be mechanical here, never prompt-enforced.
+    # password replaces the account password on every machine and spends one of three hourly
+    # attempts. Gate decisions have to be mechanical here, never prompt-enforced.
     confirm_replace: bool = False
 
     @model_validator(mode="after")

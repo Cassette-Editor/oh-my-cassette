@@ -1138,23 +1138,23 @@ def cassette_config(a: dict, **kw) -> str:
 # rather than a status code. Passwords are server-generated and mailed, never chosen, so an
 # invalid one means "stale", not "you mistyped it".
 _AUTH_MESSAGES = {
-    # Deliberately does not blame the password: /api/agent-auth/verify answers 401 both for a
-    # stale password and for an address with no Cassette access. Requesting a new password is
-    # the right next step either way — it succeeds for the first case and reports
-    # auth_not_authorized for the second, which is how the two get told apart.
+    # /api/agent-auth/verify checks the password before the allowlist, so this one really is
+    # about the password and nothing else — an address with no Cassette access answers 403
+    # (auth_not_authorized) once the password checks out.
     "auth_invalid_password": (
-        "Cassette rejected that sign-in — either the password is stale or the address has no "
-        "Cassette access. Passwords are generated and emailed, never chosen, so nothing was "
-        "mistyped; requesting a new one resolves it either way."
+        "Cassette rejected that password. Passwords are generated and emailed, never chosen, so "
+        "nothing was mistyped — the stored one is stale. Request a new one to replace it."
     ),
     "auth_not_authorized": (
-        "That address is not authorised for Cassette, so nothing was sent or stored. Request access for it first."
+        "That address is not authorised for Cassette, so nothing was stored. The password itself "
+        "was fine — the account has no Cassette access. Request access for it first."
     ),
     "auth_rate_limited": "Too many attempts for that address. Wait for the retry window and try again.",
     "auth_verify_failed": "Cassette could not verify the credentials; nothing was stored.",
     "auth_password_request_failed": (
-        "Cassette could not send a new password. The account password may already have been "
-        "replaced, so check the inbox before retrying — every attempt spends the hourly limit."
+        "Cassette could not send a new password. It mails the replacement before storing it, so "
+        "the previous password should still work — try signing in with it before retrying, "
+        "because every attempt spends the hourly limit."
     ),
 }
 
@@ -1223,9 +1223,8 @@ def cassette_login(a: dict, **kw) -> str:
     if request_new:
         if not bool(a.get("confirm_replace")):
             # request-code replaces the account password on every machine and spends one of
-            # three hourly attempts, and the server replaces it *before* delivery can fail, so
-            # even an error leaves the old password dead. A bound second argument -- not prose
-            # in a tool description -- is what stops an agent firing this casually.
+            # three hourly attempts. A bound second argument -- not prose in a tool
+            # description -- is what stops an agent firing this casually.
             return err(
                 "cassette_login",
                 "auth_confirm_required",
@@ -1248,8 +1247,6 @@ def cassette_login(a: dict, **kw) -> str:
         details: dict[str, Any] = {"email": email}
         if outcome.get("retry_after_sec") is not None:
             details["retry_after_sec"] = outcome["retry_after_sec"]
-        if outcome.get("password_replaced"):
-            details["password_replaced"] = True
         code = str(outcome.get("code") or "auth_password_request_failed")
         return err("cassette_login", code, _AUTH_MESSAGES.get(code, "Cassette could not send a new password."), details)
 

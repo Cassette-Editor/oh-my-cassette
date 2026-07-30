@@ -936,10 +936,10 @@ def test_protocol_login_reset_reports_an_unlisted_address_without_claiming_a_rep
     assert "password_replaced" not in envelope["error"]["details"]
 
 
-def test_protocol_login_reset_warns_the_password_died_when_delivery_fails(tmp_path):
-    # The server replaces the password before it tries to send, so a 500 from the mail step
-    # still leaves the old password dead. Reporting this as a plain failure would send the user
-    # back to a password that no longer exists.
+def test_protocol_login_reset_does_not_declare_the_password_dead_when_delivery_fails(tmp_path):
+    # The server mails the replacement before it stores it, so a 500 leaves the previous
+    # password working. Warning that it died would send the user off to burn the hourly limit
+    # on a replacement they do not need.
     environment, server = _login_environment(
         tmp_path, {"/api/agent-auth/request-code": (500, {"error": "email provider unavailable"}, None)}
     )
@@ -952,7 +952,8 @@ def test_protocol_login_reset_warns_the_password_died_when_delivery_fails(tmp_pa
         server.shutdown()
 
     assert envelope["error"]["code"] == "auth_password_request_failed"
-    assert envelope["error"]["details"]["password_replaced"] is True
+    assert "password_replaced" not in envelope["error"]["details"]
+    assert "still work" in envelope["error"]["message"]
 
 
 def test_protocol_login_refuses_when_credentials_come_from_the_environment(tmp_path):

@@ -312,11 +312,10 @@ def verify_agent_credentials(email: str, password: str, *, timeout_sec: float | 
     Nothing in this plugin persists tokens, and handing one back here would invite a caller
     to write it next to the credentials.
 
-    One asymmetry worth knowing: this route answers 401 for an address that is not on the
-    allowlist as well as for a wrong password -- the allowlist check throws inside the same
-    try block as the sign-in. So auth_invalid_password cannot claim the password is at fault,
-    and the 403 branch below is defensive only. request-code is what separates the two cases:
-    it answers 200 sent=false for an address with no access.
+    The route checks the password before the allowlist, so the two failures arrive
+    distinguishable: 403 means the password was right and the address has no Cassette access
+    (never granted, or revoked), 401 means the password itself did not check out and says
+    nothing about whether the account exists.
     """
     status, body, retry_after = _post_agent_auth(
         "/api/agent-auth/verify", {"email": email, "password": password}, timeout_sec=timeout_sec
@@ -330,7 +329,7 @@ def verify_agent_credentials(email: str, password: str, *, timeout_sec: float | 
             "http_status": status,
             "retry_after_sec": _retry_after_seconds(retry_after),
         }
-    if status == 403:  # not produced by this route today; kept for proxies that gate ahead of it
+    if status == 403:  # password verified, address not on the allowlist
         return {"ok": False, "code": "auth_not_authorized", "http_status": status}
     if status in {400, 401}:
         return {"ok": False, "code": "auth_invalid_password", "http_status": status}
@@ -340,10 +339,13 @@ def verify_agent_credentials(email: str, password: str, *, timeout_sec: float | 
 def request_new_agent_password(email: str, *, timeout_sec: float | None = None) -> dict[str, Any]:
     """Ask the server to replace the account password and mail the replacement.
 
-    DESTRUCTIVE, including when it reports failure: the server replaces the stored password
-    before it attempts delivery, so a mail-send error still leaves the previous password
-    dead. Upstream rate limit is 3/hour per (ip, email) and is spent before the allowlist is
-    consulted, so an unauthorized address still costs an attempt.
+    DESTRUCTIVE on success: the previous password stops working everywhere. The server now
+    mails the replacement before it stores it, so a failure reported here almost always means
+    nothing was replaced and the previous password still works -- "almost" because a store
+    that succeeds and then loses its response is indistinguishable from one that never
+    happened. Trying the old password is the cheap way to tell, which is what the failure
+    message says to do. Upstream rate limit is 3/hour per (ip, email) and is spent before the
+    allowlist is consulted, so an unauthorized address still costs an attempt.
     """
     status, body, retry_after = _post_agent_auth(
         "/api/agent-auth/request-code", {"email": email}, timeout_sec=timeout_sec
@@ -360,8 +362,8 @@ def request_new_agent_password(email: str, *, timeout_sec: float | None = None) 
         # is coming and no password was touched, so this is the one safe negative here.
         if body.get("sent") is True:
             return {"ok": True}
-        return {"ok": False, "code": "auth_not_authorized", "http_status": status, "password_replaced": False}
-    return {"ok": False, "code": "auth_password_request_failed", "http_status": status, "password_replaced": True}
+        return {"ok": False, "code": "auth_not_authorized", "http_status": status}
+    return {"ok": False, "code": "auth_password_request_failed", "http_status": status}
 
 
 def _parse_volume_levels(ffmpeg_stderr: str) -> dict | None:
