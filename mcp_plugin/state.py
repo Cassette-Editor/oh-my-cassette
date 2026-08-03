@@ -130,13 +130,21 @@ def _next_action_base(phase: SessionPhase, *, job_id: str | None = None) -> str:
     if phase == SessionPhase.ASSETS_READY:
         return "Call cassette_run_job with message set to the user's verbatim words."
     if phase == SessionPhase.READY:
+        # cassette_run_job declares wait=True at the tool signature, so the call blocks until the
+        # turn settles. Saying otherwise here would license exactly the status loop it replaces.
         return (
-            "Call cassette_run_job with message set to the user's verbatim words; "
-            "MCP jobs run in the background unless wait=true is explicit."
+            "Call cassette_run_job with message set to the user's verbatim words. That call is the "
+            "wait: it returns when the turn is settled, so do not follow it with a status loop."
         )
     if phase in {SessionPhase.RUNNING, SessionPhase.EXPORTING}:
+        # Only reachable when the run_job call did not return — host restart, cancellation, or an
+        # explicit wait=false. This is re-attachment, not progress polling.
         suffix = f" for {job_id}" if job_id else ""
-        return f"Call cassette_job_status{suffix} with wait_for_change_sec up to 30."
+        return (
+            f"Call cassette_job_status{suffix} once to re-attach to this live turn "
+            "(wait_for_change_sec up to 30 lets it settle first), then act on the phase it "
+            "returns; it is recovery, not a progress loop."
+        )
     if phase == SessionPhase.NEEDS_USER:
         return "Ask the user, then call cassette_answer_question with job_id and response."
     if phase == SessionPhase.REVIEW_REQUIRED:

@@ -1,7 +1,7 @@
 ---
 name: cassette-video-edit
-description: Edit project media through the local Oh My Cassette MCP tools in Codex or Claude — a direct multi-turn conversation with the Cassette agent, with timeline previews, guided questions, and explicit export.
-version: 2.0.0
+description: Edit, trim, cut, caption, subtitle, reframe, combine, add background music to, or export video, audio, and image files through Cassette. Use this skill whenever the user asks to change, preview, or render a media file in the project — even if they never say "Cassette" or name a tool — for example "trim the intro off demo.mp4", "add subtitles to this clip", "make me a 30-second cut with music", "why is there dead air at the start". Drives the local Oh My Cassette stdio MCP tools in Codex or Claude as one multi-turn conversation with the Cassette agent, with per-turn timeline previews, guided questions, and rendering only on explicit export.
+version: 2.1.0
 metadata:
   tags: [cassette, video, codex, claude, mcp, media-editing]
   category: media
@@ -9,97 +9,190 @@ metadata:
 
 # Oh My Cassette local workflow
 
-Use this skill when the user asks Codex or Claude to edit, cut, caption, reframe, subtitle, combine, polish, add music to, or export video, image, or audio media through Cassette.
+Cassette edits the media; you carry the messages. The `cassette` MCP server is a local stdio child
+process that opens no port and talks directly to the separate Cassette backend. Do not start or
+depend on the repository's FastAPI web-demo server for this workflow — that is a different adapter.
 
-The `cassette` MCP server is a local stdio child process. It opens no port. It sends media and edit requests directly to the separate Cassette backend. Do not start or depend on the repository's FastAPI web-demo server for this workflow.
+Two details live outside this file to keep it short. Read them when they apply:
+
+- `references/auth.md` — any `auth_*` error, or the user is not signed in on this machine.
+- `references/previews.md` — showing a timeline, contact sheet, or storyboard, and the plan-review
+  pause.
 
 ## Courier doctrine
 
 You are a courier between the user and the Cassette agent, not an editor or a brief writer.
 
-- Pass the user's editing words to `cassette_run_job` as `message` VERBATIM — never rewrite, optimize, summarize, translate, or expand them. The Cassette agent is the creative brain; it reads the session's uploaded media itself.
-- Relay the agent's questions and plans back to the user verbatim too. You add only three things: the timeline delta, the version numbers, and the live editor link.
-- Do not call `cassette_make_prompt` — it is a legacy brief builder, kept only so the tool-name set stays stable.
-- Never ask upfront about model, thinking level, optimization, or BGM. Defaults match the web editor. Change model/thinking only when the user asks, via `cassette_config`.
+- Pass the user's editing words to `cassette_run_job` as `message` VERBATIM. Never rewrite,
+  optimize, summarize, translate, or expand them. The agent is the creative brain and it reads the
+  session's uploaded media itself, so a "helpfully" rewritten instruction only throws away detail
+  the user chose and the agent could have used.
+- Relay the agent's questions and plans back verbatim too. You add exactly three things: the
+  timeline delta, the version numbers, and any validated artifact path.
+- Do not call `cassette_make_prompt`. It is a legacy brief builder, kept only so the tool-name set
+  stays stable.
+- Never ask upfront about model, thinking level, optimization, or BGM. The defaults match the web
+  editor, and front-loading configuration questions is precisely the friction this workflow exists
+  to remove.
 
 ## Safety and identity
 
-- Treat only files inside the active host project roots or explicitly configured media roots as ingestible. If `cassette_ingest_media` returns `source_path_not_allowed`, ask the user to move the file into the project or run the private setup command with `--allowed-root`.
-- Keep the returned `session_id` and `job_id`. Sessions are isolated by default. Hand a session or job to another host only when the user deliberately asks for a Codex/Claude handoff.
-- Use only paths and resource links returned in `artifacts`. Never invent an export path or ask the MCP runtime to expose another local file.
+- Only files inside the active host project roots or explicitly configured media roots are
+  ingestible. On `source_path_not_allowed`, ask the user to move the file into the project or to
+  rerun the private setup command with `--allowed-root`. Do not go hunting for a path that works.
+- Keep the returned `session_id` and `job_id`. Sessions are isolated by default; hand one to
+  another host only when the user deliberately asks for a Codex or Claude handoff.
+- Use only paths and resource links returned in `artifacts`. Never invent an export path or ask the
+  MCP runtime to expose another local file.
 
-## Signing in
+## The editing loop
 
-Cassette passwords are always generated by the server and emailed to the account holder. The user never chooses one, so **never invent, guess, or derive a password** — ask the user for the one in their Cassette email, and never proceed with a placeholder.
+One session is one continuous conversation on one persistent agent thread. The agent remembers
+every previous turn, so a follow-up like "make that title bigger" needs no context restating.
 
-- `auth_required` means this machine holds no credentials. Its `error.details.recovery` is an ordered list of `{when, action, consequence}` — pick the entry whose `when` matches what the user actually has and relay that one, not the whole list.
-- When the user has their emailed password, call `cassette_login` with `email` and `password`. It verifies against Cassette before storing anything, so a wrong paste changes nothing. It stores the password privately at file mode `0600`; do not repeat the password back in your reply.
-- When the user no longer has that password, first tell them a replacement is emailed and the current one stops working **on every machine**, get their explicit agreement, then call `cassette_login` with `request_new_password=true` and `confirm_replace=true`. Never send this on a vague complaint like "I'm having password trouble" — ask first. It is rate-limited to a few attempts an hour, so never retry it to see if it works; if it reports a delivery failure, the previous password should still work — have the user try that before spending another attempt.
-- `auth_invalid_password` means the stored password is stale, not that the user mistyped it — they never typed it. An address with no Cassette access reports `auth_not_authorized` instead, and that one is not about the password at all: relay that Cassette access has to be granted for the address first.
-- `auth_password_emailed` means the reset went out. Ask the user to paste the new password from their email and call `cassette_login` with it — the reset alone does not sign this machine in.
-- A stored password that stopped working reports `auth_failed` (or `cassette_auth_failed`), either in `error.details` or inside `data.job.errors[]` on a failed job. That is a stale password, not a typo — the user never typed it. Relay the error's `recovery` string.
-- If `credential_source` is `environment`, the credentials come from environment variables. `cassette_login` refuses in that case (`auth_env_precedence`), because a stored file would stay shadowed. Tell the user to update those variables instead.
-- Some users would rather keep a password out of the transcript. Both `auth_required` and stale-auth errors carry `setup_command` / `reset_password_command` for that; offer them as private terminal commands when the user prefers it, and don't push.
-
-## Staying current
-
-The MCP `instructions` carry an `UPDATE AVAILABLE:` line when a newer Oh My Cassette release exists. When they do:
-
-- Mention it once per session, with both version numbers, and then offer to run the command the line names.
-- Run that command only after the user explicitly agrees, and never re-offer in the same session. It replaces the plugin on disk, so tell the user the new version applies after the host reloads (`/reload-plugins` in Claude Code, a new task in Codex).
-- Never fabricate a version or an update command; if the line is absent, the install is current and the subject does not come up.
-
-## Conversational editing (multi-turn)
-
-One session is one continuous conversation with the Cassette agent on one persistent thread — the agent remembers every previous turn.
-
-1. Call `cassette_ingest_media` once for each source asset. Omit `session_id` on the first call so the runtime generates one, then reuse the returned value.
+1. Call `cassette_ingest_media` once per source asset. Omit `session_id` on the first call so the
+   runtime generates one, then reuse the returned value everywhere.
 2. Call `cassette_list_assets` and confirm the intended files are present.
-3. For every editing request, call `cassette_run_job` with `message` set to the user's verbatim words and the same `session_id`. The call returns when the turn is settled — no status polling. Follow-ups like "make that title bigger" need no context restating — the agent remembers the conversation.
-4. A turn ends `succeeded` with the edit committed and NOTHING rendered: the envelope carries `timeline_delta`, `quality.timeline_ctl`, and a contact-sheet artifact — that is the per-turn preview. Relay the delta and name the versions ("v3→v7: trimmed the intro to 4.0s").
-5. Pass `export=true` on a turn ONLY when the user expresses finish/export intent. That turn ends `review_required`; evaluate and call `cassette_review_completion` (only `decision=export` renders).
-6. If BGM is explicitly requested, use `cassette_match_exact_bgm` (concrete title/artist), `jamendo_music_matcher` (configured mood/genre), or `cassette_match_bgm` (Free To Use fallback) — then continue the conversation.
+3. For each editing request, call `cassette_run_job` with the user's verbatim `message` and the same
+   `session_id`.
+4. Relay what comes back (see routing below), then wait for the user's next instruction.
+5. Pass `export=true` only on a turn where the user expresses finish or export intent.
 
-## Model and thinking level
+If the user explicitly asks for background music, `cassette_match_exact_bgm` takes a concrete
+title/artist, `jamendo_music_matcher` a configured mood/genre, and `cassette_match_bgm` is the Free
+To Use fallback. Then continue the conversation as normal.
 
-- `cassette_config(session_id)` shows the current choice and the available options; `cassette_config(session_id, model=…, thinking_level=…)` changes them (accepts a product id like `openai/gpt-5.6-luna` or a label like "GPT-5.6 Luna").
-- The preference persists for the session and applies from the next turn — the same semantics as switching the model between turns in the web editor.
-- GPT thinking levels are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
-- The only user-selectable models are GPT-5.6 Luna and GPT-5.4 Mini. Defaults (GPT-5.6 Luna, low thinking) match the web editor. Do not ask upfront; change only on user request and confirm in one line.
+### One turn, end to end
 
-## Typed progress handling
+```
+User:  trim the dead air off the front of demo.mp4 and add a title card
 
-Treat the structured `phase` and `next_action` fields as authoritative. Do not decide routing, progress, or completion from keywords in prose.
+You:   cassette_run_job(session_id="s_41k",
+                        message="trim the dead air off the front of demo.mp4 and add a title card")
+       → phase="succeeded"
+         timeline_delta="v6→v9: trimmed 3.2s from head; added title card 0.0–2.5s"
+         quality.timeline_ctl=<digest>, artifacts=[contact sheet]
 
-`cassette_run_job` IS the wait. It returns when the turn is settled, streaming MCP progress notifications while the agent works, and answers with a terminal phase. One call per user turn — do not follow it with a status loop.
+       "v6→v9: trimmed 3.2s off the head and added a 2.5s title card. Nothing is rendered
+        yet — want to see the contact sheet, or should I export?"
 
-- `succeeded`: the turn is done, nothing rendered — relay the delta + preview and continue the conversation, or re-run with `export=true` when asked.
-- `needs_user`: present the pending question, then call `cassette_answer_question` with the same `job_id` and the user's `response`. On hosts that support MCP elicitation the runtime may collect the answer itself and return the already-resumed result; treat the returned phase as authoritative and do not re-answer.
-- `review_required` (export turns only): evaluate the full edit result and call `cassette_review_completion`. Rendering begins only when the explicit decision is `export`; use `continue`, `needs_user`, or `failed` when that is the validated outcome.
-- `exported`: present validated `artifacts` and their MCP resource links. The runtime has already measured the finished file into `quality.export_qc` (duration, fps, resolution, audio span, `black_segments`, and `audio_levels` with `mean_dbfs`/`peak_dbfs`) — read those numbers instead of probing the export yourself, and raise it with the user only when a field contradicts the request.
-- `failed`, `cancelled`, or `timed_out`: report the structured error and the runtime-derived next action. A `thread_busy` error means a run is already live on this session's thread (often started from the open editor tab) — wait and retry.
-- `running` or `exporting`: the call was detached (`wait=false`) or interrupted. See recovery below.
+User:  export it
+
+You:   cassette_run_job(session_id="s_41k", message="export it", export=true)
+       → phase="review_required"
+       cassette_review_completion(job_id="j_88", decision="export",
+                                  reason="user asked to export; trim and title card both landed")
+       → phase="exported", artifacts=[…/exports/j_88/demo_cut.mp4]
+```
+
+Note what did not happen: no status polling, no rewriting of the user's words, and no rendering
+until the user asked for it.
+
+## Routing on typed state
+
+Treat the structured `phase` and `next_action` fields as authoritative. Do not decide routing,
+progress, or completion from keywords in prose.
+
+`cassette_run_job` **is** the wait. It returns when the turn is settled, streaming MCP progress
+notifications while the agent works, and answers with a terminal phase. One call per user turn.
+
+| phase | what it means | what you do |
+|---|---|---|
+| `succeeded` | edit committed, **nothing rendered** | relay `data.job.timeline_delta` + the digest, continue the conversation |
+| `needs_user` | the agent asked a question | relay it, then `cassette_answer_question(job_id, response)` |
+| `review_required` | export turn awaiting judgement | evaluate the result, then `cassette_review_completion(job_id, decision, reason)` — only `decision=export` renders |
+| `exported` | the render finished | present the validated `artifacts` and their resource links |
+| `failed` / `cancelled` / `timed_out` | terminal error | report the structured error and its runtime-derived next action |
+| `running` / `exporting` | the call detached (`wait=false`) or was interrupted | see recovery below |
+
+### Where the per-turn data lives
+
+The envelope itself is thin — `ok`, `phase`, `next_action`, `session_id`, `job_id`, `artifacts`,
+`data`. Everything describing the turn hangs off `data.job`:
+
+| what you want | where it is |
+|---|---|
+| what changed this turn | `data.job.timeline_delta` |
+| the agent's plan checkpoints | `data.job.plan_progress` |
+| the text digest of the timeline | `data.job.quality.timeline_ctl` |
+| the contact sheet, when one exists | `data.job.quality.contact_sheet_uri` |
+| measurements of the rendered file | `data.job.quality.export_qc` (on `exported` only) |
+| resource links and export paths | `artifacts[]` — top level, **not** under `data` |
+
+Reading `timeline_delta` or `quality` off the top of the envelope yields nothing at all, which
+looks exactly like a turn that produced no preview. The digest is there on every settled turn; the
+contact sheet is best-effort and is simply absent when a sheet could not be built from the current
+frames, so check before offering to show one.
+
+`cassette_timeline` answers in its own shape — `data.ctl` plus `data.version`, `data.clip_count`,
+and `data.duration_sec` — not under `data.job`. Same digest, different path from the run envelope.
+
+`cassette_review_completion` takes `reason` as a **required** argument alongside `job_id` and
+`decision` (plus an optional `summary`) — omitting it fails the call with `validation_error`
+before anything renders. Write the judgement you actually made, in one line: it is the record of
+why this edit was considered finished, and it is the only place that judgement is captured.
+
+On `exported`, the runtime has already measured the finished file into `quality.export_qc`
+(duration, fps, resolution, audio span, `black_segments`, and `audio_levels` with
+`mean_dbfs`/`peak_dbfs`). Read those numbers instead of probing the export yourself, and raise them
+with the user only when a field contradicts what they asked for.
+
+A `thread_busy` error means a run is already live on this session's thread, often started from an
+open editor tab. Wait and retry rather than starting a second job.
+
+On hosts that support MCP elicitation, the runtime may collect a `needs_user` answer itself and
+return the already-resumed result. Trust the returned phase and do not answer twice.
 
 ### Recovery, not polling
 
-`cassette_job_status` exists to re-attach to a job whose call did not return — the host restarted, the call was cancelled, or the turn was deliberately started with `wait=false`. Call it **once** to read where the job stands, then act on the phase it reports. It is not a progress loop, and a settled turn never needs it.
+`cassette_job_status` re-attaches to a job whose call did not return — the host restarted, the call
+was cancelled, or the turn was deliberately started with `wait=false`. Call it **once**, act on the
+phase it reports, and stop. A settled turn never needs it.
 
-`job_id` is the durable handle for that recovery: jobs persist private thread and interrupt metadata on disk, so a paused turn resumes after Codex or Claude restarts.
+`job_id` is the durable handle for that recovery: jobs persist private thread and interrupt
+metadata on disk, so a paused turn resumes after a Codex or Claude restart.
 
-A long edit does not need managing. Hosts that background long tool calls (Claude Code moves any call past two minutes into a background task) keep the session usable while the turn runs, and deliver the result when it lands.
+A long edit does not need managing. Hosts that background long tool calls (Claude Code moves any
+call past two minutes into a background task) keep the session usable while the turn runs and
+deliver the result when it lands.
 
-## Timeline grounding and the live editor
+## Timeline grounding
 
-- Every user-visible statement about project state comes from `cassette_timeline`, never from memory. Name the version in replies: "Quick edit v42→v43: trimmed the intro to 4.0s."
-- Lane routing: when the ask names specific clips or values and needs at most a handful of operations, read `cassette_timeline` then use `cassette_edit` (requires `CASSETTE_DIRECT_EDIT=1`; pass `expected_version` from the read; a `stale_timeline` error means re-read and retry). When it needs watching footage, music sync, or a plan, use `cassette_run_job`.
-- The runtime does not hand out an editor deep link, and you must not construct or offer one. That URL is a bearer capability: the backend binds no owner to a session, so any signed-in account that sees it can open the project and run edits on the thread. Previews go through the digest, the contact sheet, and the export instead.
-- Job envelopes carry `timeline_delta` (cumulative changes since the turn started) and `plan_progress`; relay the delta rather than re-describing the timeline.
-- Preview escalation, one step per explicit user ask: text digest → contact sheet (`cassette_timeline` with `contact_sheet=true`) → full export. Never auto-render.
-- Showing previews in a terminal host (Claude Code, Codex CLI): the timeline digest is text — when the user asks to see the timeline, reprint `quality.timeline_ctl` verbatim in a fenced code block in your reply, never a paraphrase. For the contact sheet or storyboard sheet, terminal hosts cannot render image results inline — print the sheet's `contact_sheet_uri` / `storyboard_sheet_uri` (`file://…`) on its own line: most terminals make it cmd+clickable, opening the real pixels in the system image viewer. On a remote/SSH host where a local `file://` link cannot resolve, say the sheet is not viewable there rather than offering any editor link. Optionally also render an at-a-glance version in the terminal with `chafa -f symbols --size <cols>x<rows>` when chafa is available. Preview files are swept after ~30 days (`CASSETTE_ARTIFACT_TTL_DAYS`); exports are never auto-deleted.
-- Plan review: with `CASSETTE_PLAN_REVIEW=user` (the MCP default) a job pauses with an `edit_plan_review` question — the plan itself, with each storyboard beat as a readable cell (no raw links). The envelope's quality also carries `storyboard` (typed beat cells) and `storyboard_sheet` (a tiled image of one source frame per planned beat — show it when the host can display images). Relay the plan verbatim; answer via `cassette_answer_question` with `approve`, `revise <feedback>`, or `reject`. The user may instead decide in the open editor tab: a `resume_not_waiting_for_user` error means the tab answered first — just re-check status. Note: typing a fresh message in the open editor tab cancels an in-flight plugin turn (the tab takes over) — that is product behavior, not an error to retry.
+- Every user-visible statement about project state comes from `cassette_timeline` or the envelope's
+  `timeline_delta`, never from memory. Name the version: "v42→v43: trimmed the intro to 4.0s."
+- Prefer relaying `timeline_delta` and `plan_progress` over re-describing the whole timeline.
+- The runtime hands out no editor deep link, and you must not construct or offer one. That URL is a
+  bearer capability: the backend binds no owner to a session, so any signed-in account that sees it
+  can open the project and run edits on the thread. Previews go through the digest, the contact
+  sheet, and the export instead.
+- Route essentially everything through `cassette_run_job`. `cassette_edit` is an opt-in fast lane
+  for small named changes (trim, retime, text, delete, undo) that stays **disabled unless the
+  operator sets `CASSETTE_DIRECT_EDIT=1`** — no shipping host config sets it, so assume it is off
+  and reach for it only once a `cassette_edit` call has actually succeeded in this session or the
+  user says they enabled it. When you do use it, read `cassette_timeline` first and pass
+  `expected_version` from that read; a `stale_timeline` error means re-read and retry.
+
+## Model, thinking level, and updates
+
+- `cassette_config(session_id)` shows the current choice and the available options; adding
+  `model=…` / `thinking_level=…` changes them. It accepts a product id (`openai/gpt-5.6-luna`) or a
+  label ("GPT-5.6 Luna").
+- The selectable models are GPT-5.6 Luna and GPT-5.4 Mini. Thinking levels are `off`, `minimal`,
+  `low`, `medium`, `high`, and `xhigh`. The defaults — GPT-5.6 Luna, low thinking — match the web
+  editor. The preference persists for the session and applies from the next turn, the same
+  semantics as switching model between turns in the web editor. Change it only when the user asks,
+  and confirm in one line.
+- The MCP `instructions` carry an `UPDATE AVAILABLE:` line when a newer Oh My Cassette release
+  exists. Mention it once per session with both version numbers and offer the command it names. Run
+  that command only after the user explicitly agrees, and never re-offer in the same session — it
+  replaces the plugin on disk, so tell the user the new version applies after the host reloads
+  (`/reload-plugins` in Claude Code, a new task in Codex). Never fabricate a version or an update
+  command; if the line is absent, the install is current and the subject does not come up.
 
 ## Cancellation and handoff
 
 - Call `cassette_cancel_job` only when the user asks to stop the edit.
-- For a deliberate host handoff, provide the exact `session_id` and active `job_id`; the receiving host should begin with `cassette_job_status` rather than ingesting or starting a duplicate job.
-- Exported files remain under the shared Oh My Cassette data directory. Prefer the returned resource link or file URI rather than relocating the artifact.
+- For a deliberate host handoff, provide the exact `session_id` and active `job_id`; the receiving
+  host should begin with `cassette_job_status` rather than re-ingesting or starting a duplicate job.
+- Exported files remain under the shared Oh My Cassette data directory. Prefer the returned resource
+  link or file URI over relocating the artifact.

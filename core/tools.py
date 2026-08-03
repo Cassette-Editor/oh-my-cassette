@@ -919,7 +919,17 @@ def _job_report(job: dict) -> dict:
     latest_progress_summary = latest_progress.get("summary") or quality.get("progress_summary", "")
     output_count = len(job.get("outputs") or job.get("output_links") or [])
     export_pending = bool(quality.get("export_pending")) or (status == "succeeded" and output_count == 0)
-    if status == "succeeded" and export_pending:
+    # The transport clears completion_observed when the agent itself reported it could not do the
+    # job (terminalDecision outcome 'not_done'). The run still ends 'succeeded' because the LangGraph
+    # run succeeded — the transport fact and the editorial outcome are different things. Only an
+    # explicit False downgrades: a succeeded export always sets it True, and an absent key means no
+    # transport ever measured it, so neither is mistaken for a refusal.
+    if status == "succeeded" and quality.get("completion_observed") is False:
+        user_summary = (
+            "Cassette reported it could not carry out this edit, so the timeline is unchanged. "
+            "Read the chat message for the reason and retry with a more specific instruction."
+        )
+    elif status == "succeeded" and export_pending:
         user_summary = "Cassette chat panel indicates the edit is complete, but no exported video was recorded."
     elif status == "succeeded":
         user_summary = "Cassette edit completed and exported output is available."

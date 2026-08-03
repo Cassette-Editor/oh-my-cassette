@@ -181,9 +181,25 @@ def test_opencode_project_config_and_agents_skill_copy_stay_in_sync():
     assert config["command"] == ["python3", "scripts/run_local_mcp.py"]
     assert config["environment"]["CASSETTE_MCP_HOST"] == "opencode"
 
-    neutral = (ROOT / "skills" / "cassette-video-edit" / "SKILL.md").read_text("utf-8")
-    agents_copy = (ROOT / ".agents" / "skills" / "cassette-video-edit" / "SKILL.md").read_text("utf-8")
-    assert agents_copy == neutral
+    # The whole tree, not just SKILL.md: the body defers auth and preview detail to
+    # references/*.md, so a copy missing those files is a skill with dead pointers.
+    neutral_root = ROOT / "skills" / "cassette-video-edit"
+    agents_root = ROOT / ".agents" / "skills" / "cassette-video-edit"
+
+    def _tree(root: Path) -> dict[str, str]:
+        return {
+            str(path.relative_to(root)): path.read_text("utf-8") for path in sorted(root.rglob("*")) if path.is_file()
+        }
+
+    assert _tree(agents_root) == _tree(neutral_root)
+
+    # Every references/… path the body names has to resolve, on every host that
+    # installs the skill by copying this directory.
+    body = (neutral_root / "SKILL.md").read_text("utf-8")
+    referenced = set(re.findall(r"`(references/[\w./-]+\.md)`", body))
+    assert referenced, "SKILL.md should point at its bundled references"
+    for relative in sorted(referenced):
+        assert (neutral_root / relative).is_file(), f"SKILL.md points at missing {relative}"
 
 
 def test_codex_and_claude_install_from_the_release_channel_not_main():
@@ -309,6 +325,27 @@ def test_opencode_installer_honors_the_opencode_config_env_var(tmp_path, monkeyp
     # Skills are only discovered under the global directory, so a redirected
     # config file must not drag the skill install with it.
     assert installer.skill_destination() == (tmp_path / "opencode" / "skills" / "cassette-video-edit" / "SKILL.md")
+
+
+def test_opencode_installer_ships_the_bundled_references_not_just_skill_md(tmp_path):
+    # opencode discovers skills as directories. Copying SKILL.md alone would install a
+    # body whose references/ pointers resolve to nothing, and the reader would lose the
+    # sign-in recovery steps without any error to notice.
+    installer = _load_opencode_installer()
+    dest = tmp_path / "opencode" / "skills" / "cassette-video-edit" / "SKILL.md"
+
+    installer.install_skill(ROOT / "skills" / "cassette-video-edit", dest, dry_run=False)
+
+    assert dest.is_file()
+    for relative in ("references/auth.md", "references/previews.md"):
+        assert (dest.parent / relative).is_file(), f"installer dropped {relative}"
+
+    # Re-running the installer is how a user updates, so it has to replace cleanly
+    # rather than leave a stale file behind from the previous layout.
+    stale = dest.parent / "references" / "removed.md"
+    stale.write_text("stale", encoding="utf-8")
+    installer.install_skill(ROOT / "skills" / "cassette-video-edit", dest, dry_run=False)
+    assert not stale.exists()
 
 
 def test_opencode_installer_refuses_to_rewrite_a_jsonc_config(tmp_path):

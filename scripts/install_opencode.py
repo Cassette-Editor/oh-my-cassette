@@ -256,16 +256,24 @@ def write_config(path: Path, config: dict[str, Any]) -> None:
         raise
 
 
-def install_skill(source: Path, dest: Path, *, dry_run: bool) -> None:
-    if not source.is_file():
-        raise SystemExit(f"skill source is missing: {source}")
+def install_skill(source_dir: Path, dest: Path, *, dry_run: bool) -> None:
+    """Mirror the whole skill directory, not just SKILL.md.
+
+    SKILL.md keeps the auth and preview detail in references/*.md so the always-loaded
+    body stays short. Copying the one file would install a skill whose own pointers
+    resolve to nothing — the reader would silently lose the sign-in recovery steps.
+    """
+    source_file = source_dir / "SKILL.md"
+    if not source_file.is_file():
+        raise SystemExit(f"skill source is missing: {source_file}")
+    dest_dir = dest.parent
     if dry_run:
-        print(f"would install skill: {dest}")
+        print(f"would install skill: {dest_dir}")
         return
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists() or dest.is_symlink():
-        remove_existing(dest)
-    shutil.copyfile(source, dest)
+    dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    if dest_dir.exists() or dest_dir.is_symlink():
+        remove_existing(dest_dir)
+    shutil.copytree(source_dir, dest_dir)
     print(f"installed skill: {dest}")
 
 
@@ -366,7 +374,7 @@ def main() -> int:
             print(f"registered MCP server '{SERVER_NAME}' in {config_path}")
 
     install_skill(
-        plugin_root / "skills" / SKILL_NAME / "SKILL.md",
+        plugin_root / "skills" / SKILL_NAME,
         skill_destination(),
         dry_run=args.dry_run,
     )

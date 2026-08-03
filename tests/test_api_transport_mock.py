@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from cassette.core import jobs, tools
+from cassette.core import jobs, manifest, tools
 from cassette.core.api_transport import ApiTransport, ApiTransportError
 
 EXPORT_BYTES = b"FAKE_MP4_BYTES"
@@ -145,6 +145,9 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
             self.rec["run_input"] = body.get("input")
             self.rec["run_config"] = body.get("config")
             self.rec["run_multitask"] = body.get("multitask_strategy")
+            # A fresh run re-arms the interrupt cycle: a later job on this thread must see its own
+            # editor_navigate interrupt, not inherit the previous job's answered one.
+            self.rec["resume_value"] = None
             return self._json(200, {"run_id": "r-1", "status": "pending"})
         if path.startswith("/api/export/projects/") and path.endswith("/jobs"):
             self.rec["export_session"] = path.split("/api/export/projects/", 1)[1].rsplit("/jobs", 1)[0]
@@ -188,6 +191,10 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
         if path == "/api/langgraph/threads/th-1/runs/r-2":
             return self._json(200, {"run_id": "r-2", "status": "success"})
         if path == "/api/langgraph/threads/th-1/state":
+            # A resumed interrupt stops being pending — the real server advances the graph past it.
+            # Keeping it pending forever would let the transport resume the same interrupt in a loop.
+            if self.rec.get("resume_value") is not None:
+                return self._json(200, {"values": {}, "tasks": []})
             # Only editor_navigate (the sole browser-target tool) interrupts a headless run.
             return self._json(
                 200,
@@ -424,6 +431,33 @@ def test_api_transport_dedupes_uploads_in_reused_session(cassette_env, mock_api,
     assert mock_api.rec["init_count"] == first_inits
 
 
+def test_api_transport_uploads_the_name_the_user_knows(cassette_env, mock_api):
+    """Ingestion stores session media content-addressed, so the on-disk name is a bare hash.
+
+    Uploading that hash is what the agent then sees in its media catalog, leaving an instruction
+    that names a file ("add jazz1 under the video") unresolvable — the agent stops and asks which
+    asset was meant instead of making the edit."""
+    source = cassette_env["source_root"] / "jazz1.mp3"
+    source.write_bytes(b"x" * 64)
+    ingested = manifest.ingest_asset(str(source), session_id="names")
+    stored = Path(ingested["saved_path"])
+    assert stored.name != "jazz1.mp3", "precondition: ingestion renames to a content digest"
+
+    ApiTransport().run_job(
+        {
+            "job_id": "job-names",
+            "session_hash": ingested["session_hash"],
+            "cassette_session_id": "names",
+            "prompt": "add jazz1 under the video",
+            "asset_paths": [str(stored)],
+            "timeout_sec": 60,
+        }
+    )
+
+    assert mock_api.rec["init_bodies"][0]["fileName"] == "jazz1.mp3"
+    assert mock_api.rec["complete_bodies"][0]["fileName"] == "jazz1.mp3"
+
+
 def test_api_transport_records_run_progress(cassette_env, mock_api, tmp_path):
     """The run writes stage/telemetry into the job record (current_stage, stage_timings,
     progress_events) so status polls and _job_report are not frozen and empty."""
@@ -518,7 +552,10 @@ class _AskThenResumeAPI(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path.endswith("/runs/initial-run"):
-            return self._json(200, {"run_id": "initial-run", "status": "interrupted"})
+            # The live LangGraph server reports a run parked on an interrupt as `success`, not
+            # `interrupted` — the run really did finish, the *graph* is what is waiting. Reporting
+            # `interrupted` here would let a plugin that trusts the run status alone pass.
+            return self._json(200, {"run_id": "initial-run", "status": "success"})
         if path.endswith("/runs/resumed-run"):
             return self._json(200, {"run_id": "resumed-run", "status": "success"})
         if path == "/api/langgraph/threads/persisted-thread/state":
@@ -539,9 +576,13 @@ class _AskThenResumeAPI(BaseHTTPRequestHandler):
                             "interrupts": [
                                 {
                                     "id": "ask-1",
+                                    # Typed agent interrupts are discriminated by `kind`
+                                    # (packages/shared/src/types/agent-interrupts.ts); only
+                                    # LangGraph *tool* interrupts use `type: 'tool'`.
                                     "value": {
-                                        "type": "ask_user",
-                                        "prompt": "You must choose version A or B.",
+                                        "kind": "ask_user",
+                                        "toolCallId": "call-ask-1",
+                                        "payload": {"question": "You must choose version A or B."},
                                     },
                                 }
                             ]
