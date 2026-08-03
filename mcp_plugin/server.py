@@ -42,6 +42,12 @@ from .runtime import LocalMcpRuntime
 from . import update_check
 
 
+# A client that advertised roots should answer roots/list promptly; this bound only exists so
+# that a host which advertises the capability and then stalls degrades to "no roots" instead of
+# wedging the ingest call behind it.
+_ROOTS_TIMEOUT_SEC = 5.0
+
+
 @dataclass
 class McpLifespanContext:
     runtime: LocalMcpRuntime
@@ -87,6 +93,17 @@ async def lifespan(_: FastMCP) -> AsyncIterator[McpLifespanContext]:
     yield McpLifespanContext(runtime=runtime)
 
 
+def _client_supports_roots(context: Context) -> bool:
+    """Did the client advertise the roots capability during initialize?
+
+    Read from the negotiated client_params rather than remembered separately, so the
+    capability the server acts on is always the one it reported on stderr.
+    """
+    params = getattr(getattr(context, "session", None), "client_params", None)
+    capabilities = getattr(params, "capabilities", None)
+    return getattr(capabilities, "roots", None) is not None
+
+
 def _log_client_profile_once(context: Context) -> None:
     """Record the negotiated protocol revision and optional capabilities, once per run.
 
@@ -107,7 +124,7 @@ def _log_client_profile_once(context: Context) -> None:
         info = getattr(params, "clientInfo", None)
         negotiated = getattr(params, "protocolVersion", None)
         elicitation = getattr(capabilities, "elicitation", None) is not None
-        roots = getattr(capabilities, "roots", None) is not None
+        roots = _client_supports_roots(context)
         print(
             "oh-my-cassette: mcp client={name}/{version} protocol={negotiated} "
             "server_max={supported} elicitation={elicitation} roots={roots}".format(
@@ -303,9 +320,15 @@ def _runtime(context: Context) -> LocalMcpRuntime:
 
 async def _client_roots(context: Context) -> list[Path]:
     roots: list[Path] = []
+    if not _client_supports_roots(context):
+        # Asking anyway is not a harmless no-op. A client that never advertised roots is
+        # under no obligation to answer roots/list, and the await below has no deadline of
+        # its own, so a client that simply drops the request leaves cassette_ingest_media
+        # blocked forever. Honouring the negotiated capability keeps the degrade graceful.
+        return roots
     try:
-        result = await context.session.list_roots()
-    except Exception:  # client root support is optional
+        result = await asyncio.wait_for(context.session.list_roots(), timeout=_ROOTS_TIMEOUT_SEC)
+    except Exception:  # client root support is optional, and a slow client must not wedge ingest
         result = None
     for item in getattr(result, "roots", []) or []:
         parsed = urlparse(str(getattr(item, "uri", "")))

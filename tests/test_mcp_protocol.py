@@ -87,7 +87,12 @@ def _environment(tmp_path: Path, project: Path) -> dict[str, str]:
     return environment
 
 
-def _speak_raw(environment: dict[str, str], requests: list[dict], timeout: float = 30.0) -> dict[int, dict]:
+def _speak_raw(
+    environment: dict[str, str],
+    requests: list[dict],
+    timeout: float = 30.0,
+    server_requests: list[dict] | None = None,
+) -> dict[int, dict]:
     """Exchange raw JSON-RPC with the real server process, bypassing ClientSession.
 
     ClientSession can only ever send the revision the installed SDK was built for, so
@@ -124,6 +129,11 @@ def _speak_raw(environment: dict[str, str], requests: list[dict], timeout: float
             except json.JSONDecodeError:  # stdout is protocol-only, but never trust it blindly
                 continue
             identifier = message.get("id")
+            if server_requests is not None and "method" in message and "id" in message:
+                # A server->client request. This harness deliberately never answers one, so
+                # recording them is how a test can assert the server only asks for what the
+                # client advertised.
+                server_requests.append(message)
             if identifier in outstanding:
                 replies[identifier] = message
                 outstanding.discard(identifier)
@@ -1121,3 +1131,39 @@ def test_protocol_login_reports_an_unreachable_api_without_touching_credentials(
     assert envelope["error"]["code"] == "cassette_unreachable"
     assert stored_path.read_bytes() == before
     assert "pasted" not in json.dumps(envelope)
+
+
+def test_ingest_never_asks_a_rootless_client_for_roots(tmp_path):
+    """A client that never advertised roots must not be sent roots/list.
+
+    _speak_raw declares no capabilities and never answers a server->client request, which is
+    exactly how a minimal or custom MCP client behaves. Before the capability gate,
+    cassette_ingest_media issued roots/list unconditionally and then awaited the reply with no
+    deadline of its own, so the call hung forever on such a host -- a stall the server's own
+    stderr contradicted, because it had already logged `roots=no` during initialize.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    clip = project / "clip.mp4"
+    clip.write_bytes(b"\x00" * 4096)
+
+    server_requests: list[dict] = []
+    replies = _speak_raw(
+        _environment(tmp_path, project),
+        [
+            _initialize_request("2025-06-18", identifier=1),
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "cassette_ingest_media", "arguments": {"source_path": str(clip)}},
+            },
+        ],
+        timeout=25.0,
+        server_requests=server_requests,
+    )
+
+    assert 2 in replies, "cassette_ingest_media never answered a client without roots support"
+    asked = [message["method"] for message in server_requests]
+    assert "roots/list" not in asked, f"server asked a rootless client for roots: {asked}"

@@ -49,7 +49,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from .manifest import get_asset_root
+from .manifest import get_asset_root, load_manifest
 
 # Terminal Cassette job statuses (mirror jobs.update_job terminal set).
 _SUCCEEDED = "succeeded"
@@ -651,7 +651,9 @@ class ApiTransport:
             media_file_ids: list[str] = []
             if asset_paths:
                 self._enter_stage(job_id, "upload", "Uploading media to Cassette")
-                media_file_ids = self._upload_assets(asset_paths, session_id, deadline, job_id)
+                media_file_ids = self._upload_assets(
+                    asset_paths, session_id, deadline, job_id, self._display_names(job)
+                )
 
             # Media derivatives (analysis evidence/embeddings for the agent, render-source for the
             # export) are generated asynchronously after upload. Starting the run early makes the
@@ -867,7 +869,7 @@ class ApiTransport:
                 raise ApiTransportError("missing_required_arg", "response is required to resume a Cassette job")
             self._authenticate()
             interrupts = self._pending_interrupts(thread_id)
-            pending_kinds = {(item.get("value") or {}).get("type") for item in interrupts}
+            pending_kinds = {self._interrupt_kind(item.get("value")) for item in interrupts}
             if "edit_plan_review" in pending_kinds:
                 # Bare PlanReviewDecision — approve / revise <feedback> / reject, mapped from the
                 # user's free-text reply. First-answer-wins with an open editor tab: if the tab
@@ -1057,12 +1059,18 @@ class ApiTransport:
         self._token = str(token)
 
     # ── media upload ────────────────────────────────────────────────────────
-    def _upload_asset(self, path: str, session_id: str, deadline: float, job_id: str = "") -> str:
+    def _upload_asset(
+        self, path: str, session_id: str, deadline: float, job_id: str = "", display_name: str = ""
+    ) -> str:
         self._raise_if_cancelled(job_id)
         file_path = Path(path)
         if not file_path.exists():
             raise ApiTransportError("asset_missing", f"Asset not found on disk: {path}")
-        file_name = file_path.name
+        # Session media is stored content-addressed (<sha256><ext>), so the on-disk name carries no
+        # meaning. Uploading that hash makes every instruction that names a file ("use jazz1", "put
+        # Beach.mp4 first") unresolvable against the agent's media catalog, and the agent has to
+        # stop and ask which asset was meant.
+        file_name = display_name or file_path.name
         mime, _ = mimetypes.guess_type(file_name)
         mime = mime or "application/octet-stream"
         # The editor scopes uploads by BOTH x-session-id (media catalog the agent reads) and
@@ -1199,7 +1207,39 @@ class ApiTransport:
         return bool(status.get("exportReady") or status.get("renderStatus") == "completed")
 
     # ── upload (with incremental dedupe) ──
-    def _upload_assets(self, asset_paths: list[str], session_id: str, deadline: float, job_id: str = "") -> list[str]:
+    @staticmethod
+    def _display_names(job: dict) -> dict[str, str]:
+        """Map each stored asset path to the name the user knows the file by.
+
+        The session manifest is the only place the original name survives ingestion, so uploads
+        must read it from there rather than from the content-addressed path on disk.
+        """
+        session_hash = str(job.get("session_hash") or "").strip()
+        if not session_hash:
+            return {}
+        try:
+            manifest = load_manifest(session_hash)
+        except (OSError, ValueError):  # a damaged manifest must not fail the upload
+            return {}
+        names: dict[str, str] = {}
+        for asset in manifest.get("assets") or []:
+            if not isinstance(asset, dict):
+                continue
+            saved = str(asset.get("saved_path") or "")
+            # .name defends against a manifest carrying a path-like original name.
+            original = Path(str(asset.get("original_name") or "").strip()).name
+            if saved and original:
+                names[saved] = original
+        return names
+
+    def _upload_assets(
+        self,
+        asset_paths: list[str],
+        session_id: str,
+        deadline: float,
+        job_id: str = "",
+        display_names: dict[str, str] | None = None,
+    ) -> list[str]:
         """Upload each asset once. Skips assets already uploaded in this session (a reused gateway
         session that edits then refines would otherwise accumulate duplicate media in the project)
         via a per-session uploaded-asset cache."""
@@ -1216,7 +1256,7 @@ class ApiTransport:
                 batch[fp] = cache[fp]
                 ids.append(cache[fp])
                 continue
-            media_id = self._upload_asset(path, session_id, deadline, job_id)
+            media_id = self._upload_asset(path, session_id, deadline, job_id, (display_names or {}).get(path, ""))
             ids.append(media_id)
             if fp:
                 batch[fp] = media_id
@@ -1758,60 +1798,99 @@ class ApiTransport:
         job_id: str,
         session_id: str,
     ) -> tuple[str, list[dict]]:
+        # Interrupts we have already answered. If the same ones come back still pending, our resume
+        # did not advance the graph, and resuming again would spin until the job deadline.
+        resumed_interrupts: set[str] = set()
         while True:
             self._active_stream_stop = self._refresh_stream_listener(
                 thread_id, run_id, job, getattr(self, "_active_stream_stop", None)
             )
             status = self._await_run(thread_id, run_id, deadline, job_id)
-            if status == "interrupted":
+            if status in {"interrupted", "success"}:
+                # A run parked on an interrupt is reported `success` by the LangGraph server — the
+                # *run* did finish; the *graph* is what is waiting. So the run status alone cannot
+                # tell "done" from "waiting for an answer", and trusting it reports an edit the
+                # agent never made. The thread's pending interrupts are the authoritative signal.
                 interrupts = self._pending_interrupts(thread_id)
-                if not interrupts:
-                    # Interrupted with nothing pending == treat as needing user. Carry a summary so
-                    # the terminal message is not a bare headline.
-                    summary = self._latest_agent_summary(thread_id) or "Cassette paused and needs input to continue."
-                    questions.append(
+                pending_keys = {self._interrupt_key(item) for item in interrupts}
+                if interrupts and pending_keys <= resumed_interrupts:
+                    # Answering these already failed to move the graph on. It is still parked, so
+                    # this is a job that needs the user — never a finished edit.
+                    self._persist_continuation(job_id, thread_id, session_id, config, run_id, interrupts=interrupts)
+                    return _NEEDS_USER, questions
+                if interrupts:
+                    resume_value, new_questions, needs_user = self._resume_value(interrupts)
+                    questions.extend(new_questions)
+                    if needs_user:
+                        # A genuine user question (e.g. ask_user) with no auto-reply configured:
+                        # leave the thread interrupted and hand back to the user/review loop.
+                        self._persist_continuation(
+                            job_id,
+                            thread_id,
+                            session_id,
+                            config,
+                            run_id,
+                            interrupts=interrupts,
+                        )
+                        return _NEEDS_USER, questions
+                    run_id = self._post_run(
+                        thread_id,
                         {
-                            "question": summary[:500],
-                            "requires_user": True,
-                            "reason": "cassette_agent_question",
-                            "answer": "",
-                        }
+                            "assistant_id": "cassette-chat",
+                            "command": {"resume": resume_value},
+                            "config": config,
+                            "multitask_strategy": "interrupt",
+                            "stream_mode": _RUN_STREAM_MODES,
+                        },
                     )
                     self._persist_continuation(job_id, thread_id, session_id, config, run_id, interrupts=[])
-                    return _NEEDS_USER, questions
-                resume_value, new_questions, needs_user = self._resume_value(interrupts)
-                questions.extend(new_questions)
-                if needs_user:
-                    # A genuine user question was raised (e.g. ask_user) with no auto-reply configured:
-                    # leave the thread interrupted and hand back to the Hermes/user review loop.
-                    self._persist_continuation(
-                        job_id,
-                        thread_id,
-                        session_id,
-                        config,
-                        run_id,
-                        interrupts=interrupts,
-                    )
-                    return _NEEDS_USER, questions
-                run_id = self._post_run(
-                    thread_id,
+                    resumed_interrupts |= pending_keys
+                    continue
+                if status == "success":
+                    self._clear_continuation(job_id)
+                    return _SUCCEEDED, questions
+                # Interrupted with nothing pending == treat as needing user. Carry a summary so
+                # the terminal message is not a bare headline.
+                summary = self._latest_agent_summary(thread_id) or "Cassette paused and needs input to continue."
+                questions.append(
                     {
-                        "assistant_id": "cassette-chat",
-                        "command": {"resume": resume_value},
-                        "config": config,
-                        "multitask_strategy": "interrupt",
-                        "stream_mode": _RUN_STREAM_MODES,
-                    },
+                        "question": summary[:500],
+                        "requires_user": True,
+                        "reason": "cassette_agent_question",
+                        "answer": "",
+                    }
                 )
                 self._persist_continuation(job_id, thread_id, session_id, config, run_id, interrupts=[])
-                continue
-            if status == "success":
-                self._clear_continuation(job_id)
-                return _SUCCEEDED, questions
+                return _NEEDS_USER, questions
             if status == "timeout":
                 return _TIMED_OUT, questions
             self._clear_continuation(job_id)
             raise ApiTransportError("agent_run_error", f"Agent run failed: {self._run_error_detail(thread_id)}")
+
+    @staticmethod
+    def _interrupt_kind(value: Any) -> str:
+        """Discriminator for a LangGraph interrupt value.
+
+        The two interrupt families label themselves differently and both are load-bearing:
+        headless *tool* interrupts carry ``type: 'tool'``, while typed agent interrupts
+        (ask_user / edit_plan_review / mode_switch / init_questions) carry ``kind``. Reading only
+        one of the two makes the whole other family invisible, which silently turns a pending
+        question into a finished job.
+        """
+        if not isinstance(value, dict):
+            return "unknown"
+        return str(value.get("kind") or value.get("type") or "unknown")
+
+    @staticmethod
+    def _interrupt_key(item: Any) -> str:
+        """Stable identity for one pending interrupt, used to notice one that never clears."""
+        if not isinstance(item, dict):
+            return "unknown"
+        identifier = str(item.get("id") or "").strip()
+        if identifier:
+            return identifier
+        # No id: fall back to the value itself so two different questions stay distinguishable.
+        return json.dumps(item.get("value"), sort_keys=True, default=str)[:512]
 
     @staticmethod
     def _interrupt_metadata(interrupts: list[dict]) -> list[dict]:
@@ -1823,7 +1902,7 @@ class ApiTransport:
             metadata.append(
                 {
                     "id": str(item.get("id") or "") if isinstance(item, dict) else "",
-                    "type": str(value.get("type") or "unknown"),
+                    "type": ApiTransport._interrupt_kind(value),
                     "tool_call_id": str((value.get("toolCall") or {}).get("id") or "")
                     if isinstance(value.get("toolCall"), dict)
                     else "",
@@ -2078,7 +2157,7 @@ class ApiTransport:
         keyed: dict[str, Any] = {}
         for item in interrupts:
             value = item["value"]
-            kind = value.get("type")
+            kind = self._interrupt_kind(value)
             if kind == "tool":
                 tool_call = value.get("toolCall") or {}
                 call_id = tool_call.get("id")
@@ -2141,7 +2220,11 @@ class ApiTransport:
                 )
                 return {}, questions, False
             if kind == "ask_user":
-                text = str(value.get("prompt") or value.get("question") or "")
+                # The question lives in the typed payload (AskUserInterruptPayload); the flat keys
+                # are only a fallback. Reading the flat ones alone yields an empty question, which
+                # classifies as routine and auto-answers a decision the user never saw.
+                ask_payload = value.get("payload") if isinstance(value.get("payload"), dict) else {}
+                text = str(ask_payload.get("question") or value.get("prompt") or value.get("question") or "")
                 # Classify with prompt.classify_cassette_question: a *routine* ambiguity
                 # is auto-answered with a safe default and the run continues; only a genuine user
                 # choice or a missing-required-asset returns needs_user (carrying the specific reason).
