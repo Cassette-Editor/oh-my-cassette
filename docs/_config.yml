@@ -1,0 +1,11 @@
+title: Oh My Cassette
+description: >-
+  Open-source AI video editing plugin and local MCP server for Claude Code,
+  Codex, Hermes Agent, and OpenCode.
+theme: jekyll-theme-cayman
+
+# These two describe the hosted Cassette editor's UI and brand, not this plugin.
+# They stay in the repository but are not part of the documentation site.
+exclude:
+  - DESIGN.md
+  - PRODUCT.md
