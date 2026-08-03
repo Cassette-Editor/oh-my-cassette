@@ -1,6 +1,6 @@
 ---
 name: cassette-video-edit
-description: Orchestrate gateway media and natural-language editing instructions into complete Cassette editing jobs through the plugin's API transport, with timeline grounding, plan relay, and live editor links.
+description: Orchestrate gateway media and natural-language editing instructions into complete Cassette editing jobs through the plugin's API transport, with timeline grounding, plan relay, and previews and exports delivered into the chat.
 version: 3.0.0
 metadata:
   hermes:
@@ -71,6 +71,8 @@ When `cassette_run_job` returns `needs_user` with `completion_requires_hermes_re
 - `quality.progress_summary` — the agent's own completion summary.
 
 Export only when the evidence says the edit is complete enough to export. Do not treat a single keyword in the agent's summary as proof either way. If the timeline is empty or obviously wrong, use `decision="continue"` with feedback or `"needs_user"`.
+
+`cassette_review_completion` takes `reason` as a **required** argument beside `job_id` and `decision` (with an optional `summary`); leaving it out fails the call with `validation_error` before anything renders. Record the judgement you actually made — it is the only place that reasoning is captured.
 
 ## Hard Rules
 

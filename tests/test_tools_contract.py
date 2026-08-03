@@ -3103,6 +3103,55 @@ def test_job_status_includes_user_report(cassette_env, monkeypatch):
     assert report["latest_progress"] == "Cassette chat says complete."
 
 
+def test_job_status_report_does_not_claim_completion_the_agent_refused(cassette_env, monkeypatch):
+    """A turn the agent openly declined must not be summarized as a finished edit.
+
+    The LangGraph run still ends 'succeeded' -- that is a transport fact -- but the transport clears
+    completion_observed when the agent reports outcome 'not_done'. Observed live: the agent answered
+    "the timeline is empty, there is nothing to trim" and the report still said the edit was
+    complete, which is the one line a host is most likely to repeat back to the user.
+    """
+
+    def fake_run(job):
+        return {
+            "status": "succeeded",
+            "outputs": [],
+            "questions": [],
+            "errors": [],
+            "quality": {"completion_observed": False, "export_pending": True},
+            "final_screenshot": None,
+        }
+
+    _stub_transport(monkeypatch, run_job=fake_run)
+    payload = json.loads(tools.cassette_run_job({"prompt": "trim it", "session_id": "refused"}))
+    status = json.loads(tools.cassette_job_status({"job_id": payload["job_id"]}))
+
+    report = status["data"]["job"]["report"]
+    assert report["status"] == "succeeded"
+    assert "could not carry out this edit" in report["user_summary"]
+    assert "edit is complete" not in report["user_summary"]
+
+
+def test_job_status_report_still_reports_completion_when_nothing_was_refused(cassette_env, monkeypatch):
+    """Guard the downgrade's blast radius: an absent completion_observed is not a refusal."""
+
+    def fake_run(job):
+        return {
+            "status": "succeeded",
+            "outputs": [],
+            "questions": [],
+            "errors": [],
+            "quality": {"export_pending": True},
+            "final_screenshot": None,
+        }
+
+    _stub_transport(monkeypatch, run_job=fake_run)
+    payload = json.loads(tools.cassette_run_job({"prompt": "trim it", "session_id": "not-refused"}))
+    status = json.loads(tools.cassette_job_status({"job_id": payload["job_id"]}))
+
+    assert "no exported video was recorded" in status["data"]["job"]["report"]["user_summary"]
+
+
 def test_run_job_does_not_hardcode_default_model(cassette_env, monkeypatch):
     observed = {}
 
