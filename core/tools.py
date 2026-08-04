@@ -738,7 +738,7 @@ def _should_run_gateway_job_in_background(args: dict, delivery: dict | None) -> 
     if not _gateway_background_jobs_enabled():
         return False
     platform = _normalize_platform_name((delivery or {}).get("platform"))
-    if platform not in {"qqbot", "weixin", "telegram", "web"}:
+    if platform not in {"qqbot", "weixin", "telegram"}:
         return False
     return bool((delivery or {}).get("chat_id"))
 
@@ -1725,8 +1725,6 @@ def _normalize_platform_name(platform: Any) -> str:
         return "telegram"
     if value in {"wechat", "weixin", "wx"}:
         return "weixin"
-    if value in {"web", "browser", "web_demo", "webdemo"}:
-        return "web"
     return value
 
 
