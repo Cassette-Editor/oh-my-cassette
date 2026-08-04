@@ -66,7 +66,7 @@ python3 scripts/install_plugin.py \
 
 ## 配置
 
-Codex 与 Claude 共用操作系统标准的 Oh My Cassette 配置和数据目录，其凭据与任务状态和 Hermes 相互独立。当前客户端打开的项目会自动加入可信范围；其他媒体目录必须通过 `setup_local_mcp.py --allowed-root` 显式添加。网页演示只读取自身进程环境，不会使用任一插件保存的凭据。
+Codex 与 Claude 共用操作系统标准的 Oh My Cassette 配置和数据目录，其凭据与任务状态和 Hermes 相互独立。当前客户端打开的项目会自动加入可信范围；其他媒体目录必须通过 `setup_local_mcp.py --allowed-root` 显式添加。
 
 安装器会把常规运行时设置写入 `~/.hermes/.env`。你也可以手动编辑该文件。
 
@@ -132,7 +132,7 @@ CASSETTE_MCP_PYTHON="$PWD/.venv/bin/python" \
 .venv/bin/python scripts/run_local_mcp.py
 ```
 
-确定性测试会覆盖核心能力对齐、全部 14 个工具、真实 stdio 协议调用、长轮询、重启与续跑、状态转换、资源链接、身份验证和文件系统安全、两种插件清单、现有 Hermes 与网页演示测试，以及前端构建。由维护者手动触发的实时 E2E 会通过临时环境变量读取仓库 Secret；PR CI 本身不使用凭据。
+确定性测试会覆盖核心能力对齐、全部 14 个工具、真实 stdio 协议调用、长轮询、重启与续跑、状态转换、资源链接、身份验证和文件系统安全、两种插件清单，以及现有 Hermes 测试。由维护者手动触发的实时 E2E 会通过临时环境变量读取仓库 Secret；PR CI 本身不使用凭据。
 
 运行本地 Cassette 端到端测试工具：
 
@@ -142,22 +142,7 @@ CASSETTE_MCP_PYTHON="$PWD/.venv/bin/python" \
   --instruction "制作一个 10 秒以内、带字幕的短视频。"
 ```
 
-运行网页演示服务：
-
-```bash
-uv venv .venv-web
-uv pip install --python .venv-web/bin/python -r requirements-web.txt
-# 构建浏览器前端（Vite/React -> web_demo/frontend/dist）；需要 Node.js + npm。
-./web_demo/build_frontend.sh
-set -a
-. ./oh-my-cassette-web.env
-set +a
-.venv-web/bin/python -m web_demo.server
-```
-
-浏览器前端是位于 `web_demo/frontend` 的 Vite + React + TypeScript 应用；`web_demo/build_frontend.sh` 会将其编译到 `web_demo/frontend/dist`，由服务端在 `/static` 下提供。构建产物不会提交到仓库，因此每次部署都需要构建（拉取前端改动后也要重新构建）。如需实时调试前端，可运行 `cd web_demo/frontend && npm run dev`，Vite 会把 `/api` 代理到 `http://127.0.0.1:8088`，请同时运行 FastAPI 服务。
-
-网页演示会从进程环境变量读取 `CASSETTE_*`、`DEEPSEEK_*` 和 `OMC_WEB_*`。浏览器内也可以在“设置”里临时填写 DeepSeek API Key；该 key 只随请求发送到当前服务器，不会写入仓库或服务端磁盘。示例 systemd 文件在 `deploy/oh-my-cassette-web.service.example`，环境变量模板在 `deploy/oh-my-cassette-web.env.example`。
+网页演示已经不在本仓库内，迁到了 [oh-my-cassette-web](https://github.com/Cassette-Editor/oh-my-cassette-web)，连同它自己的 FastAPI 服务、Vite/React 前端和部署模板。它跑在一个共享的 Cassette 账号上，依赖 Playwright 传输——这正是它没法跟着本仓库切到 agent 账号 API 路径的原因。
 
 真实网关端到端测试是可选项，默认会跳过：
 

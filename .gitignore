@@ -18,7 +18,6 @@ env/
 .env.*
 !.env.example
 !.env.*.example
-oh-my-cassette-web.env
 
 # Runtime outputs
 downloads/
@@ -27,7 +26,6 @@ cache/
 exports/
 jobs/
 logs/
-web_demo/logs/
 *.part
 *.log
 

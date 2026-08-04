@@ -20,7 +20,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       python: ${{ steps.filter.outputs.python }}
-      frontend: ${{ steps.filter.outputs.frontend }}
       install: ${{ steps.filter.outputs.install }}
       mcp: ${{ steps.filter.outputs.mcp }}
       native: ${{ steps.filter.outputs.native }}
@@ -33,7 +32,6 @@ jobs:
             python:
               - '**/*.py'
               - 'pyproject.toml'
-              - 'requirements-web.txt'
               - 'requirements-mcp.in'
               - 'requirements-mcp.lock'
               - 'pytest.ini'
@@ -50,9 +48,6 @@ jobs:
               - 'release-please-config.json'
               - '.github/workflows/ci.yml'
               - '.github/workflows/e2e.yml'
-            frontend:
-              - 'web_demo/frontend/**'
-              - '.github/workflows/ci.yml'
             mcp:
               - 'mcp_plugin/**'
               - 'runtime_config.py'
@@ -129,11 +124,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          cache-dependency-path: |
-            requirements-web.txt
-            requirements-mcp.lock
+          cache-dependency-path: requirements-mcp.lock
       - name: Install dependencies
-        run: python -m pip install -r requirements-web.txt -r requirements-mcp.lock pytest pytest-xdist
+        run: python -m pip install -r requirements-mcp.lock pytest pytest-xdist
       - name: Compile check
         run: python -m compileall -q .
       - name: Run tests
@@ -282,7 +275,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: requirements-web.txt
+          cache-dependency-path: requirements-mcp.lock
       - name: Install hermes-agent CLI
         run: python -m pip install hermes-agent pyyaml
       - name: Put workspace on a branch (file:// clone fails on detached HEAD)
@@ -320,29 +313,11 @@ jobs:
           assert checks["plugin"]["status"] == "ok", checks["plugin"]
           EOF
 
-  frontend:
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: web_demo/frontend
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web_demo/frontend/package-lock.json
-      - run: npm ci
-      - run: npm run build
-
   # Single stable required check for branch protection. Path-skipped jobs
   # never expand their matrix, so their per-leg check names don't exist on
   # docs-only PRs — this aggregate tolerates skips but fails on any failure.
   ci-ok:
-    needs: [changes, lint, test, mcp-macos-smoke, native-packaging, install-smoke, frontend]
+    needs: [changes, lint, test, mcp-macos-smoke, native-packaging, install-smoke]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 3

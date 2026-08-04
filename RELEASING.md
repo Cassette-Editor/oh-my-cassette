@@ -32,7 +32,6 @@ Releases carry no uploaded assets on purpose. No host consumes an archive (Claud
    ```bash
    .venv/bin/python -m compileall -q .
    .venv/bin/python -m pytest -q -rs -n 4 --dist loadfile
-   ./web_demo/build_frontend.sh
    ```
 
 3. Run the Codex plugin validator and the official Claude validators:

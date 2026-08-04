@@ -35,7 +35,6 @@ Per-host setup for OpenCode, Hermes, and any other MCP host is in the
 
 - [Showcase](showcase.md) — six real case videos with the exact prompt, inputs, and processing time for each
 - [Development and troubleshooting](development.md) — configuration reference, transports, diagnostics, common runtime problems
-- [Web demo](web-demo.md) — running the browser demo yourself
 - [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md) — release history
 - [Support and scope](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SUPPORT.md) — what this plugin covers versus the hosted Cassette service
 - [Contributing](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CONTRIBUTING.md) — development setup and guidelines
@@ -45,7 +44,6 @@ Per-host setup for OpenCode, Hermes, and any other MCP host is in the
 - [中文说明](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.zh-cn.md)
 - [案例展示](showcase.zh-cn.md)
 - [开发与排查](development.zh-cn.md)
-- [网页 Demo](web-demo.zh-cn.md)
 
 ## How it works
 
@@ -57,5 +55,5 @@ Every editing turn returns a timeline delta, a CTL digest, and a contact sheet, 
 review the plan before a frame is rendered. The runtime is host-neutral and sessions live
 in a host-agnostic data directory, so an edit started in one host can continue in another.
 
-The plugin is MIT licensed — all of it, including the MCP server, the skill, and the web demo.
+The plugin is MIT licensed — all of it, including the MCP server and the skill.
 [Source on GitHub](https://github.com/Cassette-Editor/oh-my-cassette).
