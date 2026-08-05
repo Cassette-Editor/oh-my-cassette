@@ -70,7 +70,7 @@ def test_provides_tools_and_hooks_match_register():
     manifest = _load_manifest()
     ctx = FakeContext()
     register(ctx)
-    assert set(manifest["provides_tools"]) == {tool["name"] for tool in ctx.tools}
+    assert set(manifest.get("provides_tools") or []) == {tool["name"] for tool in ctx.tools} == set()
     assert set(manifest["provides_hooks"]) == {name for name, _ in ctx.hooks}
 
 
@@ -93,4 +93,5 @@ def test_after_install_mentions_the_setup_flow():
     assert "--setup-only" in text
     assert "hermes plugins enable cassette" in text
     assert "hermes gateway restart" in text
+    assert "MCP" in text
     assert "~/.hermes/.env" in text

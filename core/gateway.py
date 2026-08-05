@@ -18,6 +18,7 @@ import mimetypes
 import os
 import random
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -2366,6 +2367,10 @@ def handle_cut_command(raw_args: str = "") -> str:
 
 
 def close_cassette_sessions(**kwargs) -> None:
+    session_id = str(kwargs.get("session_id") or "")
+    if session_id:
+        with _CASSETTE_RUN_JOB_TURN_LOCK:
+            _CASSETTE_RUN_JOB_BY_SESSION.pop(session_id, None)
     transport.get_transport().close_sessions()
 
 
@@ -2377,17 +2382,113 @@ def _compact_user_text(raw: str, max_chars: int = 700) -> str:
     return text[: max(0, max_chars - 1)].rstrip() + "…"
 
 
+_CASSETTE_MEDIA_NOUNS = (
+    "video",
+    "audio",
+    "clip",
+    "montage",
+    "timeline",
+    "thumbnail",
+    "subtitle",
+    "caption",
+)
+_CASSETTE_MEDIA_ACTIONS = (
+    "edit",
+    "upload",
+    "make",
+    "trim",
+    "cut",
+    "export",
+    "show",
+    "add",
+    "combine",
+    "reframe",
+)
+_HERMES_CASSETTE_SKILL_HINT = (
+    "For a Cassette media request, load the canonical plugin skill with "
+    'skill_view(name="cassette:cassette-video-edit"). Hermes plugin skills are namespaced, so do '
+    'not use the bare name "cassette-video-edit". Use the mcp__cassette__* stdio tools for editing; '
+    "the native plugin intentionally has no second set of edit handlers. If an explicit export request "
+    "returns phase=review_required, the user already authorized export: review the attached timeline and "
+    "call cassette_review_completion in the same assistant turn. Do not ask for redundant confirmation "
+    "and do not start a second cassette_run_job. For a requested thumbnail/contact sheet in Hermes TUI, "
+    "label it as saved locally and output MEDIA:<contact_sheet_uri> on its own line. Use the returned "
+    "URL-encoded file URI, never the raw contact_sheet_path, because raw paths may contain spaces."
+)
+
+
+_CASSETTE_RUN_JOB_TURN_LOCK = threading.Lock()
+_CASSETTE_RUN_JOB_BY_SESSION: dict[str, tuple[str, str]] = {}
+
+
+def _hermes_tool_name(tool_name: object, args: object) -> str:
+    """Return the concrete tool name, including Hermes's generic tool wrapper."""
+    name = str(tool_name or "")
+    if name in {"tool_call", "mcp_tool"} and isinstance(args, dict):
+        nested = args.get("name") or args.get("tool_name")
+        if nested:
+            return str(nested)
+    return name
+
+
+def guard_cassette_run_job_call(**kwargs) -> dict[str, str] | None:
+    """Mechanically allow at most one Cassette edit/export run per Hermes user turn.
+
+    A model may retry a slow or failed MCP call despite prompt instructions. Hermes supplies a
+    stable session_id and a unique turn_id to this hook, so the plugin can stop that retry before
+    a second backend job is created. Re-entrant checks for the same tool_call_id remain allowed.
+    """
+    tool_name = _hermes_tool_name(kwargs.get("tool_name"), kwargs.get("args"))
+    if tool_name != "cassette_run_job" and not tool_name.endswith("__cassette_run_job"):
+        return None
+
+    session_id = str(kwargs.get("session_id") or kwargs.get("task_id") or "")
+    turn_id = str(kwargs.get("turn_id") or "")
+    tool_call_id = str(kwargs.get("tool_call_id") or "")
+    if not session_id or not turn_id:
+        # Current Hermes releases always supply both fields. Fail open on older releases instead
+        # of accidentally treating different user turns as one long turn.
+        return None
+
+    with _CASSETTE_RUN_JOB_TURN_LOCK:
+        previous = _CASSETTE_RUN_JOB_BY_SESSION.get(session_id)
+        if previous is None or previous[0] != turn_id:
+            _CASSETTE_RUN_JOB_BY_SESSION[session_id] = (turn_id, tool_call_id)
+            return None
+        if tool_call_id and previous[1] == tool_call_id:
+            return None
+
+    return {
+        "action": "block",
+        "message": (
+            "A cassette_run_job already ran in this user turn. Do not retry or create another "
+            "backend job. Report the first result to the user and wait for their next message."
+        ),
+    }
+
+
+def _looks_like_cassette_request(user_message: object) -> bool:
+    text = str(user_message or "").casefold()
+    if "cassette" in text:
+        return True
+    return any(noun in text for noun in _CASSETTE_MEDIA_NOUNS) and any(
+        action in text for action in _CASSETTE_MEDIA_ACTIONS
+    )
+
+
 def inject_cassette_context(**kwargs) -> str | None:
-    del kwargs
+    user_message = kwargs.get("user_message")
     try:
         recent = jobs.list_jobs(limit=6)
     except Exception:
-        return None
+        recent = []
+    skill_hint = _HERMES_CASSETTE_SKILL_HINT if recent or _looks_like_cassette_request(user_message) else ""
     if not recent:
-        return None
+        return skill_hint or None
     review_jobs = _completion_review_jobs(recent)
     if review_jobs:
         lines = [
+            skill_hint,
             "Cassette completion review required. Hermes is the supervisor and must make the semantic completion decision from the latest Cassette reply, not from hard-coded keyword matching.",
         ]
         for job in review_jobs:
@@ -2401,9 +2502,9 @@ def inject_cassette_context(**kwargs) -> str | None:
                 "Do not expose local paths, raw IDs, prompts, or worker commands.",
             ]
         )
-        return "\n".join(lines)
+        return "\n".join(line for line in lines if line)
     summaries = [f"{j.get('job_id')}: {j.get('status')}" for j in recent]
-    return "Recent Cassette jobs: " + "; ".join(summaries)
+    return "\n".join((skill_hint, "Recent Cassette jobs: " + "; ".join(summaries)))
 
 
 def _completion_review_jobs(recent: list[dict]) -> list[dict[str, str]]:

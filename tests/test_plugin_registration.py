@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from cassette import register
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeContext:
@@ -25,27 +29,13 @@ class FakeContext:
         self.skills.append({"name": name, "path": path, "description": description})
 
 
-def test_plugin_registers_tools_command_hooks_and_skill():
+def test_plugin_registers_gateway_shim_and_shared_mcp_skill():
     ctx = FakeContext()
     register(ctx)
 
-    assert {tool["name"] for tool in ctx.tools} == {
-        "cassette_ingest_media",
-        "cassette_list_assets",
-        "cassette_make_prompt",
-        "cassette_match_bgm",
-        "cassette_match_exact_bgm",
-        "jamendo_music_matcher",
-        "cassette_answer_question",
-        "cassette_run_job",
-        "cassette_job_status",
-        "cassette_review_completion",
-        "cassette_cancel_job",
-        "cassette_timeline",
-        "cassette_edit",
-        "cassette_config",
-        "cassette_login",
-    }
+    # Hermes gets the same tools as every other host from the stdio MCP server.
+    # The native plugin is deliberately only the gateway lifecycle shim.
+    assert ctx.tools == []
     assert {command["name"] for command in ctx.commands} == {"cassette", "cut", "cassette_model"}
     assert next(command for command in ctx.commands if command["name"] == "cassette")["args_hint"] == (
         "help|status <job_id>|cancel <job_id>|cut [job_id]|language [zh|en]|recent [limit]"
@@ -53,13 +43,17 @@ def test_plugin_registers_tools_command_hooks_and_skill():
     assert {name for name, _ in ctx.hooks} == {
         "pre_gateway_dispatch",
         "pre_llm_call",
+        "pre_tool_call",
         "post_tool_call",
         "on_session_finalize",
         "on_session_reset",
     }
-    assert all(tool.get("check_fn") is None for tool in ctx.tools)
-    assert ctx.skills[0]["name"] == "cassette-video-edit"
-    assert ctx.skills[0]["path"].exists()
+    assert {skill["name"] for skill in ctx.skills} == {
+        "cassette-video-edit",
+        "cassette-gateway-video-edit",
+    }
+    shared = next(skill for skill in ctx.skills if skill["name"] == "cassette-video-edit")
+    assert shared["path"] == ROOT / "skills" / "cassette-video-edit" / "SKILL.md"
 
 
 def test_login_refuses_to_write_under_the_hermes_adapter(tmp_path, monkeypatch):

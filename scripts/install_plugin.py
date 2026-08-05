@@ -231,6 +231,35 @@ def restart_gateway(home: Path, *, dry_run: bool = False) -> bool:
     return True
 
 
+def configure_hermes_mcp(home: Path, *, dry_run: bool = False) -> bool:
+    """Point Hermes at the same stdio MCP runtime used by every other host."""
+    python = hermes_python(home)
+    helper = repo_root() / "scripts" / "configure_hermes_mcp.py"
+    if dry_run:
+        launcher = repo_root() / "scripts" / "run_local_mcp.py"
+        print(f"would configure Hermes MCP server 'cassette' with launcher: {launcher}")
+        return True
+    if not python.exists():
+        print(f"skip Cassette MCP configuration; Hermes Python was not found: {python}")
+        return False
+    cmd = [
+        str(python),
+        str(helper),
+        "--plugin-root",
+        str(repo_root()),
+        "--hermes-home",
+        str(home),
+    ]
+    env = os.environ.copy()
+    env["HERMES_HOME"] = str(home)
+    print("configuring Hermes to use the shared Cassette MCP server...")
+    proc = subprocess.run(cmd, check=False, env=env)
+    if proc.returncode != 0:
+        print("Cassette MCP configuration failed. Re-run this installer after fixing the reported issue.")
+        return False
+    return True
+
+
 def enable_cassette_plugin(
     home: Path,
     *,
@@ -444,6 +473,9 @@ def main() -> int:
     parser.add_argument(
         "--skip-plugin-enable", action="store_true", help="do not prompt to enable the Cassette plugin in Hermes"
     )
+    parser.add_argument(
+        "--skip-mcp-config", action="store_true", help="do not configure the shared Cassette MCP server"
+    )
     parser.add_argument("--skip-cassette-url", action="store_true", help="do not prompt for Cassette agent URL")
     parser.add_argument(
         "--skip-cassette-auth", action="store_true", help="do not prompt for Cassette login credentials"
@@ -465,6 +497,9 @@ def main() -> int:
     else:
         dest = Path(args.plugin_dir).expanduser().resolve() if args.plugin_dir else home / "plugins" / "cassette"
         code = install_plugin(source, dest, copy=args.copy, force=args.force, dry_run=args.dry_run)
+    if code == 0 and not args.skip_mcp_config:
+        if not configure_hermes_mcp(home, dry_run=args.dry_run):
+            code = 1
     if code == 0 and not args.dry_run and not args.skip_plugin_enable:
         enable_cassette_plugin(home)
     if code == 0 and not args.dry_run and not args.skip_cassette_url:

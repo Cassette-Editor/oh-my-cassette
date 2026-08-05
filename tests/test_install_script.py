@@ -258,6 +258,7 @@ def test_install_script_can_skip_cassette_plugin_enable(tmp_path):
 
 
 SETUP_STEP_NAMES = (
+    "configure_hermes_mcp",
     "enable_cassette_plugin",
     "configure_cassette_url",
     "configure_cassette_auth",
@@ -276,6 +277,28 @@ def _record_setup_steps(install_plugin, monkeypatch):
             lambda home, *, dry_run=False, _name=name: called.append((_name, home)) or True,
         )
     return called
+
+
+def test_install_script_configures_shared_mcp_with_hermes_python(tmp_path, monkeypatch):
+    install_plugin = _load_install_script()
+    home = tmp_path / ".hermes"
+    python = home / "hermes-agent" / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    observed = {}
+
+    class Proc:
+        returncode = 0
+
+    def fake_run(cmd, check=False, env=None):
+        observed.update(cmd=cmd, check=check, env=env)
+        return Proc()
+
+    monkeypatch.setattr(install_plugin.subprocess, "run", fake_run)
+
+    assert install_plugin.configure_hermes_mcp(home) is True
+    assert observed["cmd"][:2] == [str(python), str(ROOT / "scripts" / "configure_hermes_mcp.py")]
+    assert observed["env"]["HERMES_HOME"] == str(home)
 
 
 def test_install_script_setup_only_skips_file_install(tmp_path, monkeypatch):
@@ -307,6 +330,7 @@ def test_install_script_setup_only_respects_skip_flags(tmp_path, monkeypatch):
             "--hermes-home",
             str(tmp_path / ".hermes"),
             "--skip-plugin-enable",
+            "--skip-mcp-config",
             "--skip-cassette-url",
             "--skip-cassette-auth",
             "--skip-jamendo-auth",
@@ -319,6 +343,26 @@ def test_install_script_setup_only_respects_skip_flags(tmp_path, monkeypatch):
     assert called == []
 
 
+def test_install_script_stops_when_shared_mcp_configuration_fails(tmp_path, monkeypatch):
+    install_plugin = _load_install_script()
+    later_steps = []
+    monkeypatch.setattr(install_plugin, "configure_hermes_mcp", lambda home, *, dry_run=False: False)
+    for name in SETUP_STEP_NAMES[1:]:
+        monkeypatch.setattr(
+            install_plugin,
+            name,
+            lambda home, *, dry_run=False, _name=name: later_steps.append(_name) or True,
+        )
+    monkeypatch.setattr(
+        install_plugin.sys,
+        "argv",
+        ["install_plugin.py", "--setup-only", "--hermes-home", str(tmp_path / ".hermes")],
+    )
+
+    assert install_plugin.main() == 1
+    assert later_steps == []
+
+
 def test_install_script_setup_only_subprocess_non_tty(tmp_path):
     home = tmp_path / ".hermes"
     result = subprocess.run(
@@ -329,6 +373,7 @@ def test_install_script_setup_only_subprocess_non_tty(tmp_path):
             "--copy",
             "--hermes-home",
             str(home),
+            "--skip-mcp-config",
             "--skip-gateway-restart",
             "--skip-ffmpeg-detect",
         ],
