@@ -210,7 +210,7 @@ Upload a clip, type an edit, watch it happen — from a desktop or mobile browse
 
 </details>
 
-Want to run the demo yourself? See [Web Demo — Local Deployment](./docs/web-demo.md).
+The demo is a separate deployment with its own repository and its own transport; this repository is the plugin only.
 
 # 🚀 Quick Start
 
@@ -657,7 +657,7 @@ Yes — the [public web demo](http://43.134.224.156:8080/) runs the full workflo
 
 ### Is Oh My Cassette free and open source?
 
-This plugin is free and open source under the MIT license — all of it, including the MCP server, the skill, and the web demo.
+This plugin is free and open source under the MIT license — all of it, including the MCP server and the skill.
 
 Rendering runs on [Cassette](https://trycassette.online), a separate hosted service that requires an account. See [Cassette's pricing](https://trycassette.online) for what an account costs. You can try the whole workflow with no account at all through the [web demo](#-try-without-installation).
 

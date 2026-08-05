@@ -11,7 +11,7 @@ metadata:
 
 Cassette edits the media; you carry the messages. The `cassette` MCP server is a local stdio child
 process that opens no port and talks directly to the separate Cassette backend. Do not start or
-depend on the repository's FastAPI web-demo server for this workflow — that is a different adapter.
+depend on the separate FastAPI web-demo server for this workflow — that is a different adapter.
 
 Two details live outside this file to keep it short. Read them when they apply:
 

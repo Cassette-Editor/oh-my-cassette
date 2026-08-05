@@ -14,13 +14,6 @@ updates:
       # types move to snake_case. It has to be a deliberate migration, never a merge.
       - dependency-name: mcp
         update-types: ["version-update:semver-major"]
-  - package-ecosystem: npm
-    directory: /web_demo/frontend
-    schedule:
-      interval: weekly
-    groups:
-      frontend-deps:
-        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:
