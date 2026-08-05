@@ -126,7 +126,10 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-mcp.lock
       - name: Install dependencies
-        run: python -m pip install -r requirements-mcp.lock pytest pytest-xdist
+        # pyyaml is a test-only dependency: the packaging tests parse plugin.yaml.
+        # It used to arrive transitively via requirements-web.txt, which the web
+        # demo took with it when it moved to its own repository.
+        run: python -m pip install -r requirements-mcp.lock pytest pytest-xdist pyyaml
       - name: Compile check
         run: python -m compileall -q .
       - name: Run tests

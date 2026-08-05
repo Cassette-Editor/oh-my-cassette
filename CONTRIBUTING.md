@@ -20,7 +20,7 @@ Branch from `main` and target `main`. The `release` branch is machine-owned — 
 ```bash
 uv venv --python 3.13 .venv
 uv pip install --python .venv/bin/python \
-  -r requirements-mcp.lock pytest pytest-xdist
+  -r requirements-mcp.lock pytest pytest-xdist pyyaml
 ```
 
 Run the CI-equivalent checks:
