@@ -68,7 +68,7 @@ python3 scripts/install_plugin.py \
 
 ## Configuration
 
-Codex and Claude share the platform-standard Oh My Cassette config and data directories. Their credentials and job state are separate from Hermes. The active host project is trusted automatically; add any other media directory explicitly with `setup_local_mcp.py --allowed-root`. The web demo reads only its process environment and does not use either plugin's stored credentials.
+Codex and Claude share the platform-standard Oh My Cassette config and data directories. Their credentials and job state are separate from Hermes. The active host project is trusted automatically; add any other media directory explicitly with `setup_local_mcp.py --allowed-root`.
 
 The installer writes normal runtime settings to `~/.hermes/.env`. You can also edit that file manually.
 Minimum useful values:
@@ -143,7 +143,7 @@ CASSETTE_MCP_PYTHON="$PWD/.venv/bin/python" \
 .venv/bin/python scripts/run_local_mcp.py
 ```
 
-The deterministic test suite covers core parity, all 11 tools, real stdio protocol calls, long-polling, restart/resume behavior, state transitions, resource links, auth and filesystem security, both plugin manifests, the existing Hermes/web suite, and frontend builds. Maintainer-triggered live E2E uses repository secrets through ephemeral environment variables; PR CI stays credential-free.
+The deterministic test suite covers core parity, all 11 tools, real stdio protocol calls, long-polling, restart/resume behavior, state transitions, resource links, auth and filesystem security, both plugin manifests, and the existing Hermes suite. Maintainer-triggered live E2E uses repository secrets through ephemeral environment variables; PR CI stays credential-free.
 
 Run the local Cassette E2E harness:
 
@@ -172,22 +172,7 @@ The end-to-end flow against a real Cassette account:
   --media tests/fixtures/sample.mp4 --instruction "Make a short captioned video."
 ```
 
-Run the web demo service:
-
-```bash
-uv venv .venv-web
-uv pip install --python .venv-web/bin/python -r requirements-web.txt
-# Build the browser UI (Vite/React -> web_demo/frontend/dist); requires Node.js + npm.
-./web_demo/build_frontend.sh
-set -a
-. ./oh-my-cassette-web.env
-set +a
-.venv-web/bin/python -m web_demo.server
-```
-
-The browser UI is a Vite + React + TypeScript app under `web_demo/frontend`; `web_demo/build_frontend.sh` compiles it to `web_demo/frontend/dist`, which the server serves under `/static`. The build output is not committed, so build it on each deploy (and re-run it after pulling frontend changes). For live frontend iteration, `cd web_demo/frontend && npm run dev` runs Vite with `/api` proxied to `http://127.0.0.1:8088`, so run the FastAPI server alongside it.
-
-The web demo reads `CASSETTE_*`, `DEEPSEEK_*`, and `OMC_WEB_*` from process environment variables. Users can also enter a temporary DeepSeek API key in the browser settings; it is sent only with requests to this server and is not written to the repository or server disk. A systemd template lives at `deploy/oh-my-cassette-web.service.example`, with an environment template at `deploy/oh-my-cassette-web.env.example`.
+The browser-based web demo is no longer part of this repository. It lives in [oh-my-cassette-web](https://github.com/Cassette-Editor/oh-my-cassette-web), with its own FastAPI service, Vite/React UI, and deployment templates. It runs on a shared Cassette account through a Playwright transport, which is why it could not follow this repository onto the agent-account API path.
 
 Real gateway E2E tests are opt-in only and are skipped by default:
 

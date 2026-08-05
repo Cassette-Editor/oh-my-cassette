@@ -204,7 +204,7 @@ codex plugin add oh-my-cassette@cassette-editor
 
 </details>
 
-想自己部署这个演示？见 [Web Demo — 本地部署](./docs/web-demo.zh-cn.md)。
+演示是一套独立部署，有自己的仓库和自己的传输方式；本仓库只包含插件本身。
 
 # 🚀 快速开始
 
@@ -360,8 +360,6 @@ python3 scripts/install_plugin.py \
 ## 通过本地 MCP 在 Codex 或 Claude 中使用
 
 Codex 与 Claude 使用同一套自包含运行时。本文所说的 **MCP server** 是由客户端通过标准输入/输出连接的本地子进程：它不会监听端口，也不依赖 FastAPI 网页演示服务。独立的 Cassette 后端仍然是剪辑引擎，继续负责身份验证、素材处理、Agent 任务、项目状态和渲染。
-
-网页演示是另一条入口。浏览器仍然需要保留的 FastAPI 服务来处理上传、聊天会话和前端接口；改成本地 MCP 插件不会移除或改变这些能力。
 
 ### 首次身份验证
 
@@ -628,7 +626,7 @@ hermes gateway restart
 
 ### Oh My Cassette 是免费开源的吗？
 
-这个插件完全免费开源，基于 MIT 许可证——包括 MCP 服务、skill 和 Web Demo 在内的全部代码。
+这个插件完全免费开源，基于 MIT 许可证——包括 MCP 服务和 skill 在内的全部代码。
 
 渲染跑在 [Cassette](https://trycassette.online) 上，它是一个独立的托管服务，需要注册账号。账号的具体费用请以 Cassette 官网为准。你也可以完全不注册账号，直接用[网页演示](#-无需安装试用)体验整套流程。
 

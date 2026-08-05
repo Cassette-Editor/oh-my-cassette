@@ -2989,7 +2989,7 @@ def test_run_job_rejects_second_active_job_for_same_session(cassette_env):
         "internal",
         "instruction",
         [],
-        {"cassette_session_id": session_id, "delivery": {"platform": "web", "chat_id": session_id}},
+        {"cassette_session_id": session_id, "delivery": {"platform": "telegram", "chat_id": session_id}},
     )
     job["status"] = "running"
     jobs.save_job(job)

@@ -496,10 +496,6 @@ def _gateway_session_id(event: Any, session_store: Any = None) -> str:
     platform = (
         getattr(getattr(source, "platform", None), "value", None) or getattr(source, "platform", None) or "gateway"
     )
-    if _normalize_platform_name(platform) == "web":
-        chat_id = str(getattr(source, "chat_id", "") or "").strip()
-        if chat_id.startswith("web_"):
-            return chat_id
     chat_hash = safe_hash_id(getattr(source, "chat_id", None))
     hermes_session_id = _gateway_hermes_session_id(event, session_store)
     if hermes_session_id:

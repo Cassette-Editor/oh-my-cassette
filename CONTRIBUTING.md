@@ -1,6 +1,6 @@
 # Contributing to Oh My Cassette
 
-Thanks for helping. This repository ships four adapters—Codex, Claude, Hermes, and the web demo—so changes must preserve their isolation as well as shared-core behavior.
+Thanks for helping. This repository ships three adapters—Codex, Claude, and Hermes—so changes must preserve their isolation as well as shared-core behavior. The browser-based web demo lives in [oh-my-cassette-web](https://github.com/Cassette-Editor/oh-my-cassette-web).
 
 ## Conventional commits
 
@@ -20,7 +20,7 @@ Branch from `main` and target `main`. The `release` branch is machine-owned — 
 ```bash
 uv venv --python 3.13 .venv
 uv pip install --python .venv/bin/python \
-  -r requirements-web.txt pytest pytest-xdist
+  -r requirements-mcp.lock pytest pytest-xdist pyyaml
 ```
 
 Run the CI-equivalent checks:
@@ -30,7 +30,6 @@ uvx ruff@0.15.22 check .
 uvx ruff@0.15.22 format --check .
 .venv/bin/python -m compileall -q .
 .venv/bin/python -m pytest -q -rs -n 4 --dist loadfile
-./web_demo/build_frontend.sh
 ```
 
 `ruff format .` fixes formatting in place; configuration lives in `pyproject.toml`. The
@@ -74,8 +73,7 @@ For the Codex side, follow the `Smoke-install with Codex CLI` step in `.github/w
 
 ## Architecture rules
 
-- `mcp_plugin` may reuse repository core modules, but it must not import `web_demo`.
-- The web demo keeps its FastAPI server and process-environment config.
+- `mcp_plugin` may reuse repository core modules, but it must not depend on any host-specific adapter.
 - Hermes keeps its hooks, commands, notifier, gateway roots, and `.env` behavior.
 - Codex and Claude use the protected host-neutral config/data roots and the host-neutral skill under `skills/`.
 - Keep the 14 tool names in parity unless a deliberate compatibility change is approved.

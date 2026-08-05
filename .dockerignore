@@ -4,7 +4,6 @@ venv
 __pycache__
 **/__pycache__
 *.pyc
-web_demo/node_modules
 assets
 docs
 tests
