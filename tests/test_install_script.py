@@ -301,6 +301,28 @@ def test_install_script_configures_shared_mcp_with_hermes_python(tmp_path, monke
     assert observed["env"]["HERMES_HOME"] == str(home)
 
 
+def test_install_script_configures_shared_mcp_with_current_python_for_pip_hermes(tmp_path, monkeypatch):
+    install_plugin = _load_install_script()
+    home = tmp_path / ".hermes"
+    current_python = tmp_path / "python"
+    current_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    observed = {}
+
+    class Proc:
+        returncode = 0
+
+    def fake_run(cmd, *, check, env):
+        observed.update(cmd=cmd, check=check, env=env)
+        return Proc()
+
+    monkeypatch.setattr(install_plugin.sys, "executable", str(current_python))
+    monkeypatch.setattr(install_plugin.subprocess, "run", fake_run)
+
+    assert install_plugin.configure_hermes_mcp(home) is True
+    assert observed["cmd"][:2] == [str(current_python), str(ROOT / "scripts" / "configure_hermes_mcp.py")]
+    assert observed["env"]["HERMES_HOME"] == str(home)
+
+
 def test_install_script_setup_only_skips_file_install(tmp_path, monkeypatch):
     install_plugin = _load_install_script()
     home = tmp_path / ".hermes"

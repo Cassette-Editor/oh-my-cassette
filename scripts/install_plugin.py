@@ -240,8 +240,10 @@ def configure_hermes_mcp(home: Path, *, dry_run: bool = False) -> bool:
         print(f"would configure Hermes MCP server 'cassette' with launcher: {launcher}")
         return True
     if not python.exists():
-        print(f"skip Cassette MCP configuration; Hermes Python was not found: {python}")
-        return False
+        # A pip-installed Hermes uses the interpreter that launched this installer rather
+        # than HERMES_HOME/hermes-agent/venv. The helper imports hermes_cli before writing,
+        # so a non-Hermes interpreter still fails closed without touching config.yaml.
+        python = Path(sys.executable).resolve()
     cmd = [
         str(python),
         str(helper),
