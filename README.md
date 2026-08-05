@@ -195,7 +195,7 @@ Every case below was edited end-to-end by an AI agent through Oh My Cassette, fr
 
 Upload a clip, type an edit, watch it happen — from a desktop or mobile browser, with no agent installed locally.
 
-<h3><a href="http://43.134.224.156:8080/">▶ Open the live demo</a></h3>
+<h3><a href="https://trycassette.online/agent-demo">▶ Open the live demo</a></h3>
 
 > [!WARNING]
 > **Evaluation demo — unauthenticated and public. Don't upload anything sensitive, private, or copyrighted.**
@@ -305,7 +305,7 @@ That downloads the current release, writes the `cassette` server into `~/.config
 
 **Re-run the same command to update.** Only `git` is not required — the release tarball is fetched with Python's standard library.
 
-Credentials are shared with the Codex and Claude installs, so if you have already set those up there is nothing more to do. Otherwise the installer prints the `setup_local_mcp.py` command to finish authentication.
+Credentials are shared across Codex, Claude Code, OpenCode, and Hermes, so if you have already set up another host there is nothing more to do. Otherwise the installer prints the `setup_local_mcp.py` command to finish authentication.
 
 The plugin tree lands in `~/.oh-my-cassette` (override with `OMC_HOME`). `--dry-run` previews the changes. If you prefer a git checkout, clone it and run the installer from there — it registers that tree and leaves it alone, and `--sync` fast-forwards it to the release channel.
 
@@ -321,7 +321,7 @@ Install through the Hermes plugin manager (recommended):
 hermes plugins install Cassette-Editor/oh-my-cassette
 ```
 
-The Hermes installer prompts for your Cassette account email and password and saves them to `~/.hermes/.env`. Then run the setup finisher — it detects `ffmpeg`/`ffprobe` and lets you pick the Cassette region — and enable the plugin:
+The Hermes installer prompts for your Cassette account email and password and saves them to `~/.hermes/.env`. Then run the setup finisher — it configures the same stdio MCP server and canonical editing skill used by the other hosts, sets Hermes's tool timeout to 1800 seconds, detects `ffmpeg`/`ffprobe`, and lets you pick the Cassette region — and enable the thin gateway plugin:
 
 ```bash
 python3 ~/.hermes/plugins/cassette/scripts/install_plugin.py --setup-only
@@ -345,6 +345,7 @@ Run the installer and follow the prompts to set up Oh My Cassette with your Cass
 The installer:
 
 - installs the plugin into `~/.hermes/plugins/cassette` as a symlink by default;
+- writes the shared Cassette stdio server into `~/.hermes/config.yaml` with an 1800-second tool timeout;
 - asks whether to enable the plugin with `hermes plugins enable cassette`;
 - asks which Cassette URL to use:
   - `https://sg.trycassette.online/agent` (Asia, default)
@@ -370,9 +371,9 @@ python3 scripts/install_plugin.py \
 ```
 </details>
 
-## Use with Codex or Claude over local MCP
+## Use with agent clients over local MCP
 
-Codex and Claude use the same self-contained runtime. In this README, **MCP server** means a local child process connected over stdin/stdout: it opens no port and does not depend on the FastAPI web-demo service. The separate Cassette backend remains the editing engine and continues to handle authentication, media processing, agent runs, project state, and rendering.
+Codex, Claude Code, OpenCode, and Hermes use the same self-contained runtime. In this README, **MCP server** means a local child process connected over stdin/stdout: it opens no port and does not depend on the FastAPI web-demo service. The separate Cassette backend remains the editing engine and continues to handle authentication, media processing, agent runs, project state, and rendering.
 
 The web demo is intentionally different. Browsers still need the retained FastAPI server for uploads, chat sessions, and frontend endpoints; none of that behavior is removed by the local MCP plugin.
 
@@ -434,7 +435,7 @@ python3 scripts/setup_local_mcp.py --logout
 
    > Edit the clips in ./footage into a 30-second travel vlog with beat-synced cuts. Add the title "KOTA KINABALU" at the start and end, and keep the rhythm light.
 
-3. **Keep going in the same conversation.** Each turn commits the edit and returns a timeline digest, a contact sheet, and a live editor link — nothing renders. "Make the intro shorter", "swap the music for something calmer", "undo that" all continue the same session, and the agent remembers.
+3. **Keep going in the same conversation.** Each turn commits the edit and returns a timeline digest plus a contact-sheet JPEG saved locally with a clickable link — nothing renders. Hermes labels this as the thumbnail and uses the same saved file; no editor deep link is exposed. "Make the intro shorter", "swap the music for something calmer", and "undo that" all continue the same session.
 
 4. **Say "export" when you're happy.** That's the only thing that starts a render; the finished file lands in `cassette/exports/<job_id>/`.
 
@@ -444,17 +445,17 @@ Supported inputs are video, image, and audio files (`.mp4`, `.mov`, `.jpg`, `.pn
 
 What the plugin does under the hood on each of those turns:
 
-1. Ask Codex or Claude to edit one or more media files in the current project.
+1. Ask your agent client to edit one or more media files in the current project.
 2. The plugin ingests only media inside the active project or another explicitly trusted root. It canonicalizes paths and rejects traversal and symlink escapes.
-3. Describe the edit, answer any guided choices, and start the job. MCP jobs run in the background by default.
-4. The host checks status with bounded 30-second long polls. During a long poll the runtime emits MCP progress notifications (visible in hosts that request them), so the wait shows live stage updates instead of a silent block. The skill monitors for up to 25 minutes, then returns the still-running job ID so you can continue later without tight-polling.
+3. Describe the edit, answer any guided choices, and start the job. `cassette_run_job` is the wait: the host calls it exactly once for that user turn while the runtime streams progress notifications.
+4. When that call settles, follow its typed `phase` and `next_action`; do not start a status-poll loop or retry the edit in the same user turn. `cassette_job_status` is reserved for a deliberately detached or interrupted call.
 5. If Cassette needs a real user decision, answer it with the returned job ID. On hosts that support MCP elicitation, `cassette_job_status` collects the answer inline and returns the already-resumed status; other hosts use the `cassette_answer_question` round-trip. API jobs persist their private continuation metadata across host restarts.
 6. When editing completes, review the result. Rendering starts only after an explicit `export` decision.
 7. The result contains validated absolute paths, file URIs, MIME type, size, and an MCP resource link for each exported artifact. Large media bytes are never embedded in the tool response.
 
 When a background job reaches a terminal state (finished, needs input, failed, or cancelled), the MCP runtime posts a best-effort local desktop notification — `osascript` on macOS, `notify-send` on Linux — so you learn a long render is done even after the monitor budget hands the job back. Set `CASSETTE_MCP_NOTIFY=0` to disable it.
 
-Sessions are isolated by a cryptographically random session ID. Codex and Claude share host-neutral storage, so you can deliberately hand a session or job ID from one host to the other; nothing is shared implicitly.
+Sessions are isolated by a cryptographically random session ID. Codex, Claude Code, OpenCode, and Hermes share host-neutral storage, so you can deliberately hand a session or job ID from one host to another; nothing is shared implicitly.
 
 Additional trusted media directories can be registered during setup:
 
@@ -466,7 +467,7 @@ Exports stay under the shared Oh My Cassette data directory at `cassette/exports
 
 ### How the plugin reaches Cassette
 
-One way: direct calls to the separate Cassette backend. Authentication retries once after a `401`, access tokens are kept in memory only, and continuation metadata is persisted, so a paused job resumes after Codex or Claude restarts.
+One way: direct calls to the separate Cassette backend. Authentication retries once after a `401`, access tokens are kept in memory only, and continuation metadata is persisted, so a paused job resumes after the agent client restarts.
 
 There is no browser to install, drive, or keep alive. The Playwright transport that used to sit behind `CASSETTE_TRANSPORT=browser` has been removed; a leftover setting is reported once on stderr and ignored.
 
@@ -484,7 +485,7 @@ The local MCP runtime exposes the same 15 tool names as Hermes:
 | `jamendo_music_matcher` | Match structured Jamendo preferences |
 | `cassette_answer_question` | Answer a guided question or resume a paused job |
 | `cassette_run_job` | Run one conversational turn (`message` = the user's verbatim words); `export=true` renders |
-| `cassette_job_status` | Read status or wait briefly for a change |
+| `cassette_job_status` | Resume a deliberately detached or interrupted job call |
 | `cassette_review_completion` | Review completion and explicitly approve export |
 | `cassette_cancel_job` | Request cooperative cancellation |
 | `cassette_timeline` | Read the live project timeline as a bounded text digest (+ optional contact sheet) |
@@ -494,7 +495,7 @@ The local MCP runtime exposes the same 15 tool names as Hermes:
 
 Every tool returns a structured envelope with `ok`, typed `data` or `error`, `session_id`, `job_id`, the current phase, and a runtime-derived `next_action`.
 
-### The live editor deep link and plan review
+### Local preview links and plan review
 
 The runtime returns **no editor deep link**. A `…?projectSessionId=<id>&chatSessionId=<uuid>` URL is a bearer capability: the backend binds no owner to a scratch session, so the only checks on that route are "signed in" and "knows the id" — any authenticated account that sees the link can open the project *and* run edits on the thread. Tool output ends up in chat transcripts, logs and screen recordings, so the runtime no longer emits one, and the skills instruct the agent not to construct one. Previews are the timeline digest, the contact sheet, and the export.
 
@@ -514,7 +515,7 @@ In QQ or Telegram:
 1. Send one or more video, image, or audio files.
 2. Wait for the saved-material acknowledgement.
 3. Send an edit instruction in the same conversation, or prefix it with `/edit`. Your words go to the Cassette agent verbatim — no model/optimization/BGM questionnaire. Use `/refine`, `/music`, or `/cassette_model` when you want those.
-4. Each turn ends with the edit saved (timeline delta + contact-sheet preview + live link, no render). Keep editing in the same conversation — the agent remembers. Say "export" when you want the video, and the plugin renders and delivers it through the gateway when supported.
+4. Each turn ends with the edit saved (timeline delta + contact-sheet preview, no render). Depending on the client, the preview is delivered as an image or a labeled local thumbnail link. Keep editing in the same conversation. Say "export" when you want the video, and the plugin renders and delivers it through the gateway when supported.
 
 | Command | Explanation |
 |---|---|
@@ -649,11 +650,11 @@ Montage and story edits — vlogs, travel videos, music-driven shorts, cooking t
 
 ### Can I see what the agent is doing mid-edit?
 
-Yes. After each editing turn you get a timeline contact sheet, a per-turn preview, and a live editor deep link into the Cassette timeline; before the edit runs, the agent surfaces the plan as a storyboard sheet (one source frame per planned beat) for review.
+Yes. After each editing turn you get a timeline digest and a contact-sheet JPEG saved locally. Terminal clients present a clickable local thumbnail link, and supported gateway clients can deliver the preview as an image. Before the edit runs, the agent can also surface the plan as a storyboard sheet (one source frame per planned beat) for review. The plugin intentionally does not expose an editor deep link.
 
 ### Can I try it without installing anything?
 
-Yes — the [public web demo](http://43.134.224.156:8080/) runs the full workflow in your browser. It is unauthenticated and for evaluation only, so don't upload sensitive content.
+Yes — the [public web demo](https://trycassette.online/agent-demo) runs the full workflow in your browser. It is unauthenticated and for evaluation only, so don't upload sensitive content.
 
 ### Is Oh My Cassette free and open source?
 

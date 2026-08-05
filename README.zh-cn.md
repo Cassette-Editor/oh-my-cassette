@@ -189,7 +189,7 @@ codex plugin add oh-my-cassette@cassette-editor
 
 上传一段素材、输入一句剪辑指令，就能看到成片过程——电脑或手机浏览器都行，本地不用装任何 Agent。
 
-<h3><a href="http://43.134.224.156:8080/">▶ 打开在线演示</a></h3>
+<h3><a href="https://trycassette.online/agent-demo">▶ 打开在线演示</a></h3>
 
 > [!WARNING]
 > **评估用演示环境，公开且未鉴权。请勿上传任何敏感、私密或受版权限制的内容。**
@@ -292,7 +292,7 @@ curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/rele
 
 **更新时重跑同一条命令即可。** 无需安装 `git`——发布包用 Python 标准库下载。
 
-凭据与 Codex、Claude 安装共用，如果已经配置过就无需重复操作；否则脚本会打印 `setup_local_mcp.py` 命令来完成认证。
+凭据在 Codex、Claude Code、OpenCode 和 Hermes 之间共用；如果已经为其他客户端配置过，就无需重复操作。否则脚本会打印 `setup_local_mcp.py` 命令来完成认证。
 
 插件目录默认放在 `~/.oh-my-cassette`（可用 `OMC_HOME` 覆盖）。`--dry-run` 可以先预览改动。如果你更习惯用 git 检出，克隆后从该目录运行安装脚本即可——它会注册这份检出而不覆盖，`--sync` 则把它快进到发布通道。
 
@@ -308,7 +308,7 @@ curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/rele
 hermes plugins install Cassette-Editor/oh-my-cassette
 ```
 
-Hermes 安装器会提示输入你的 Cassette 账号邮箱和密码，并保存到 `~/.hermes/.env`。随后运行完成设置命令——它会检测 `ffmpeg`/`ffprobe` 路径，并让你选择 Cassette 地区——然后启用插件：
+Hermes 安装器会提示输入你的 Cassette 账号邮箱和密码，并保存到 `~/.hermes/.env`。随后运行完成设置命令——它会配置与其他客户端相同的 stdio MCP 服务和通用剪辑 skill、把 Hermes 工具超时设为 1800 秒、检测 `ffmpeg`/`ffprobe` 路径，并让你选择 Cassette 地区——然后启用轻量网关插件：
 
 ```bash
 python3 ~/.hermes/plugins/cassette/scripts/install_plugin.py --setup-only
@@ -332,6 +332,7 @@ python3 scripts/install_plugin.py
 安装器会：
 
 - 默认以符号链接方式把插件安装到 `~/.hermes/plugins/cassette`；
+- 把共享 Cassette stdio 服务写入 `~/.hermes/config.yaml`，工具超时为 1800 秒；
 - 询问是否通过 `hermes plugins enable cassette` 启用插件；
 - 询问使用哪个 Cassette 地址：
   - `https://sg.trycassette.online/agent`（亚洲，默认）
@@ -357,9 +358,9 @@ python3 scripts/install_plugin.py \
 ```
 </details>
 
-## 通过本地 MCP 在 Codex 或 Claude 中使用
+## 通过本地 MCP 在 Agent 客户端中使用
 
-Codex 与 Claude 使用同一套自包含运行时。本文所说的 **MCP server** 是由客户端通过标准输入/输出连接的本地子进程：它不会监听端口，也不依赖 FastAPI 网页演示服务。独立的 Cassette 后端仍然是剪辑引擎，继续负责身份验证、素材处理、Agent 任务、项目状态和渲染。
+Codex、Claude Code、OpenCode 与 Hermes 使用同一套自包含运行时。本文所说的 **MCP server** 是由客户端通过标准输入/输出连接的本地子进程：它不会监听端口，也不依赖 FastAPI 网页演示服务。独立的 Cassette 后端仍然是剪辑引擎，继续负责身份验证、素材处理、Agent 任务、项目状态和渲染。
 
 ### 首次身份验证
 
@@ -419,7 +420,7 @@ python3 scripts/setup_local_mcp.py --logout
 
    > 用 ./footage 里的素材剪一支 30 秒旅行 vlog，卡点剪辑，片头片尾加标题 "KOTA KINABALU"，节奏轻快。
 
-3. **在同一段对话里继续修改。** 每一轮都会提交剪辑并返回时间线摘要、缩略图联系表和在线编辑器链接，但不会渲染。"开头再短一点""换一首更安静的音乐""撤销"都在同一会话内继续，agent 记得上下文。
+3. **在同一段对话里继续修改。** 每一轮都会提交剪辑，并返回时间线摘要以及保存在本机的缩略图拼版 JPEG 和可点击链接，但不会渲染。Hermes 会把它标注为缩略图，并使用同一个本地文件；插件不会暴露在线编辑器深层链接。"开头再短一点""换一首更安静的音乐""撤销"都在同一会话内继续。
 
 4. **满意后说"导出"。** 只有这一步会启动渲染，成片保存在 `cassette/exports/<job_id>/`。
 
@@ -429,15 +430,15 @@ python3 scripts/setup_local_mcp.py --logout
 
 上述每一轮背后，插件实际做的事：
 
-1. 让 Codex 或 Claude 剪辑当前项目中的一个或多个媒体文件。
+1. 让你的 Agent 客户端剪辑当前项目中的一个或多个媒体文件。
 2. 插件只接收当前项目或显式信任目录中的素材，并会规范化路径、拒绝目录穿越和符号链接逃逸。
-3. 描述剪辑需求，完成必要的选项确认，然后启动任务。MCP 任务默认在后台运行。
-4. 客户端以最长 30 秒的长轮询查看状态。skill 最多持续监控 25 分钟，之后会返回仍在运行的任务 ID，方便稍后继续，而不是高频轮询。
+3. 描述剪辑需求，完成必要的选项确认，然后启动任务。`cassette_run_job` 本身就是等待过程：客户端在这一轮只调用一次，运行时会持续发送进度通知。
+4. 调用结束后按带类型的 `phase` 和 `next_action` 继续；不要启动状态轮询，也不要在同一用户轮次重试剪辑。`cassette_job_status` 只用于主动转到后台或意外中断的调用。
 5. 如果 Cassette 确实需要用户决定，请用返回的任务 ID 回答。API 任务会保存私有续跑元数据，因此客户端重启后仍可继续。
 6. 剪辑完成后先审阅结果；只有明确选择 `export` 才会开始渲染。
 7. 导出结果会返回经过校验的绝对路径、文件 URI、MIME 类型、文件大小和 MCP 资源链接，不会把大体积媒体字节直接塞进工具响应。
 
-每个会话都使用密码学安全的随机 ID 隔离。Codex 与 Claude 共用同一套与客户端无关的数据目录，因此你可以主动把会话或任务 ID 交给另一个客户端继续处理；插件不会在未明确指定时共享会话。
+每个会话都使用密码学安全的随机 ID 隔离。Codex、Claude Code、OpenCode 与 Hermes 共用同一套与客户端无关的数据目录，因此你可以主动把会话或任务 ID 交给另一个客户端继续处理；插件不会在未明确指定时共享会话。
 
 可以在设置时添加额外的可信素材目录：
 
@@ -449,7 +450,7 @@ python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
 
 ### 插件如何连接 Cassette
 
-只有一条路径：直接调用独立的 Cassette 后端。遇到 `401` 时只重试一次身份验证，访问令牌只保存在内存中；续跑元数据会持久化，因此 Codex 或 Claude 重启后仍能继续暂停中的任务。
+只有一条路径：直接调用独立的 Cassette 后端。遇到 `401` 时只重试一次身份验证，访问令牌只保存在内存中；续跑元数据会持久化，因此 Agent 客户端重启后仍能继续暂停中的任务。
 
 不需要安装、驱动或维持任何浏览器。原先由 `CASSETTE_TRANSPORT=browser` 选择的 Playwright 传输已被移除；如果环境里还留着这个变量，运行时只会在 stderr 提示一次，然后照常走 API。
 
@@ -467,7 +468,7 @@ python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
 | `jamendo_music_matcher` | 按结构化偏好匹配 Jamendo 音乐 |
 | `cassette_answer_question` | 回答引导问题或恢复暂停任务 |
 | `cassette_run_job` | 执行一轮对话式剪辑（`message` 为用户原话逐字传递）；`export=true` 才渲染 |
-| `cassette_job_status` | 读取状态，或短暂等待状态变化 |
+| `cassette_job_status` | 恢复主动转到后台或意外中断的任务调用 |
 | `cassette_review_completion` | 审阅完成结果并明确批准导出 |
 | `cassette_cancel_job` | 请求协作式取消任务 |
 | `cassette_timeline` | 读取实时项目时间线文本摘要（可选缩略图拼版） |
@@ -486,7 +487,7 @@ python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
 1. 发送一个或多个视频、图片或音频文件。
 2. 等待素材已保存的确认消息。
 3. 在同一个会话中发送剪辑指令，也可以在指令前加 `/edit`。你的原话会逐字发给 Cassette 智能体——没有模型/优化/配乐问卷；需要时用 `/refine`、`/music` 或 `/cassette_model`。
-4. 每一轮剪辑完成后会收到时间线变更、缩略图拼版预览和实时编辑器链接（不渲染成片）。继续在同一会话里修改——智能体记得上下文；想要成片时回复"导出"，插件会渲染并在网关支持时发回视频。
+4. 每一轮剪辑完成后会收到时间线变更和缩略图拼版预览（不渲染成片）。根据客户端能力，预览会作为图片发送，或显示为带标签的本地缩略图链接。继续在同一会话里修改；想要成片时回复"导出"，插件会渲染并在网关支持时发回视频。
 
 | 命令 | 说明 |
 |---|---|
@@ -618,11 +619,11 @@ hermes gateway restart
 
 ### 剪辑过程中能看到 Agent 在做什么吗？
 
-可以。每轮剪辑后都会收到时间线缩略图拼版、本轮预览和进入 Cassette 时间线的实时编辑器链接；剪辑执行前，Agent 会把剪辑方案渲染成分镜表（每个规划节拍对应一帧源素材）供你审阅。
+可以。每轮剪辑后都会收到时间线摘要，以及保存在本机的缩略图拼版 JPEG。终端客户端会显示可点击的本地缩略图链接，支持的网关客户端也可以直接发送预览图片。剪辑执行前，Agent 还可以把剪辑方案显示为分镜表（每个规划节拍对应一帧源素材）供你审阅。插件不会暴露在线编辑器深层链接。
 
 ### 可以不安装直接试用吗？
 
-可以——[公开网页演示](http://43.134.224.156:8080/)在浏览器中运行完整流程。演示未鉴权、仅供评估，请勿上传敏感内容。
+可以——[公开网页演示](https://trycassette.online/agent-demo)在浏览器中运行完整流程。演示未鉴权、仅供评估，请勿上传敏感内容。
 
 ### Oh My Cassette 是免费开源的吗？
 

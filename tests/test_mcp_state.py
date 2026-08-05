@@ -48,6 +48,15 @@ def test_next_action_never_carries_an_editor_link():
     assert next_action_for(SessionPhase.RUNNING, job_id="j1").startswith("Call cassette_job_status")
 
 
+def test_review_required_next_action_does_not_request_redundant_export_confirmation():
+    from mcp_plugin.models import SessionPhase
+    from mcp_plugin.state import next_action_for
+
+    action = next_action_for(SessionPhase.REVIEW_REQUIRED)
+    assert "same assistant turn" in action
+    assert "do not ask the user to confirm export again" in action
+
+
 def test_multi_turn_transitions_and_next_actions(tmp_path):
     from mcp_plugin.state import _ALLOWED, next_action_for
     from mcp_plugin.models import SessionPhase

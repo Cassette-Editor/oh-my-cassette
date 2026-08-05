@@ -2661,9 +2661,9 @@ class ApiTransport:
         # then the older CASSETTE_UPLOAD_TIMEOUT_SEC, then a default.
         raw = _env("CASSETTE_API_MEDIA_READY_TIMEOUT_SEC") or _env("CASSETTE_UPLOAD_TIMEOUT_SEC")
         try:
-            return max(30.0, float(raw or "300"))
+            return max(30.0, float(raw or "600"))
         except ValueError:
-            return 300.0
+            return 600.0
 
     @staticmethod
     def _run_start_timeout() -> float:

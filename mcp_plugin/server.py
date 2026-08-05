@@ -15,6 +15,7 @@ from urllib.parse import unquote, urlparse
 from mcp import types
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.fastmcp.resources import FileResource
 from pydantic import BaseModel, Field, ValidationError
 
 import runtime_config
@@ -159,6 +160,43 @@ def _log_client_profile_once(context: Context) -> None:
 class ArtifactFastMCP(FastMCP[McpLifespanContext]):
     """Append validated artifact ResourceLink blocks to structured tool output."""
 
+    def _register_artifact_resource(self, artifact: dict[str, Any]) -> None:
+        """Make a validated local artifact readable through MCP resources/read.
+
+        ResourceLink is a pointer, not a file server.  Hosts such as Hermes follow the
+        pointer with resources/read, so every link emitted below must have a matching
+        concrete resource for the lifetime of this stdio server.  The runtime already
+        validates artifact paths; repeat the boundary check here so a future producer
+        cannot accidentally expose an arbitrary local file through this generic hook.
+        """
+        raw_path = str(artifact.get("path") or "").strip()
+        raw_uri = str(artifact.get("resource_uri") or artifact.get("uri") or "").strip()
+        if not raw_path or not raw_uri:
+            return
+        try:
+            resolved = Path(raw_path).expanduser().resolve(strict=True)
+            asset_root = runtime_config.asset_root().resolve(strict=True)
+            allowed_roots = (asset_root / "previews", asset_root / "exports")
+            if (
+                not resolved.is_file()
+                or not any(resolved.is_relative_to(root.resolve(strict=False)) for root in allowed_roots)
+                or raw_uri != resolved.as_uri()
+            ):
+                return
+            mime_type = str(artifact.get("mime_type") or "application/octet-stream")
+            self.add_resource(
+                FileResource(
+                    uri=raw_uri,
+                    name=str(artifact.get("name") or resolved.name),
+                    description="Validated Cassette artifact",
+                    mime_type=mime_type,
+                    path=resolved,
+                    is_binary=not mime_type.startswith("text/"),
+                )
+            )
+        except (OSError, ValueError):
+            return
+
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         try:
             _log_client_profile_once(self.get_context())
@@ -198,6 +236,7 @@ class ArtifactFastMCP(FastMCP[McpLifespanContext]):
         for artifact in structured.get("artifacts") or []:
             if not isinstance(artifact, dict):
                 continue
+            self._register_artifact_resource(artifact)
             blocks.append(
                 types.ResourceLink(
                     type="resource_link",
@@ -233,8 +272,10 @@ mcp = ArtifactFastMCP(
         "cassette_run_job returns when the turn is settled, streaming progress notifications while it "
         "works — one call per turn, never a status loop. Route on the typed phase and next_action "
         "fields, never on prose: needs_user means ask the user then call cassette_answer_question; "
-        "review_required (export turns) means evaluate the result and call cassette_review_completion (only "
-        "decision=export renders); succeeded means relay the delta/preview and continue the "
+        "review_required (export turns) means evaluate the result and call cassette_review_completion in the "
+        "same assistant turn (only decision=export renders); an explicit user export request is already "
+        "authorization, so do not ask them to confirm again merely because Cassette's prose says it cannot "
+        "render; succeeded means relay the delta/preview and continue the "
         "conversation; exported means present the validated artifacts; "
         "failed, cancelled, or timed_out means report the structured error (thread_busy = a run "
         "is already live on this session's thread; wait and retry). cassette_job_status is for "
@@ -401,7 +442,10 @@ async def cassette_list_assets(
     description=(
         "Read the live Cassette timeline as a bounded text digest (CTL). Call this before any "
         "statement about project state — never answer from memory. contact_sheet=true also tiles "
-        "the stored clip posters into one image (zero render)."
+        "the stored clip posters into one image (zero render) and saves it locally. Present the "
+        "returned contact_sheet_uri as the thumbnail link. In Hermes TUI, label it as saved locally "
+        "and output MEDIA:<contact_sheet_uri> on its own line; use the URL-encoded URI, never the raw "
+        "contact_sheet_path, because raw paths may contain spaces."
     ),
     structured_output=True,
 )
@@ -627,9 +671,15 @@ async def cassette_answer_question(
     description=(
         "Run one Cassette edit turn and return when it is settled. This call IS the wait: it streams "
         "progress notifications while the agent works and answers with the terminal envelope "
-        "(succeeded / needs_user / review_required / exported / failed). Do not poll cassette_job_status "
-        "after it — that tool is for resuming a job whose call was interrupted. Pass wait=false only to "
-        "deliberately detach the turn into the background."
+        "(succeeded / needs_user / review_required / exported / failed). Pass message as the user's words "
+        "verbatim. Exactly one cassette_run_job call per user turn: after any settled result, return "
+        "control to the user. Never start a corrective, retry, or follow-up run in the same user turn, "
+        "even if you think the edit could be improved. Do not poll cassette_job_status after a settled "
+        "result; that tool is only for resuming a job whose call was interrupted. Pass wait=false only "
+        "to deliberately detach the turn into the background. If an explicit export request returns "
+        "phase=review_required, the user has already authorized export: inspect the attached timeline and "
+        "call cassette_review_completion in this same assistant turn. Do not ask for redundant confirmation, "
+        "and do not start another cassette_run_job."
     ),
     structured_output=True,
 )
@@ -720,7 +770,10 @@ async def cassette_job_status(
 
 @mcp.tool(
     description=(
-        "Resolve a review-required completion. Rendering starts only for an explicit, validated decision=export."
+        "Resolve a review-required completion. Rendering starts only for an explicit, validated decision=export. "
+        "For a cassette_run_job(export=true) triggered by the user's explicit export request, review the attached "
+        "timeline and call this immediately in the same assistant turn; do not ask the user to authorize export "
+        "again merely because the Cassette agent's prose claims rendering is unavailable."
     ),
     structured_output=True,
 )

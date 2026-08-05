@@ -2784,10 +2784,89 @@ def test_completion_review_context_injected_for_hermes_supervisor(cassette_env):
     context = gateway_mod.inject_cassette_context()
 
     assert context is not None
+    assert 'skill_view(name="cassette:cassette-video-edit")' in context
+    assert 'bare name "cassette-video-edit"' in context
     assert "Cassette completion review required" in context
     assert job["job_id"] in context
     assert "cassette_review_completion" in context
     assert 'decision="export"' in context
+
+
+def test_initial_hermes_media_request_injects_qualified_plugin_skill(monkeypatch):
+    monkeypatch.setattr(gateway_mod.jobs, "list_jobs", lambda limit=6: [])
+
+    context = gateway_mod.inject_cassette_context(
+        user_message="Please upload these two videos and make a short montage."
+    )
+
+    assert context is not None
+    assert 'skill_view(name="cassette:cassette-video-edit")' in context
+    assert "mcp__cassette__* stdio tools" in context
+    assert "MEDIA:<contact_sheet_uri>" in context
+    assert "URL-encoded file URI" in context
+
+
+def test_unrelated_hermes_request_does_not_inject_cassette_skill(monkeypatch):
+    monkeypatch.setattr(gateway_mod.jobs, "list_jobs", lambda limit=6: [])
+
+    assert gateway_mod.inject_cassette_context(user_message="Explain this Python function") is None
+
+
+def test_hermes_blocks_second_run_job_in_same_user_turn():
+    first = gateway_mod.guard_cassette_run_job_call(
+        tool_name="mcp__cassette__cassette_run_job",
+        args={"message": "edit"},
+        session_id="hermes-session",
+        turn_id="turn-1",
+        tool_call_id="call-1",
+    )
+    duplicate = gateway_mod.guard_cassette_run_job_call(
+        tool_name="mcp__cassette__cassette_run_job",
+        args={"message": "retry"},
+        session_id="hermes-session",
+        turn_id="turn-1",
+        tool_call_id="call-2",
+    )
+    next_turn = gateway_mod.guard_cassette_run_job_call(
+        tool_name="mcp__cassette__cassette_run_job",
+        args={"message": "export"},
+        session_id="hermes-session",
+        turn_id="turn-2",
+        tool_call_id="call-3",
+    )
+
+    assert first is None
+    assert duplicate == {
+        "action": "block",
+        "message": (
+            "A cassette_run_job already ran in this user turn. Do not retry or create another "
+            "backend job. Report the first result to the user and wait for their next message."
+        ),
+    }
+    assert next_turn is None
+
+
+def test_hermes_run_job_guard_handles_wrapper_and_reentrant_check():
+    kwargs = {
+        "tool_name": "tool_call",
+        "args": {"name": "mcp__cassette__cassette_run_job", "arguments": {"message": "edit"}},
+        "session_id": "wrapped-session",
+        "turn_id": "turn-1",
+        "tool_call_id": "call-1",
+    }
+
+    assert gateway_mod.guard_cassette_run_job_call(**kwargs) is None
+    assert gateway_mod.guard_cassette_run_job_call(**kwargs) is None
+    assert (
+        gateway_mod.guard_cassette_run_job_call(
+            tool_name="mcp__cassette__cassette_timeline",
+            args={},
+            session_id="wrapped-session",
+            turn_id="turn-1",
+            tool_call_id="call-2",
+        )
+        is None
+    )
 
 
 def test_completion_review_export_goes_through_the_transport(cassette_env, monkeypatch):

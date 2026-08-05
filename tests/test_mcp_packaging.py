@@ -129,10 +129,10 @@ def test_repo_root_mcp_config_is_claude_project_scoped_not_codex():
     assert project["args"] == ["${CLAUDE_PROJECT_DIR:-.}/scripts/run_local_mcp.py"]
 
 
-def test_native_hosts_load_only_host_neutral_skill_and_hermes_keeps_its_skill():
+def test_hermes_loads_the_host_neutral_skill_and_keeps_only_a_gateway_addendum():
     neutral = (ROOT / "skills" / "cassette-video-edit" / "SKILL.md").read_text("utf-8")
     hermes = (ROOT / "hermes" / "skills" / "cassette-video-edit" / "SKILL.md").read_text("utf-8")
-    assert "Codex or Claude" in neutral
+    assert "supported MCP host" in neutral
     assert "gateway user" not in neutral
     assert "Hermes" in hermes
 
@@ -154,7 +154,8 @@ def test_native_hosts_load_only_host_neutral_skill_and_hermes_keeps_its_skill():
 
     context = Context()
     register(context)
-    assert context.skills[0][1] == ROOT / "hermes" / "skills" / "cassette-video-edit" / "SKILL.md"
+    assert context.skills[0][1] == ROOT / "skills" / "cassette-video-edit" / "SKILL.md"
+    assert context.skills[1][1] == ROOT / "hermes" / "skills" / "cassette-video-edit" / "SKILL.md"
 
 
 def test_release_please_updates_all_host_version_fields():
@@ -173,6 +174,14 @@ def test_release_please_updates_all_host_version_fields():
         "type": "generic",
         "path": "plugin.yaml",
     }
+
+
+def test_public_demo_docs_use_the_named_https_route():
+    expected = "https://trycassette.online/agent-demo"
+    for relative in ("README.md", "README.zh-cn.md", "llms.txt"):
+        text = (ROOT / relative).read_text("utf-8")
+        assert expected in text
+        assert not re.search(r"http://(?:\d{1,3}\.){3}\d{1,3}:8080/?", text)
 
 
 def test_opencode_project_config_and_agents_skill_copy_stay_in_sync():

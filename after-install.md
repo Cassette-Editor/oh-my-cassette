@@ -1,10 +1,12 @@
 # Oh My Cassette installed 🎬
 
-Finish setup (ffmpeg detection, region choice):
+Finish setup (shared MCP configuration, ffmpeg detection, region choice):
 
     python3 ~/.hermes/plugins/cassette/scripts/install_plugin.py --setup-only
 
-Then enable the plugin and restart the gateway:
+This writes the same local stdio MCP server used by Codex, Claude Code, and OpenCode into
+`~/.hermes/config.yaml` with an 1800-second tool timeout. Then enable the thin gateway plugin and
+restart the gateway:
 
     hermes plugins enable cassette
     hermes gateway restart

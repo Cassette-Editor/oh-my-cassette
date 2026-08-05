@@ -3,7 +3,7 @@ name: cassette-video-edit
 description: Edit, trim, cut, caption, subtitle, reframe, combine, add background music to, or export video, audio, and image files through Cassette. Use this skill whenever the user asks to change, preview, or render a media file in the project — even if they never say "Cassette" or name a tool — for example "trim the intro off demo.mp4", "add subtitles to this clip", "make me a 30-second cut with music", "why is there dead air at the start". Drives the local Oh My Cassette stdio MCP tools in Codex or Claude as one multi-turn conversation with the Cassette agent, with per-turn timeline previews, guided questions, and rendering only on explicit export.
 version: 2.1.0
 metadata:
-  tags: [cassette, video, codex, claude, mcp, media-editing]
+  tags: [cassette, video, codex, claude, hermes, opencode, mcp, media-editing]
   category: media
 ---
 
@@ -12,6 +12,8 @@ metadata:
 Cassette edits the media; you carry the messages. The `cassette` MCP server is a local stdio child
 process that opens no port and talks directly to the separate Cassette backend. Do not start or
 depend on the separate FastAPI web-demo server for this workflow — that is a different adapter.
+This is the canonical workflow for every supported MCP host, including Codex, Claude Code, Hermes,
+and OpenCode.
 
 Two details live outside this file to keep it short. Read them when they apply:
 
@@ -94,13 +96,15 @@ Treat the structured `phase` and `next_action` fields as authoritative. Do not d
 progress, or completion from keywords in prose.
 
 `cassette_run_job` **is** the wait. It returns when the turn is settled, streaming MCP progress
-notifications while the agent works, and answers with a terminal phase. One call per user turn.
+notifications when the host supports them, and answers with a terminal phase. Make exactly one
+call per user turn, then return control to the user. Never start a second corrective, retry, or
+"finish the plan" call until the user sends another message.
 
 | phase | what it means | what you do |
 |---|---|---|
 | `succeeded` | edit committed, **nothing rendered** | relay `data.job.timeline_delta` + the digest, continue the conversation |
 | `needs_user` | the agent asked a question | relay it, then `cassette_answer_question(job_id, response)` |
-| `review_required` | export turn awaiting judgement | evaluate the result, then `cassette_review_completion(job_id, decision, reason)` — only `decision=export` renders |
+| `review_required` | export turn awaiting judgement | evaluate the result, then **in the same assistant turn** call `cassette_review_completion(job_id, decision, reason)` — only `decision=export` renders |
 | `exported` | the render finished | present the validated `artifacts` and their resource links |
 | `failed` / `cancelled` / `timed_out` | terminal error | report the structured error and its runtime-derived next action |
 | `running` / `exporting` | the call detached (`wait=false`) or was interrupted | see recovery below |
@@ -137,6 +141,13 @@ On `exported`, the runtime has already measured the finished file into `quality.
 `mean_dbfs`/`peak_dbfs`). Read those numbers instead of probing the export yourself, and raise them
 with the user only when a field contradicts what they asked for.
 
+An explicit user export request is already authorization to export. If that export turn returns
+`review_required`, inspect the attached timeline and resolve the gate in the same assistant turn.
+Do **not** ask the user to confirm export again merely because the Cassette agent's prose says it
+cannot render or lacks rendering capability: that prose is precisely why the typed supervisor
+review gate exists. Ask only when the timeline reveals a real defect or the requested result is
+genuinely ambiguous. Never start a second `cassette_run_job` to get past this gate.
+
 A `thread_busy` error means a run is already live on this session's thread, often started from an
 open editor tab. Wait and retry rather than starting a second job.
 
@@ -150,7 +161,7 @@ was cancelled, or the turn was deliberately started with `wait=false`. Call it *
 phase it reports, and stop. A settled turn never needs it.
 
 `job_id` is the durable handle for that recovery: jobs persist private thread and interrupt
-metadata on disk, so a paused turn resumes after a Codex or Claude restart.
+metadata on disk, so a paused turn resumes after a supported MCP host restarts.
 
 A long edit does not need managing. Hosts that background long tool calls (Claude Code moves any
 call past two minutes into a background task) keep the session usable while the turn runs and
