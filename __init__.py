@@ -3,44 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 
 if __package__:
-    from .core import gateway, schemas, tools
+    from .core import gateway
 else:  # Pytest may import this file as a bare module when the repo root is not named "cassette".
-    schemas = None
-    tools = None
+    gateway = None
 
 
 def register(ctx) -> None:
-    if schemas is None or tools is None:
+    if gateway is None:
         raise RuntimeError("cassette plugin must be loaded as a package directory")
 
-    plugin_tools = (
-        ("cassette_ingest_media", schemas.CASSETTE_INGEST_MEDIA, tools.cassette_ingest_media),
-        ("cassette_list_assets", schemas.CASSETTE_LIST_ASSETS, tools.cassette_list_assets),
-        ("cassette_make_prompt", schemas.CASSETTE_MAKE_PROMPT, tools.cassette_make_prompt),
-        ("cassette_match_bgm", schemas.CASSETTE_MATCH_BGM, tools.cassette_match_bgm),
-        ("cassette_match_exact_bgm", schemas.CASSETTE_MATCH_EXACT_BGM, tools.cassette_match_exact_bgm),
-        ("jamendo_music_matcher", schemas.JAMENDO_MUSIC_MATCHER, tools.jamendo_music_matcher),
-        ("cassette_answer_question", schemas.CASSETTE_ANSWER_QUESTION, tools.cassette_answer_question),
-        ("cassette_run_job", schemas.CASSETTE_RUN_JOB, tools.cassette_run_job),
-        ("cassette_job_status", schemas.CASSETTE_JOB_STATUS, tools.cassette_job_status),
-        ("cassette_review_completion", schemas.CASSETTE_REVIEW_COMPLETION, tools.cassette_review_completion),
-        ("cassette_cancel_job", schemas.CASSETTE_CANCEL_JOB, tools.cassette_cancel_job),
-        ("cassette_timeline", schemas.CASSETTE_TIMELINE, tools.cassette_timeline),
-        ("cassette_edit", schemas.CASSETTE_EDIT, tools.cassette_edit),
-        ("cassette_config", schemas.CASSETTE_CONFIG, tools.cassette_config),
-        # Registered for tool-name parity across adapters. Under Hermes the handler refuses and
-        # points at ~/.hermes/.env, because mcp_env_value() reads the stored credential file
-        # only under the mcp adapter — a file written here would never be read back.
-        ("cassette_login", schemas.CASSETTE_LOGIN, tools.cassette_login),
-    )
-
-    for name, schema, handler in plugin_tools:
-        ctx.register_tool(
-            name=name,
-            toolset="cassette",
-            schema=schema,
-            handler=handler,
-        )
+    # Tools intentionally come from the same stdio MCP server used by every host. The native
+    # Hermes plugin owns only gateway lifecycle behavior; a second set of direct handlers would
+    # create two subtly different Cassette runtimes.
 
     ctx.register_command(
         "cassette",
@@ -62,15 +36,24 @@ def register(ctx) -> None:
     )
     ctx.register_hook("pre_gateway_dispatch", gateway.ingest_gateway_media)
     ctx.register_hook("pre_llm_call", gateway.inject_cassette_context)
+    ctx.register_hook("pre_tool_call", gateway.guard_cassette_run_job_call)
     ctx.register_hook("post_tool_call", gateway.log_cassette_tool_call)
     ctx.register_hook("on_session_finalize", gateway.close_cassette_sessions)
     ctx.register_hook("on_session_reset", gateway.close_cassette_sessions)
 
-    # Keep the gateway-specific Hermes workflow out of the native Codex/Claude plugin skill path.
-    skill_path = Path(__file__).parent / "hermes" / "skills" / "cassette-video-edit" / "SKILL.md"
-    if skill_path.exists():
+    root = Path(__file__).parent
+    shared_skill = root / "skills" / "cassette-video-edit" / "SKILL.md"
+    if shared_skill.exists():
         ctx.register_skill(
             "cassette-video-edit",
-            skill_path,
-            "Orchestrate QQ/Telegram gateway media into Cassette video editing jobs.",
+            shared_skill,
+            "Edit and export media through the shared Cassette MCP workflow.",
+        )
+
+    gateway_skill = root / "hermes" / "skills" / "cassette-video-edit" / "SKILL.md"
+    if gateway_skill.exists():
+        ctx.register_skill(
+            "cassette-gateway-video-edit",
+            gateway_skill,
+            "Add QQ/Telegram gateway delivery behavior to the shared Cassette MCP workflow.",
         )

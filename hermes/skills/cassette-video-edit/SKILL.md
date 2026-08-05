@@ -1,6 +1,6 @@
 ---
-name: cassette-video-edit
-description: Orchestrate gateway media and natural-language editing instructions into complete Cassette editing jobs through the plugin's API transport, with timeline grounding, plan relay, and previews and exports delivered into the chat.
+name: cassette-gateway-video-edit
+description: Add Hermes gateway media ingestion, background notification, and delivery behavior to the canonical cassette-video-edit MCP workflow.
 version: 3.0.0
 metadata:
   hermes:
@@ -8,7 +8,11 @@ metadata:
     category: automation
     requires_toolsets: [cassette]
 ---
-# Cassette Video Edit Workflow
+# Cassette Gateway Addendum
+
+Use this only for QQ, Telegram, or legacy Weixin gateway sessions. The canonical editing state
+machine, one-call boundary, and tool contracts live in the `cassette-video-edit` skill and remain
+authoritative. This addendum covers only gateway ingestion, background work, and delivery.
 
 ## When to Use
 

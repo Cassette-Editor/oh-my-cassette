@@ -148,7 +148,11 @@ def _next_action_base(phase: SessionPhase, *, job_id: str | None = None) -> str:
     if phase == SessionPhase.NEEDS_USER:
         return "Ask the user, then call cassette_answer_question with job_id and response."
     if phase == SessionPhase.REVIEW_REQUIRED:
-        return "Review completion, then call cassette_review_completion; only decision=export renders."
+        return (
+            "Review completion, then call cassette_review_completion in this same assistant turn; "
+            "only decision=export renders. When this came from an explicit user export request, that "
+            "request is already authorization: do not ask the user to confirm export again."
+        )
     if phase == SessionPhase.SUCCEEDED:
         return (
             "Turn finished; the edit is committed but nothing was rendered. Review the attached "

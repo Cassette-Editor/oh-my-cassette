@@ -16,7 +16,6 @@ import pytest
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 
-from cassette import register
 from mcp_plugin.server import mcp
 
 
@@ -207,34 +206,17 @@ def test_a_stateless_2026_request_meets_a_structured_error_not_a_hang(tmp_path):
     assert reply["error"]["code"] == -32602
 
 
-def test_mcp_lists_exactly_the_hermes_tools_with_flat_structured_schemas():
-    class Context:
-        def __init__(self):
-            self.tools = []
-
-        def register_tool(self, **kwargs):
-            self.tools.append(kwargs)
-
-        def register_command(self, *_args, **_kwargs):
-            pass
-
-        def register_hook(self, *_args, **_kwargs):
-            pass
-
-        def register_skill(self, *_args, **_kwargs):
-            pass
-
-    hermes = Context()
-    register(hermes)
-
+def test_mcp_lists_the_shared_tools_with_flat_structured_schemas():
     async def inspect():
         listed = await mcp.list_tools()
-        assert {tool.name for tool in listed} == {tool["name"] for tool in hermes.tools} == EXPECTED_TOOLS
+        assert {tool.name for tool in listed} == EXPECTED_TOOLS
         by_name = {tool.name: tool for tool in listed}
         assert "request" not in by_name["cassette_run_job"].inputSchema["properties"]
         # The call IS the wait: it returns on a terminal phase and streams progress meanwhile,
         # so the host makes one call per turn instead of a cassette_job_status poll loop.
         assert by_name["cassette_run_job"].inputSchema["properties"]["wait"]["default"] is True
+        assert "Exactly one cassette_run_job call per user turn" in by_name["cassette_run_job"].description
+        assert "return control to the user" in by_name["cassette_run_job"].description
         assert set(by_name["cassette_config"].inputSchema["properties"]["thinking_level"]["anyOf"][0]["enum"]) == {
             "off",
             "minimal",
@@ -428,6 +410,11 @@ def test_protocol_restart_long_poll_and_resource_link(tmp_path):
                 assert artifact["uri"] == output.resolve().as_uri()
                 assert artifact["size"] == len(b"validated-video")
                 assert any(isinstance(block, types.ResourceLink) for block in result.content)
+                resource = await session.read_resource(artifact["uri"])
+                assert len(resource.contents) == 1
+                assert isinstance(resource.contents[0], types.BlobResourceContents)
+                assert resource.contents[0].mimeType == "video/mp4"
+                assert resource.contents[0].blob == "dmFsaWRhdGVkLXZpZGVv"
 
     async def restarted_process():
         async with stdio_client(_server_parameters(environment)) as (read, write):
