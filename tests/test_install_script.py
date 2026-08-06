@@ -126,14 +126,16 @@ def test_install_script_updates_existing_cassette_auth_without_clobbering(tmp_pa
     assert "old@example.com" not in text
 
 
-def test_install_script_configures_jamendo_auth_interactively(tmp_path):
+def test_install_script_configures_jamendo_auth_interactively(tmp_path, monkeypatch):
     install_plugin = _load_install_script()
+    monkeypatch.setattr(
+        install_plugin.runtime_config, "validate_jamendo_client_id", lambda client_id: {"status": "success"}
+    )
     answers = iter(["y", "client-id-placeholder"])
 
     configured = install_plugin.configure_jamendo_auth(
         tmp_path / ".hermes",
         input_func=lambda prompt: next(answers),
-        password_func=lambda prompt: "client-secret-placeholder",
         interactive=True,
     )
 
@@ -141,11 +143,14 @@ def test_install_script_configures_jamendo_auth_interactively(tmp_path):
     text = env_path.read_text(encoding="utf-8")
     assert configured is True
     assert "JAMENDO_CLIENT_ID=client-id-placeholder" in text
-    assert "JAMENDO_CLIENT_SECRET=client-secret-placeholder" in text
+    assert "JAMENDO_CLIENT_SECRET" not in text
 
 
-def test_install_script_updates_existing_jamendo_auth_without_clobbering(tmp_path):
+def test_install_script_updates_existing_jamendo_auth_without_clobbering(tmp_path, monkeypatch):
     install_plugin = _load_install_script()
+    monkeypatch.setattr(
+        install_plugin.runtime_config, "validate_jamendo_client_id", lambda client_id: {"status": "success"}
+    )
     env_path = tmp_path / ".hermes" / ".env"
     env_path.parent.mkdir(parents=True)
     env_path.write_text(
@@ -157,7 +162,6 @@ def test_install_script_updates_existing_jamendo_auth_without_clobbering(tmp_pat
     configured = install_plugin.configure_jamendo_auth(
         tmp_path / ".hermes",
         input_func=lambda prompt: next(answers),
-        password_func=lambda prompt: "new-secret",
         interactive=True,
     )
 
@@ -165,7 +169,8 @@ def test_install_script_updates_existing_jamendo_auth_without_clobbering(tmp_pat
     assert configured is True
     assert "OTHER_VALUE=keep" in text
     assert "JAMENDO_CLIENT_ID=new-client" in text
-    assert "export JAMENDO_CLIENT_SECRET=new-secret" in text
+    # Obsolete secret entries are ignored but never silently deleted or rewritten.
+    assert "export JAMENDO_CLIENT_SECRET=old-secret" in text
     assert "old-client" not in text
 
 

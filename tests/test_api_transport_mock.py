@@ -472,11 +472,13 @@ def test_api_transport_records_run_progress(cassette_env, mock_api, tmp_path):
     )
     job["asset_paths"] = [str(asset)]
     job["prompt"] = "edit"
-    ApiTransport().run_job(job)
+    result = ApiTransport().run_job(job)
     saved = jobs.load_job(job["job_id"])
     assert saved.get("current_stage")  # a live stage was recorded
     assert saved.get("progress_events")  # at least one structured progress event
     assert isinstance(saved.get("stage_timings"), dict) and saved["stage_timings"]
+    assert all(stage.get("status") != "running" for stage in saved["stage_timings"].values())
+    assert saved["progress_events"][-1]["status"] == result["status"]
 
 
 def test_api_transport_completion_review_gate(cassette_env, mock_api, monkeypatch, tmp_path):
@@ -1587,14 +1589,34 @@ def test_export_qc_never_fails_an_export(monkeypatch, tmp_path):
     assert T.ApiTransport()._export_qc([]) is None
 
 
-def test_explicit_refusal_downgrades_completion_observed():
-    """A run that ends 'success' with the model reporting it could not do the job
-    must not report completion - that is the always-on half of the false-completion bug."""
+def test_explicit_refusal_is_a_terminal_failure():
+    """LangGraph success is not product success when the agent explicitly reports not_done."""
     from cassette.core import api_transport as T
 
     transport = T.ApiTransport()
     transport._last_terminal_outcome = "not_done"
-    assert transport._result("succeeded", completion_observed=True)["quality"]["completion_observed"] is False
+    result = transport._result("succeeded", completion_observed=True)
+
+    assert result["status"] == "failed"
+    assert result["quality"]["completion_observed"] is False
+    assert result["errors"][-1]["code"] == "agent_reported_not_done"
+
+
+def test_result_finalizes_every_started_stage():
+    from cassette.core import api_transport as T
+
+    transport = T.ApiTransport()
+    transport._init_progress({"job_id": ""})
+    transport._enter_stage("", "upload", "Uploading")
+    transport._enter_stage("", "agent", "Editing")
+
+    result = transport._result("failed", errors=[{"code": "boom"}])
+
+    assert result["status"] == "failed"
+    assert transport._stage_timings["upload"]["status"] == "succeeded"
+    assert transport._stage_timings["agent"]["status"] == "failed"
+    assert transport._stage_timings["upload"]["finished_at"]
+    assert transport._stage_timings["agent"]["finished_at"]
 
 
 def test_completion_observed_survives_a_normal_terminal_decision():

@@ -453,7 +453,8 @@ def test_exact_bgm_selection_choice_calls_exact_tool(cassette_env):
     assert "Read ONLY the immediately previous assistant recommendation menu" in result["text"]
     assert "exact numbered line `2.`" in result["text"]
     assert "cannot unambiguously extract both title and artist" in result["text"]
-    assert "jamendo_music_matcher" in result["text"] or "cassette_match_bgm" in result["text"]
+    assert "stop the music flow" in result["text"]
+    assert "cassette_match_bgm" not in result["text"]
     assert gateway_mod._load_pending_edit(session_id) is None
 
 
@@ -627,7 +628,8 @@ def test_exact_bgm_selection_random_uses_plugin_selected_provider(cassette_env, 
 
     assert result is not None
     assert result["action"] == "rewrite"
-    assert "selected `exact_song` as the primary provider" in result["text"]
+    assert "selected `exact_song` for this attempt" in result["text"]
+    assert "no automatic provider fallback" in result["text"]
     assert "cassette_match_exact_bgm" in result["text"]
     assert gateway_mod._load_pending_edit(session_id) is None
 
@@ -2353,8 +2355,8 @@ def test_gateway_retry_after_exact_bgm_selection_does_not_reask_or_rematch_bgm(c
     assert selected is not None
     assert "cassette_match_exact_bgm" in selected["text"]
     assert "selected smart BGM recommendation #1" in selected["text"]
-    assert 'fallback_from="exact_bgm"' in selected["text"]
-    assert "fallback_reason set to the exact-song tool error code" in selected["text"]
+    assert "stop the music flow" in selected["text"]
+    assert "fallback_from" not in selected["text"]
 
     retry = gateway_mod.ingest_gateway_media(
         event=SimpleNamespace(
@@ -2555,20 +2557,19 @@ def test_smart_bgm_uses_jamendo_first_when_configured(cassette_env, monkeypatch)
     )
 
     assert result["action"] == "rewrite"
-    assert "Jamendo credentials appear configured" in result["text"]
+    assert "chose Jamendo smart BGM" in result["text"]
     assert "jamendo_music_matcher" in result["text"]
-    assert "Your next action must be a tool call" in result["text"]
+    assert "Call jamendo_music_matcher next" in result["text"]
     assert "searchTerms" in result["text"]
-    assert "Do not generate or pass a raw Jamendo SearchPlan JSON" in result["text"]
-    assert "Do not provide boost, order, type, duration" in result["text"]
+    assert "Never generate raw SearchPlan JSON" in result["text"]
     assert "Jamendo SearchPlan prompt" not in result["text"]
     assert "你是 Jamendo 音乐搜索策略生成器" not in result["text"]
-    assert "Free To Use only as fallback" in result["text"]
-    assert "Free To Use fallback category summary" in result["text"]
+    assert "Do not call Free To Use" in result["text"]
+    assert "automatic" not in result["text"].split("Do not call Free To Use", 1)[-1]
     assert "configured-client-id" not in result["text"]
 
 
-def test_jamendo_api_error_disables_jamendo_bgm_fallback(cassette_env, monkeypatch):
+def test_jamendo_api_error_stops_without_provider_fallback(cassette_env, monkeypatch):
     monkeypatch.setenv("JAMENDO_CLIENT_ID", "configured-client-id")
     tools._JAMENDO_DISABLED_CODE = None
 
@@ -2594,7 +2595,9 @@ def test_jamendo_api_error_disables_jamendo_bgm_fallback(cassette_env, monkeypat
 
     assert payload["ok"] is False
     assert payload["error"]["code"] == "jamendo_api_error"
-    assert tools._JAMENDO_DISABLED_CODE == "jamendo_api_error"
+    assert tools._JAMENDO_DISABLED_CODE is None
+    assert payload["error"]["details"]["provider_fallback_allowed"] is False
+    assert payload["error"]["details"]["setup_tool"] == "cassette_jamendo_setup"
 
     monkeypatch.setattr(
         gateway_mod, "_safe_freetouse_category_summary", lambda: "- Chill (Genre); related tags: mellow"
@@ -2606,8 +2609,9 @@ def test_jamendo_api_error_disables_jamendo_bgm_fallback(cassette_env, monkeypat
         optimization_enabled=False,
     )
 
-    assert "jamendo_music_matcher" not in result["text"]
-    assert "Choose exactly 3 Free To Use music search queries" in result["text"]
+    assert "jamendo_music_matcher" in result["text"]
+    assert "Do not call Free To Use" in result["text"]
+    assert "Choose exactly 3 Free To Use music search queries" not in result["text"]
     tools._JAMENDO_DISABLED_CODE = None
 
 
@@ -3183,13 +3187,7 @@ def test_job_status_includes_user_report(cassette_env, monkeypatch):
 
 
 def test_job_status_report_does_not_claim_completion_the_agent_refused(cassette_env, monkeypatch):
-    """A turn the agent openly declined must not be summarized as a finished edit.
-
-    The LangGraph run still ends 'succeeded' -- that is a transport fact -- but the transport clears
-    completion_observed when the agent reports outcome 'not_done'. Observed live: the agent answered
-    "the timeline is empty, there is nothing to trim" and the report still said the edit was
-    complete, which is the one line a host is most likely to repeat back to the user.
-    """
+    """A turn the agent openly declined must become a typed terminal failure."""
 
     def fake_run(job):
         return {
@@ -3206,7 +3204,8 @@ def test_job_status_report_does_not_claim_completion_the_agent_refused(cassette_
     status = json.loads(tools.cassette_job_status({"job_id": payload["job_id"]}))
 
     report = status["data"]["job"]["report"]
-    assert report["status"] == "succeeded"
+    assert status["data"]["job"]["status"] == "failed"
+    assert report["status"] == "failed"
     assert "could not carry out this edit" in report["user_summary"]
     assert "edit is complete" not in report["user_summary"]
 

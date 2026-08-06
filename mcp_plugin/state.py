@@ -103,6 +103,8 @@ def phase_from_job(job: dict) -> SessionPhase:
             return SessionPhase.REVIEW_REQUIRED
         return SessionPhase.NEEDS_USER
     if status == "succeeded":
+        if quality.get("completion_observed") is False:
+            return SessionPhase.FAILED
         return SessionPhase.EXPORTED if job.get("outputs") else SessionPhase.SUCCEEDED
     if status == "failed":
         return SessionPhase.FAILED
@@ -124,11 +126,16 @@ def _next_action_base(phase: SessionPhase, *, job_id: str | None = None) -> str:
         return "Call cassette_ingest_media with a trusted project media path."
     if phase == SessionPhase.GUIDED_CHOICES:
         return (
-            "Call cassette_run_job with message set to the user's verbatim words. "
-            "Optionally set model/thinking first via cassette_config when the user asks."
+            "Call cassette_config(session_id) before the first edit. If its source is default, present the "
+            "interactive model/thinking choices and save the user's choice; then call cassette_run_job "
+            "with message set to the user's verbatim words."
         )
     if phase == SessionPhase.ASSETS_READY:
-        return "Call cassette_run_job with message set to the user's verbatim words."
+        return (
+            "Call cassette_config(session_id) before the first edit. If its source is default, present the "
+            "interactive model/thinking choices, wait for the user, and save their choice; then call "
+            "cassette_run_job with message set to the user's verbatim words."
+        )
     if phase == SessionPhase.READY:
         # cassette_run_job declares wait=True at the tool signature, so the call blocks until the
         # turn settles. Saying otherwise here would license exactly the status loop it replaces.

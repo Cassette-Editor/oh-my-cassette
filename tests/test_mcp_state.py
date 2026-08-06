@@ -27,6 +27,10 @@ def test_typed_state_machine_rejects_invalid_export_transition(tmp_path):
             SessionPhase.REVIEW_REQUIRED,
         ),
         ({"status": "succeeded", "outputs": [{"local_path": "/tmp/x"}]}, SessionPhase.EXPORTED),
+        (
+            {"status": "succeeded", "quality": {"completion_observed": False}},
+            SessionPhase.FAILED,
+        ),
         ({"status": "failed"}, SessionPhase.FAILED),
         ({"status": "cancelled"}, SessionPhase.CANCELLED),
     ],

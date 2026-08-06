@@ -187,6 +187,48 @@ def _write_credentials(*, email: str, password: str) -> None:
     )
 
 
+def configure_jamendo(*, offer: bool, host: str | None = None) -> str:
+    """Validate and store an ID-only Jamendo configuration for MCP hosts."""
+    target_host = str(host or os.getenv("CASSETTE_MCP_HOST", "") or "").strip().lower()
+    direct = str(os.getenv("JAMENDO_CLIENT_ID", "") or "").strip()
+    if direct:
+        runtime_config.validate_jamendo_client_id(direct)
+        return "Jamendo Client ID is configured through the environment; no local value was written."
+    if target_host == "hermes":
+        existing = runtime_config.stored_hermes_jamendo()
+    else:
+        existing = runtime_config.stored_jamendo()
+    if offer and sys.stdin.isatty():
+        answer = input("Configure a Jamendo Client ID for music matching now? [y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            return (
+                f"Skipped Jamendo setup. Configure it later with `{runtime_config.jamendo_setup_command(PLUGIN_ROOT)}`."
+            )
+    elif offer:
+        return (
+            "Skipped interactive Jamendo setup outside a terminal. Configure it later with "
+            f"`{runtime_config.jamendo_setup_command(PLUGIN_ROOT)}`."
+        )
+    current = str(existing.get("client_id") or "").strip()
+    prompt = f"Jamendo Client ID [{runtime_config.mask_client_id(current)}]: " if current else "Jamendo Client ID: "
+    client_id = input(prompt).strip() or current
+    if not client_id:
+        raise SetupError("A Jamendo Client ID is required; existing configuration was unchanged.")
+    try:
+        runtime_config.validate_jamendo_client_id(client_id)
+    except runtime_config.JamendoValidationError as exc:
+        raise SetupError(f"{exc} Existing Jamendo configuration was unchanged.") from exc
+    if target_host == "hermes":
+        destination = runtime_config.store_hermes_jamendo_client_id(client_id)
+    else:
+        runtime_config.store_jamendo_client_id(client_id, verified_at=_now_iso())
+        destination = runtime_config.settings_path()
+    return (
+        f"Verified Jamendo Client ID {runtime_config.mask_client_id(client_id)} and stored it privately at "
+        f"{destination}. No Client Secret is required."
+    )
+
+
 def _reset_api_url() -> str:
     """Resolve the origin the MCP runtime will actually talk to.
 
@@ -427,6 +469,16 @@ def parse_args() -> argparse.Namespace:
         help="Read credentials from ephemeral environment variables (intended for maintainer acceptance only)",
     )
     parser.add_argument(
+        "--jamendo",
+        action="store_true",
+        help="Interactively verify and store only a Jamendo Client ID",
+    )
+    parser.add_argument(
+        "--host",
+        choices=("codex", "claude", "opencode", "hermes"),
+        help="MCP host for --jamendo storage (Hermes uses ~/.hermes/.env)",
+    )
+    parser.add_argument(
         "--reset-password",
         action="store_true",
         help="Have Cassette email a new generated password and store it privately",
@@ -459,8 +511,9 @@ def _reject_mode_conflicts(args: argparse.Namespace, mode: str) -> None:
             ("--import-hermes", args.import_hermes is not None),
             ("--use-environment", args.use_environment),
             ("--no-auto-update", args.no_auto_update),
-            ("--email", bool(args.email) and mode == "--logout"),
-            ("--yes", args.yes and mode == "--logout"),
+            ("--email", bool(args.email) and mode in {"--logout", "--jamendo"}),
+            ("--yes", args.yes and mode in {"--logout", "--jamendo"}),
+            ("--host", bool(getattr(args, "host", None)) and mode != "--jamendo"),
         )
         if used
     ]
@@ -477,8 +530,17 @@ def main() -> None:
     # of a value that had passed through the password flow, which is both harder to follow
     # and what CodeQL's clear-text-logging rule objected to.
     try:
-        if args.reset_password and args.logout:
-            raise SetupError("--reset-password and --logout do opposite things; pick one.")
+        modes = [
+            name
+            for name, enabled in (
+                ("--reset-password", args.reset_password),
+                ("--logout", args.logout),
+                ("--jamendo", args.jamendo),
+            )
+            if enabled
+        ]
+        if len(modes) > 1:
+            raise SetupError(f"{', '.join(modes)} are separate setup modes; pick one.")
         if args.logout:
             _reject_mode_conflicts(args, "--logout")
             print(logout())
@@ -489,8 +551,14 @@ def main() -> None:
             print("New password stored.")
             print(f"Saved at {runtime_config.credentials_path()}.")
             return
+        if args.jamendo:
+            _reject_mode_conflicts(args, "--jamendo")
+            print(configure_jamendo(offer=False, host=args.host))
+            return
+        if args.host:
+            raise SetupError("--host is only valid together with --jamendo.")
         configure(args)
-    except (SetupError, runtime_config.RuntimeConfigError) as exc:
+    except (SetupError, runtime_config.JamendoValidationError, runtime_config.RuntimeConfigError) as exc:
         path = getattr(exc, "path", None)
         location = f" ({path})" if path else ""
         print(f"oh-my-cassette setup: {exc}{location}", file=sys.stderr)
@@ -499,6 +567,14 @@ def main() -> None:
     auto_update = enable_claude_auto_update(skip=args.no_auto_update)
     if auto_update:
         print(auto_update)
+    try:
+        print(configure_jamendo(offer=True))
+    except (SetupError, runtime_config.JamendoValidationError, runtime_config.RuntimeConfigError) as exc:
+        print(
+            "Cassette sign-in succeeded, but optional Jamendo setup did not: "
+            f"{exc} Run `{runtime_config.jamendo_setup_command(PLUGIN_ROOT)}` to retry.",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

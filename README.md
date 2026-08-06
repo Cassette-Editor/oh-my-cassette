@@ -305,7 +305,7 @@ That downloads the current release, writes the `cassette` server into `~/.config
 
 **Re-run the same command to update.** Only `git` is not required — the release tarball is fetched with Python's standard library.
 
-Credentials are shared across Codex, Claude Code, OpenCode, and Hermes, so if you have already set up another host there is nothing more to do. Otherwise the installer prints the `setup_local_mcp.py` command to finish authentication.
+Cassette credentials are shared across Codex, Claude Code, OpenCode, and Hermes, so if you have already set up another host there is nothing more to do. Otherwise the installer prints the `setup_local_mcp.py` command to finish authentication. Jamendo uses the host-specific BYOK setup described below.
 
 The plugin tree lands in `~/.oh-my-cassette` (override with `OMC_HOME`). `--dry-run` previews the changes. If you prefer a git checkout, clone it and run the installer from there — it registers that tree and leaves it alone, and `--sync` fast-forwards it to the release channel.
 
@@ -350,7 +350,7 @@ The installer:
 - asks which Cassette URL to use:
   - `https://sg.trycassette.online/agent` (Asia, default)
   - `https://trycassette.online/agent` (America)
-- optionally saves Cassette login and Jamendo credentials into `~/.hermes/.env`;
+- optionally verifies and saves a Jamendo Client ID into `~/.hermes/.env`;
 - detects `ffmpeg` and `ffprobe` paths for service environments;
 - restarts the Hermes gateway service.
 
@@ -398,6 +398,22 @@ python3 scripts/setup_local_mcp.py --import-hermes
 ```
 
 Either route creates config directories with mode `0700` and credential files with mode `0600`, rejects symlinks and permissive files, and never persists access or refresh tokens.
+
+### Jamendo BYOK setup
+
+Jamendo music matching is strictly bring-your-own-key for every local agent host. Create a read-only application in the [Jamendo developer portal](https://devportal.jamendo.com/) and copy its Client ID. A Client Secret is neither needed nor accepted.
+
+**In the conversation.** Ask the agent to configure Jamendo, paste your Client ID, and it calls `cassette_jamendo_setup`. The tool verifies a minimal Tracks request before writing anything. The trade-off is the same as chat sign-in: the ID reaches the host transcript and model provider for that conversation.
+
+**In a private terminal.** Keep the ID out of the conversation entirely:
+
+```bash
+python3 scripts/setup_local_mcp.py --jamendo
+```
+
+Codex, Claude Code, and OpenCode store it in the protected `settings.json`; Hermes stores it in `~/.hermes/.env`. `JAMENDO_CLIENT_ID` in the process environment remains highest precedence. A failed validation preserves the previous working value.
+
+BYOK assigns API access and quota to your Jamendo application; it does not grant commercial rights to selected music. Review the returned track URL, license URL, download eligibility, and attribution requirements before publishing or commercial use.
 
 ### Resetting the password
 
@@ -473,7 +489,7 @@ There is no browser to install, drive, or keep alive. The Playwright transport t
 
 ### MCP tools
 
-The local MCP runtime exposes the same 15 tool names as Hermes:
+The local MCP runtime exposes the same 16 tool names as Hermes:
 
 | Tool | Purpose |
 |---|---|
@@ -483,6 +499,7 @@ The local MCP runtime exposes the same 15 tool names as Hermes:
 | `cassette_match_bgm` | Match Free To Use background music |
 | `cassette_match_exact_bgm` | Match a specific title and artist |
 | `jamendo_music_matcher` | Match structured Jamendo preferences |
+| `cassette_jamendo_setup` | Verify and privately store this machine's Jamendo Client ID |
 | `cassette_answer_question` | Answer a guided question or resume a paused job |
 | `cassette_run_job` | Run one conversational turn (`message` = the user's verbatim words); `export=true` renders |
 | `cassette_job_status` | Resume a deliberately detached or interrupted job call |
@@ -503,7 +520,7 @@ This narrows exposure rather than closing it: the route still resolves for anyon
 
 Two concurrency semantics worth knowing: a plugin turn never cancels a run started from the open editor tab (it fails typed as `thread_busy` instead — wait and retry), while typing a fresh message in the tab DOES cancel an in-flight plugin turn (the tab takes over; existing product behavior).
 
-**Behavior change (0.4.1):** the agent now receives the user's `message` verbatim (no brief wrapper), sessions are multi-turn on one thread, and a turn ends with the edit committed but **nothing rendered** — the envelope carries `timeline_delta`, `quality.timeline_ctl`, and a contact-sheet preview instead; pass `export=true` on the turn where the user asks to finish. Model/thinking are session preferences via `cassette_config` — never asked upfront, defaults match the web editor.
+**Behavior change (0.4.14):** the agent receives the user's `message` verbatim (no brief wrapper), sessions are multi-turn on one thread, and a turn ends with the edit committed but **nothing rendered** — the envelope carries `timeline_delta`, `quality.timeline_ctl`, and a contact-sheet preview instead; pass `export=true` on the turn where the user asks to finish. After the first asset is ingested, the plugin calls `cassette_config` and offers the available model/thinking choices once; the saved session preference applies from the next turn and can be changed later with the same tool.
 
 **Behavior change (0.4.0):** on MCP hosts, `edit_plan_review` now surfaces as a real question by default (`CASSETTE_PLAN_REVIEW=user`) instead of being silently auto-approved — answer with `approve`, `revise <feedback>`, or `reject`, in chat or in the open editor tab (first answer wins). Set `CASSETTE_UNATTENDED=1` to restore the previous fully headless behavior. Status envelopes additionally carry `timeline_delta` (what changed) and `plan_progress`, fed by the run's SSE event stream (`CASSETTE_API_STREAM=0` disables).
 
@@ -514,7 +531,7 @@ In QQ or Telegram:
 
 1. Send one or more video, image, or audio files.
 2. Wait for the saved-material acknowledgement.
-3. Send an edit instruction in the same conversation, or prefix it with `/edit`. Your words go to the Cassette agent verbatim — no model/optimization/BGM questionnaire. Use `/refine`, `/music`, or `/cassette_model` when you want those.
+3. Choose the model and thinking level when prompted for the first edit (or send `/cassette_model` later to change them), then send the edit instruction in the same conversation or prefix it with `/edit`. Your words go to the Cassette agent verbatim; optimization and BGM remain explicit via `/refine` and `/music`.
 4. Each turn ends with the edit saved (timeline delta + contact-sheet preview, no render). Depending on the client, the preview is delivered as an image or a labeled local thumbnail link. Keep editing in the same conversation. Say "export" when you want the video, and the plugin renders and delivers it through the gateway when supported.
 
 | Command | Explanation |

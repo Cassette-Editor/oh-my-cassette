@@ -560,6 +560,7 @@ class ApiTransport:
         self._last_event: float = 0.0
         self._last_heartbeat: float = 0.0
         self._run_started: float = 0.0
+        self._last_terminal_outcome: str | None = None
 
     # ── public Transport surface ──────────────────────────────────────────────
     def check_available(self) -> bool:
@@ -2340,6 +2341,7 @@ class ApiTransport:
         self._last_event = 0.0  # force an event on the first stage
         self._last_heartbeat = now  # first heartbeat waits one full interval
         self._run_started = now
+        self._last_terminal_outcome = None
 
     def _enter_stage(self, job_id: str, stage: str, summary: str) -> None:
         """Mark the start of a phase: finalize the previous stage timing, write current_stage +
@@ -2347,8 +2349,9 @@ class ApiTransport:
         iso = self._now_iso()
         if self._current_stage and self._current_stage in self._stage_timings:
             prev = self._stage_timings[self._current_stage]
-            prev.setdefault("status", "succeeded")
+            prev["status"] = "succeeded"
             prev["finished_at"] = iso
+            prev["duration_sec"] = round(time.monotonic() - prev.get("started_mono", time.monotonic()), 1)
         self._current_stage = stage
         entry = self._stage_timings.get(stage) or {"attempts": 0, "started_at": iso, "started_mono": time.monotonic()}
         entry["attempts"] = int(entry.get("attempts", 0)) + 1
@@ -2359,6 +2362,19 @@ class ApiTransport:
         self._stage_timings[stage] = entry
         self._last_event = 0.0  # always emit an event at a stage boundary
         self._tick(job_id, summary, force_event=True)
+
+    def _finish_progress(self, status: str, summary: str, outputs: list[dict]) -> None:
+        """Close the active stage and persist one truthful terminal progress event."""
+        now = time.monotonic()
+        iso = self._now_iso()
+        if self._current_stage in self._stage_timings:
+            current = self._stage_timings[self._current_stage]
+            current["status"] = status
+            current["finished_at"] = iso
+            current["duration_sec"] = round(now - current.get("started_mono", now), 1)
+        job_id = str((self._job or {}).get("job_id") or "")
+        if job_id:
+            self._append_event(job_id, summary or f"Cassette job {status}", status, outputs)
 
     def _tick(
         self, job_id: str, summary: str, status: str = "running", outputs: list | None = None, force_event: bool = False
@@ -2567,12 +2583,26 @@ class ApiTransport:
         final_screenshot: Any | None = None,
     ) -> dict:
         outputs = outputs or []
-        # completion_observed is a transport fact — the LangGraph run reached success.
-        # A turn where the model reported it could not do the job also reaches success,
-        # so an explicit refusal has to downgrade it. Only ever downgrades: an absent
-        # or reshaped decision keeps today's behaviour.
-        if completion_observed and getattr(self, "_last_terminal_outcome", None) == "not_done":
+        errors = list(errors or [])
+        agent_not_done = getattr(self, "_last_terminal_outcome", None) == "not_done"
+        # LangGraph success only means the graph settled. The agent's terminal decision is the
+        # product outcome, and not_done must be a failure even if the caller was about to enter
+        # review/export. This also gives every host one typed terminal state to render.
+        if agent_not_done:
+            status = _FAILED
             completion_observed = False
+            export_completed = False
+            export_pending = False
+            risk = "high"
+            if not any(error.get("code") == "agent_reported_not_done" for error in errors):
+                errors.append(
+                    {
+                        "code": "agent_reported_not_done",
+                        "message": "Cassette settled the turn but reported that the requested edit was not completed.",
+                        "details": {"terminal_outcome": "not_done"},
+                    }
+                )
+            extra_quality = {**(extra_quality or {}), "agent_terminal_outcome": "not_done"}
         quality = {
             "transport": "api",
             "completion_observed": completion_observed,
@@ -2590,11 +2620,12 @@ class ApiTransport:
             export_qc = self._export_qc(outputs)
             if export_qc:
                 quality["export_qc"] = export_qc
+        self._finish_progress(status, str(quality.get("progress_summary") or ""), outputs)
         return {
             "status": status,
             "outputs": outputs,
             "questions": questions or [],
-            "errors": errors or [],
+            "errors": errors,
             "quality": quality,
             "final_screenshot": final_screenshot,
         }

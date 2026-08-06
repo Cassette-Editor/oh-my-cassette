@@ -18,6 +18,7 @@ and OpenCode.
 Two details live outside this file to keep it short. Read them when they apply:
 
 - `references/auth.md` — any `auth_*` error, or the user is not signed in on this machine.
+- `references/music.md` — any Jamendo/BGM request or `jamendo_*` error.
 - `references/previews.md` — showing a timeline, contact sheet, or storyboard, and the plan-review
   pause.
 
@@ -33,9 +34,10 @@ You are a courier between the user and the Cassette agent, not an editor or a br
   timeline delta, the version numbers, and any validated artifact path.
 - Do not call `cassette_make_prompt`. It is a legacy brief builder, kept only so the tool-name set
   stays stable.
-- Never ask upfront about model, thinking level, optimization, or BGM. The defaults match the web
-  editor, and front-loading configuration questions is precisely the friction this workflow exists
-  to remove.
+- Model selection is the one guided setup step: after the first ingest, call
+  `cassette_config(session_id)`. If `source=default`, show the model and thinking choices and wait
+  for the user's selection before the first edit. Persist even “keep the default” by calling the
+  tool with that choice, so it is asked only once. Do not ask upfront about optimization or BGM.
 
 ## Safety and identity
 
@@ -55,14 +57,17 @@ every previous turn, so a follow-up like "make that title bigger" needs no conte
 1. Call `cassette_ingest_media` once per source asset. Omit `session_id` on the first call so the
    runtime generates one, then reuse the returned value everywhere.
 2. Call `cassette_list_assets` and confirm the intended files are present.
-3. For each editing request, call `cassette_run_job` with the user's verbatim `message` and the same
+3. Before the first edit, call `cassette_config(session_id)`. If its source is `default`, present
+   the returned choices and save the user's selection (including an accepted default).
+4. For each editing request, call `cassette_run_job` with the user's verbatim `message` and the same
    `session_id`.
-4. Relay what comes back (see routing below), then wait for the user's next instruction.
-5. Pass `export=true` only on a turn where the user expresses finish or export intent.
+5. Relay what comes back (see routing below), then wait for the user's next instruction.
+6. Pass `export=true` only on a turn where the user expresses finish or export intent.
 
 If the user explicitly asks for background music, `cassette_match_exact_bgm` takes a concrete
-title/artist, `jamendo_music_matcher` a configured mood/genre, and `cassette_match_bgm` is the Free
-To Use fallback. Then continue the conversation as normal.
+title/artist and `jamendo_music_matcher` handles a configured mood/genre. Never switch providers
+automatically. `cassette_match_bgm` remains available only when the user explicitly asks for the
+legacy Free To Use provider. Read `references/music.md` before handling music.
 
 ### One turn, end to end
 
@@ -191,8 +196,8 @@ deliver the result when it lands.
 - The selectable models are GPT-5.6 Luna and GPT-5.4 Mini. Thinking levels are `off`, `minimal`,
   `low`, `medium`, `high`, and `xhigh`. The defaults — GPT-5.6 Luna, low thinking — match the web
   editor. The preference persists for the session and applies from the next turn, the same
-  semantics as switching model between turns in the web editor. Change it only when the user asks,
-  and confirm in one line.
+  semantics as switching model between turns in the web editor. Ask once before the first edit;
+  after that, change it only when the user asks, and confirm in one line.
 - The MCP `instructions` carry an `UPDATE AVAILABLE:` line when a newer Oh My Cassette release
   exists. Mention it once per session with both version numbers and offer the command it names. Run
   that command only after the user explicitly agrees, and never re-offer in the same session — it

@@ -1461,24 +1461,10 @@ def _fuzzy_bgm_fallback_text(
     freetouse_summary: str | None = None,
     language: str = "zh",
 ) -> str:
-    summary = freetouse_summary if freetouse_summary is not None else _safe_freetouse_category_summary()
-    if _jamendo_configured():
-        return (
-            "If the exact song search tool returns ok=false, fall back without asking the user again. "
-            "First call jamendo_music_matcher with userQuery, searchTerms, fuzzyTags, excludeTerms, vocalInstrumental when clear, download=true, and session_id. "
-            "Do not generate or pass raw Jamendo SearchPlan JSON. "
-            "If Jamendo also returns ok=false after its internal 3-attempt search budget or reports missing/invalid credentials, fall back to Free To Use: choose exactly 3 Free To Use search queries from the category summary below and call cassette_match_bgm with session_id, instruction, search_queries, optimization_enabled="
-            f'{str(bool(optimization_enabled)).lower()}, continue_after_match={str(bool(continue_after_match)).lower()}, fallback_from="exact_bgm", and fallback_reason set to the exact-song tool error code or concise failure reason. '
-            f"Use the same success handling as the primary exact tool, including cassette_language='{_normalize_cassette_language(language) or 'zh'}'. Original instruction: {instruction}\n\n"
-            "Free To Use fallback category summary:\n"
-            f"{summary}\n"
-        )
     return (
-        "If the exact song search tool returns ok=false, fall back without asking the user again: choose exactly 3 Free To Use search queries from the category summary below and call cassette_match_bgm with session_id, instruction, search_queries, optimization_enabled="
-        f'{str(bool(optimization_enabled)).lower()}, continue_after_match={str(bool(continue_after_match)).lower()}, fallback_from="exact_bgm", and fallback_reason set to the exact-song tool error code or concise failure reason. '
-        f"Use the same success handling as the primary exact tool, including cassette_language='{_normalize_cassette_language(language) or 'zh'}'. Original instruction: {instruction}\n\n"
-        "Free To Use fallback category summary:\n"
-        f"{summary}\n"
+        "If the exact-song tool returns ok=false, stop the music flow and relay its structured "
+        "error. Do not call Jamendo, Free To Use, another music provider, or continue the edit "
+        "without the requested BGM. "
     )
 
 
@@ -1517,7 +1503,6 @@ def _available_bgm_methods() -> list[str]:
         methods.append("exact_song")
     if _jamendo_configured():
         methods.append("jamendo")
-    methods.append("freetouse")
     return methods
 
 
@@ -1531,40 +1516,43 @@ def _rewrite_random_bgm_provider_selection(
     language: str = "zh",
 ) -> dict:
     methods = _available_bgm_methods()
+    if not methods:
+        return _rewrite_smart_bgm_keyword_selection(
+            session_id,
+            instruction,
+            asset_count,
+            optimization_enabled=optimization_enabled,
+            continue_after_match=continue_after_match,
+            language=language,
+        )
     primary = random.choice(methods)
-    fallback_order = [method for method in methods if method != primary]
-    summary = _safe_freetouse_category_summary()
-    lines = [
-        f"{instruction}\n\n",
-        f"[The user selected random smart BGM matching. Cassette gateway assets available: {asset_count} asset(s). Use cassette session_id `{session_id}`. ",
-        f"The plugin selected `{primary}` as the primary provider for this random attempt; fallback provider order is: {', '.join(fallback_order) or 'none'}. ",
-        "Follow this provider order strictly and stop after the first successful BGM tool call. Do not ask the user another BGM question. ",
-    ]
-    if primary == "exact_song" or "exact_song" in fallback_order:
-        lines.append(
-            "For `exact_song`, Hermes must choose one concrete real song title plus concrete artist/singer that fits the edit instruction, then call cassette_match_exact_bgm with session_id, instruction, title, artist, optimization_enabled="
-            f"{str(bool(optimization_enabled)).lower()}, continue_after_match={str(bool(continue_after_match)).lower()}, and download=true. "
-            "Do not show the exact-song choice to the user in random mode before calling the tool. "
+    if primary == "exact_song":
+        provider_guidance = (
+            "Choose one concrete real song title plus artist/singer that fits the instruction, then "
+            "call cassette_match_exact_bgm with session_id, instruction, title, artist, "
+            f"optimization_enabled={str(bool(optimization_enabled)).lower()}, "
+            f"continue_after_match={str(bool(continue_after_match)).lower()}, and download=true. "
         )
-    if primary == "jamendo" or "jamendo" in fallback_order:
-        lines.append(
-            "For `jamendo`, call jamendo_music_matcher with fixed-form userQuery, searchTerms, fuzzyTags, excludeTerms, optional vocalInstrumental, download=true, and session_id. "
-            "Do not generate or pass raw Jamendo SearchPlan JSON. "
+    else:
+        provider_guidance = (
+            "Call jamendo_music_matcher with fixed-form userQuery, searchTerms, fuzzyTags, "
+            "excludeTerms, optional vocalInstrumental, download=true, and session_id. Do not "
+            "generate or pass raw Jamendo SearchPlan JSON. "
         )
-    if primary == "freetouse" or "freetouse" in fallback_order:
-        lines.append(
-            "For `freetouse`, choose exactly 3 Free To Use music search queries from the category summary below and call cassette_match_bgm with session_id, instruction, search_queries, optimization_enabled="
-            f"{str(bool(optimization_enabled)).lower()}, and continue_after_match={str(bool(continue_after_match)).lower()}. "
-        )
-    lines.append(
-        f"{_exact_bgm_success_guidance(optimization_enabled, continue_after_match, language)}"
-        f"For Jamendo or Free To Use success, use that tool's data.effective_instruction and hermes_next_step, preserving cassette_language='{_normalize_cassette_language(language) or 'zh'}'. "
-        "If every provider fails, continue the edit without BGM and tell the user BGM matching failed without blocking the Cassette flow. "
-        "Free To Use category summary:\n"
-        f"{summary}\n"
-        f"{_cassette_orchestration_guard()}]"
-    )
-    return {"action": "rewrite", "text": "".join(lines)}
+    return {
+        "action": "rewrite",
+        "text": (
+            f"{instruction}\n\n"
+            f"[The user selected random smart BGM matching. Cassette gateway assets available: "
+            f"{asset_count} asset(s). Use cassette session_id `{session_id}`. The plugin selected "
+            f"`{primary}` for this attempt. There is no automatic provider fallback. "
+            f"{provider_guidance}"
+            f"{_exact_bgm_success_guidance(optimization_enabled, continue_after_match, language)}"
+            "On any failure, relay the structured error and stop the music flow. Do not call "
+            "another provider or continue the edit without the requested BGM. "
+            f"{_cassette_orchestration_guard()}]"
+        ),
+    }
 
 
 def _safe_freetouse_category_summary() -> str:
@@ -1577,9 +1565,10 @@ def _safe_freetouse_category_summary() -> str:
 def _jamendo_configured() -> bool:
     # Read through the module: tools._disable_jamendo_bgm rebinds this at
     # runtime, and a from-import would freeze the value at import time.
-    return tools_mod._JAMENDO_DISABLED_CODE is None and bool(
-        str(os.getenv("JAMENDO_CLIENT_ID", "") or notifier._runtime_env("JAMENDO_CLIENT_ID")).strip()
-    )
+    try:
+        return bool(tools_mod.jamendo.JamendoConfig.from_env().client_id)
+    except Exception:
+        return False
 
 
 def _rewrite_smart_bgm_keyword_selection(
@@ -1591,6 +1580,21 @@ def _rewrite_smart_bgm_keyword_selection(
     continue_after_match: bool = True,
     language: str = "zh",
 ) -> dict:
+    if not _jamendo_configured():
+        details = tools_mod.jamendo.jamendo_setup_details()
+        return {
+            "action": "rewrite",
+            "text": (
+                f"{instruction}\n\n"
+                "[The user requested Jamendo smart BGM, but this machine has no Jamendo Client "
+                "ID configured. Stop the music and edit flow. Explain that they must create their "
+                f"own read-only application at {details['developer_portal']}; no Client Secret is "
+                "needed. Warn that chat setup places the Client ID in the conversation transcript, "
+                "then ask for it and call cassette_jamendo_setup. If they prefer private terminal "
+                f"entry, offer `{details['setup_command']}`. Do not call cassette_match_bgm, another "
+                "music provider, cassette_run_job, or continue without the requested BGM.]"
+            ),
+        }
     summary = _safe_freetouse_category_summary()
     if _jamendo_configured():
         return _rewrite_jamendo_first_bgm_selection(
@@ -1645,50 +1649,36 @@ def _rewrite_jamendo_first_bgm_selection(
     language: str = "zh",
 ) -> dict:
     if continue_after_match:
-        jamendo_success = (
-            "If jamendo_music_matcher succeeds, preserve jamendo_music_matcher.data.effective_instruction as the edit instruction. "
-            "If optimization_enabled is true, optimize that effective instruction for the user and ask for confirmation before starting Cassette. "
-            f"If optimization_enabled is false, continue directly with cassette_list_assets, cassette_make_prompt, and cassette_run_job using that effective instruction. {_cassette_run_job_tool_chain_guard(language)} "
-        )
-        freetouse_success = (
-            "If the Free To Use fallback succeeds, preserve cassette_match_bgm.data.effective_instruction as the edit instruction. "
-            "If optimization_enabled is true, optimize that effective instruction for the user and ask for confirmation before starting Cassette. "
-            f"If optimization_enabled is false, continue directly with cassette_list_assets, cassette_make_prompt, and cassette_run_job using that effective instruction. {_cassette_run_job_tool_chain_guard(language)} "
+        strict_success = (
+            "If jamendo_music_matcher succeeds, preserve its data.effective_instruction as the edit "
+            "instruction. If optimization_enabled is true, optimize that instruction and ask for "
+            "confirmation before starting Cassette. If optimization_enabled is false, continue "
+            f"directly with the Cassette tool chain. {_cassette_run_job_tool_chain_guard(language)} "
         )
     else:
-        jamendo_success = (
-            "If jamendo_music_matcher succeeds, do not call cassette_list_assets, cassette_make_prompt, or cassette_run_job. "
-            "Only tell the user the Jamendo BGM matching result if the tool notification was not already delivered. "
+        strict_success = (
+            "If jamendo_music_matcher succeeds, do not call cassette_list_assets, "
+            "cassette_make_prompt, or cassette_run_job; only relay the BGM result. "
         )
-        freetouse_success = (
-            "If the Free To Use fallback succeeds, do not call cassette_list_assets, cassette_make_prompt, or cassette_run_job. "
-            "Only tell the user the BGM matching result if the tool notification was not already delivered. "
-        )
-    text = (
-        f"{instruction}\n\n"
-        f"[The user chose smart BGM matching {'before continuing the Cassette edit' if continue_after_match else 'as a standalone material-ingest command'}. "
-        f"Cassette gateway assets available: {asset_count} asset(s). Use cassette session_id `{session_id}`. "
-        "Jamendo credentials appear configured, so use Jamendo as the primary smart-BGM provider and Free To Use only as fallback. "
-        "Do not call cassette_list_assets, cassette_make_prompt, or cassette_run_job until the BGM provider step finishes. "
-        "Your next action must be a tool call, not a user-visible message: call jamendo_music_matcher with userQuery, searchTerms, fuzzyTags, excludeTerms, vocalInstrumental, download=true, session_id, and seed if the user provided one. "
-        "Do not generate or pass a raw Jamendo SearchPlan JSON. Do not put any JSON in assistant content, Markdown, or a normal reply. "
-        "Fill the fixed form only: searchTerms must be 1 to 5 short English Jamendo-friendly search phrases; fuzzyTags should be 0 to 8 English mood/genre/instrument words; excludeTerms should contain only clearly unwanted English words; vocalInstrumental must be vocal, instrumental, or omitted. "
-        "Do not provide boost, order, type, duration, acousticElectric, speed, extraParams, or raw SearchPlan fields; the plugin will build safe Jamendo strategies itself. "
-        "The plugin will search Jamendo across multiple result orders/boosts and has a 3-attempt zero-result budget before returning failure. "
-        "If you cannot fill valid English searchTerms, skip Jamendo and use the Free To Use fallback below without showing the user any JSON. "
-        f"{jamendo_success}"
-        "If jamendo_music_matcher returns ok=false after its internal 3-attempt Jamendo search budget, or reports Jamendo missing configuration, credential/API validation failure, network failure, no eligible tracks, invalid fixed-form fields, or download failure, fall back to the existing Free To Use flow below without asking the user again. "
-        "For the Free To Use fallback, choose exactly 3 Free To Use music search queries from the category summary. "
-        "Each query must be 1 to 4 lowercase English words, built from one Free To Use category name plus one or two related mood/tag words when useful. "
-        "Then call cassette_match_bgm with session_id, instruction, search_queries, optimization_enabled="
-        f"{str(bool(optimization_enabled)).lower()}, and continue_after_match={str(bool(continue_after_match)).lower()}. "
-        f"{freetouse_success}"
-        "The tools will send or provide the user-facing BGM result message; do not expose local paths, raw IDs, Jamendo credentials, or worker commands.\n\n"
-        "Free To Use fallback category summary:\n"
-        f"{freetouse_summary}\n\n"
-        f"{_cassette_orchestration_guard()}]"
-    )
-    return {"action": "rewrite", "text": text}
+    return {
+        "action": "rewrite",
+        "text": (
+            f"{instruction}\n\n"
+            f"[The user chose Jamendo smart BGM {'before continuing the Cassette edit' if continue_after_match else 'as a standalone material-ingest command'}. "
+            f"Cassette gateway assets available: {asset_count} asset(s). Use cassette session_id "
+            f"`{session_id}`. Call jamendo_music_matcher next with fixed-form userQuery, "
+            "searchTerms, fuzzyTags, excludeTerms, optional vocalInstrumental, download=true, "
+            "session_id, and seed when provided. Never generate raw SearchPlan JSON. "
+            "Search terms must be short English Jamendo-friendly phrases. "
+            f"{strict_success}"
+            "If Jamendo returns any error—including configuration, validation, network, rate-limit, "
+            "no-result, eligibility, or download errors—relay the structured guidance and stop. "
+            "Do not call Free To Use or another music provider, and do not continue the edit without "
+            "the requested BGM. Remind the user that BYOK does not grant commercial-use rights and "
+            "that they must review the selected track's license and attribution requirements. "
+            f"{_cassette_orchestration_guard()}]"
+        ),
+    }
 
 
 def _freetouse_categories() -> list[dict[str, Any]]:

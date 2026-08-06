@@ -172,7 +172,7 @@ JAMENDO_MUSIC_MATCHER = {
     "name": "jamendo_music_matcher",
     "description": (
         "Fixed-form Jamendo music matcher. Hermes fills controlled fields such as searchTerms/fuzzyTags/vocalInstrumental; the plugin builds safe Jamendo strategies internally. "
-        "The plugin searches multiple result orders/boosts, retries zero-result searches up to a 3-attempt Jamendo budget, and only then lets Hermes fall back to Free To Use. Never ask Hermes to generate or print raw Jamendo SearchPlan JSON."
+        "The plugin searches multiple result orders/boosts and retries zero-result searches up to a 3-attempt Jamendo budget. Any failure stops the music flow; never switch providers automatically. Never ask the host to generate or print raw Jamendo SearchPlan JSON."
     ),
     "parameters": {
         "type": "object",
@@ -237,6 +237,25 @@ JAMENDO_MUSIC_MATCHER = {
             },
         },
         "required": ["userQuery", "searchTerms"],
+        "additionalProperties": False,
+    },
+}
+
+CASSETTE_JAMENDO_SETUP = {
+    "name": "cassette_jamendo_setup",
+    "description": (
+        "Validate and privately store this machine's Jamendo Client ID for read-only music matching. "
+        "First explain that the user can create a read-only application at https://devportal.jamendo.com/, "
+        "that no Client Secret is needed, and that chat setup places the Client ID in the conversation "
+        "transcript. Ask for the user's own Client ID; never invent one and never ask for a Client Secret. "
+        "Validation happens before storage, so failure preserves any existing working configuration."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "client_id": {"type": "string", "description": "The user's Jamendo application Client ID."},
+        },
+        "required": ["client_id"],
         "additionalProperties": False,
     },
 }
@@ -415,11 +434,11 @@ CASSETTE_CANCEL_JOB = {
 CASSETTE_CONFIG = {
     "name": "cassette_config",
     "description": (
-        "Get or set the session's Cassette model and thinking level. Call with only session_id to "
-        "list the current choice and available options; pass model (id or label) and/or "
+        "Interactive model picker for the session. Before the first edit, call with only session_id "
+        "to list the current choice and available options; if source=default ask the user to choose, "
+        "then pass model (id or label) and/or "
         "thinking_level to change them. Changes persist for the session and apply from the next "
-        "cassette_run_job turn. Never ask the user upfront — defaults match the web editor; change "
-        "only when the user asks."
+        "cassette_run_job turn. Persist an accepted default too so the question occurs only once."
     ),
     "parameters": {
         "type": "object",
