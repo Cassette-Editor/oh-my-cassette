@@ -238,6 +238,28 @@ def test_jamendo_search_fallback_relaxes_api_params_when_primary_empty():
     ]
 
 
+def test_jamendo_search_retries_preserve_selected_track_identity():
+    calls = []
+
+    class FakeClient(jamendo.JamendoClient):
+        def search_tracks(self, plan, *, limit_override=None):
+            del limit_override
+            calls.append([dict(strategy.extra_params) for strategy in plan.strategies])
+            if len(calls) < 3:
+                return []
+            return [_track("selected")]
+
+    payload = _plan_dict()
+    payload["strategies"][0]["extraParams"] = {"id": "selected"}
+    plan = jamendo.JamendoSearchPlan.from_dict(payload)
+
+    candidates, _effective_plan, _fallbacks = jamendo._search_candidates_with_fallbacks(FakeClient("client-id"), plan)
+
+    assert [item.id for item in candidates] == ["selected"]
+    assert calls
+    assert all(params == {"id": "selected"} for attempt in calls for params in attempt)
+
+
 def test_jamendo_search_uses_three_attempt_budget_before_empty_result():
     calls = []
 

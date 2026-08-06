@@ -33,6 +33,7 @@
     "websiteURL": "https://github.com/Cassette-Editor/oh-my-cassette",
     "defaultPrompt": [
       "Edit this project video with Cassette.",
+      "Let me choose the Cassette model for this edit.",
       "Add captions and background music to this clip.",
       "Continue this Cassette job from its job ID."
     ],

@@ -649,6 +649,12 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
     language = _language_for_platform(platform, job)
     status = job.get("status") or "unknown"
     quality = job.get("quality") or {}
+    agent_not_done = status == "succeeded" and quality.get("completion_observed") is False
+    if agent_not_done:
+        status = "failed"
+    error_codes = _error_codes(job)
+    if agent_not_done and error_codes in {"unknown", "none"}:
+        error_codes = "agent_reported_not_done"
     latest_progress = _terminal_summary(job)
     output_count = len(job.get("outputs") or job.get("output_links") or [])
     exported_paths = _exported_media_paths(job)
@@ -664,7 +670,7 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
         elif status == "timed_out":
             headline = "Cassette timed out before exposing a clear completion signal."
         elif status == "failed":
-            headline = f"Cassette edit failed. Error code(s): {_error_codes(job)}."
+            headline = f"Cassette edit failed. Error code(s): {error_codes}."
         elif status == "cancelled":
             headline = "Cassette edit was paused."
         else:
@@ -706,7 +712,7 @@ def format_platform_final_message(job: dict, media_delivery: str | None = None, 
     elif status == "timed_out":
         headline = "Cassette 剪辑任务超时，未检测到明确完成信号。"
     elif status == "failed":
-        headline = f"Cassette 剪辑任务失败。错误码：{_error_codes(job)}。"
+        headline = f"Cassette 剪辑任务失败。错误码：{error_codes}。"
     elif status == "cancelled":
         headline = "Cassette 剪辑任务已取消。"
     else:

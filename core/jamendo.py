@@ -13,6 +13,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+import runtime_config
+
 from . import manifest, notifier
 from .errors import CassetteError
 
@@ -59,7 +61,6 @@ _RESERVED_SEARCH_PARAMS = {"client_id", "format", "audioformat", "audiodlformat"
 @dataclass
 class JamendoConfig:
     client_id: str
-    client_secret: str = ""
     base_url: str = JAMENDO_BASE_URL
     download_dir: Path = field(default_factory=lambda: manifest.get_asset_root() / "downloads" / "jamendo")
     metadata_dir: Path = field(default_factory=lambda: manifest.get_asset_root() / "metadata" / "jamendo")
@@ -72,7 +73,8 @@ class JamendoConfig:
         if not client_id:
             raise CassetteError(
                 "jamendo_client_id_missing",
-                "JAMENDO_CLIENT_ID is required for Jamendo music matching",
+                "Jamendo music requires this machine's own Client ID.",
+                jamendo_setup_details(),
                 recoverable=True,
             )
         timeout_raw = _runtime_env("HTTP_TIMEOUT_SECONDS") or "30"
@@ -82,7 +84,6 @@ class JamendoConfig:
             timeout = 30.0
         return cls(
             client_id=client_id,
-            client_secret=_runtime_env("JAMENDO_CLIENT_SECRET"),
             base_url=(_runtime_env("JAMENDO_BASE_URL") or JAMENDO_BASE_URL).rstrip("/"),
             download_dir=_runtime_path("DOWNLOAD_DIR", manifest.get_asset_root() / "downloads" / "jamendo"),
             metadata_dir=_runtime_path("METADATA_DIR", manifest.get_asset_root() / "metadata" / "jamendo"),
@@ -263,6 +264,7 @@ class TrackCandidate:
             "albumName": self.album_name,
             "duration": self.duration,
             "shareUrl": self.shareurl,
+            "licenseCcUrl": self.license_ccurl,
             "audiodownloadAllowed": self.audiodownload_allowed,
             "sourceStrategies": self.source_strategies,
         }
@@ -681,11 +683,20 @@ def match_jamendo_music(
             "provider": "jamendo",
             "effective_instruction": _instruction_with_jamendo_bgm(search_plan.raw_user_query, selected),
             "user_message": _jamendo_status_message(selected),
+            "attribution": f"{selected.artist_name or 'Unknown artist'} — {selected.name}",
+            "track_url": selected.shareurl or "",
+            "license_url": selected.license_ccurl or "",
+            "download_allowed": selected.audiodownload_allowed,
+            "license_notice": (
+                "BYOK controls Jamendo API access and quota only. Review the selected track's license "
+                "and attribution requirements before publishing or commercial use."
+            ),
             "fallbacks": fallbacks,
             "hermes_next_step": (
                 "Use effective_instruction directly as the edit instruction for cassette_make_prompt, "
                 "or as the source text for prompt optimization if optimization is still enabled. "
-                "If this tool returned an error, fall back to the existing Free To Use cassette_match_bgm flow."
+                "If this tool returns an error, stop the music flow and relay its structured guidance; "
+                "never switch providers automatically."
             ),
         }
     )
@@ -775,7 +786,10 @@ def _relaxed_api_plan(plan: JamendoSearchPlan) -> JamendoSearchPlan:
                 order=strategy.order,
                 limit=strategy.limit,
                 type=None,
-                extra_params={},
+                # Identity constraints (notably the web picker's selected track id) are not
+                # search strictness and must survive retries. Dropping them can download a
+                # completely different song than the one the user selected.
+                extra_params=dict(strategy.extra_params),
             )
         )
     return JamendoSearchPlan(
@@ -812,7 +826,7 @@ def _broad_api_plan(plan: JamendoSearchPlan) -> JamendoSearchPlan:
                     order=order,
                     limit=strategy.limit,
                     type=None,
-                    extra_params={},
+                    extra_params=dict(strategy.extra_params),
                 )
             )
     return JamendoSearchPlan(
@@ -881,7 +895,16 @@ def _instruction_with_jamendo_bgm(instruction: str, track: TrackCandidate) -> st
 def _jamendo_status_message(track: TrackCandidate) -> str:
     artist = track.artist_name or "未知艺术家"
     title = track.name or "未知曲目"
-    return f"已通过 Jamendo 智能匹配 BGM：{artist} - {title}。"
+    links = []
+    if track.shareurl:
+        links.append(f"曲目：{track.shareurl}")
+    if track.license_ccurl:
+        links.append(f"许可：{track.license_ccurl}")
+    suffix = f" {'；'.join(links)}。" if links else ""
+    return (
+        f"已通过 Jamendo 智能匹配 BGM：{artist} - {title}。{suffix}"
+        "BYOK 仅决定 API 访问和配额；发布或商用前请核对该曲目的许可与署名要求。"
+    )
 
 
 def load_jamendo_plan_prompt_template() -> str:
@@ -917,7 +940,30 @@ def _with_raw_user_query(value: str | dict[str, Any], user_query: str) -> str | 
 
 
 def _runtime_env(name: str) -> str:
-    return str(os.getenv(name, "") or notifier._runtime_env(name)).strip()
+    direct = str(os.getenv(name, "") or "").strip()
+    if direct:
+        return direct
+    if runtime_config.is_mcp_runtime():
+        return runtime_config.mcp_env_value(name)
+    return notifier._runtime_env(name)
+
+
+def jamendo_setup_details() -> dict[str, Any]:
+    try:
+        source = runtime_config.resolve_jamendo_client_id().get("source") or "missing"
+    except runtime_config.RuntimeConfigError:
+        source = "config_error"
+    return {
+        "setup_required": True,
+        "setup_tool": "cassette_jamendo_setup",
+        "setup_command": runtime_config.jamendo_setup_command(),
+        "developer_portal": runtime_config.JAMENDO_DEVELOPER_PORTAL,
+        "credential_source": source,
+        "next_action": (
+            "Create a read-only Jamendo application, then either call cassette_jamendo_setup with its "
+            "Client ID or run the private terminal setup command."
+        ),
+    }
 
 
 def _runtime_path(name: str, default: Path) -> Path:

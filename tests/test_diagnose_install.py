@@ -24,14 +24,12 @@ def test_diagnose_redacts_secret_env_values():
             "CASSETTE_AUTH_EMAIL": "operator@example.com",
             "CASSETTE_AUTH_PASSWORD": "secret-password",
             "JAMENDO_CLIENT_ID": "client-id",
-            "JAMENDO_CLIENT_SECRET": "secret-client",
         }
     )
 
     assert snapshot["CASSETTE_AUTH_EMAIL"] == "<set>"
     assert snapshot["CASSETTE_AUTH_PASSWORD"] == "<set>"
     assert snapshot["JAMENDO_CLIENT_ID"] == "<set>"
-    assert snapshot["JAMENDO_CLIENT_SECRET"] == "<set>"
     assert "operator@example.com" not in str(snapshot)
     assert "secret-password" not in str(snapshot)
     assert "secret-client" not in str(snapshot)

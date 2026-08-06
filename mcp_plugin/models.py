@@ -182,6 +182,16 @@ class JamendoMatcherInput(StrictModel):
     session_id: str | None = None
 
 
+class JamendoSetupInput(StrictModel):
+    client_id: str
+
+    @model_validator(mode="after")
+    def _require_client_id(self) -> "JamendoSetupInput":
+        if not (self.client_id or "").strip():
+            raise ValueError("cassette_jamendo_setup requires client_id")
+        return self
+
+
 class RunJobInput(StrictModel):
     message: str | None = None
     # None = not provided: the transport keeps its default, which is to commit the edit and

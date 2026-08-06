@@ -27,6 +27,7 @@ from .models import (
     ConfigInput,
     IngestMediaInput,
     JamendoMatcherInput,
+    JamendoSetupInput,
     JobStatusInput,
     EditInput,
     ListAssetsInput,
@@ -79,6 +80,21 @@ def _startup_auth_notice() -> str:
         )
     verified = str(credentials.get("verified_at") or "").strip()
     return f" At startup this machine was signed in to Cassette{f' (verified {verified})' if verified else ''}."
+
+
+def _startup_jamendo_notice() -> str:
+    try:
+        configured = runtime_config.resolve_jamendo_client_id()
+    except Exception:  # noqa: BLE001 — a diagnostic line must never block server startup
+        return ""
+    if configured.get("client_id"):
+        return " At startup Jamendo BYOK was configured for this machine; never reveal its Client ID."
+    return (
+        " At startup Jamendo BYOK was not configured. When the user asks for Jamendo music, explain "
+        "how to create a read-only Jamendo application and ask for its Client ID, then call "
+        "cassette_jamendo_setup; alternatively offer the private terminal setup command. Never ask "
+        "for a Client Secret and never switch music providers automatically."
+    )
 
 
 @asynccontextmanager
@@ -267,8 +283,10 @@ mcp = ArtifactFastMCP(
         "A turn ends succeeded with the edit committed and nothing rendered, carrying "
         "timeline_delta + quality.timeline_ctl + a contact-sheet artifact as the per-turn "
         "preview; pass export=true only when the user expresses finish/export intent. "
-        "Model/thinking: never ask upfront (defaults match the web editor); when the user asks, "
-        "set them via cassette_config — applied from the next turn. "
+        "Model/thinking: after the first asset is ingested, call cassette_config(session_id) before "
+        "the first edit. If source=default, present its interactive model/thinking choices and wait "
+        "for the user; persist even an accepted default by calling cassette_config with that choice. "
+        "Later changes apply from the next turn. "
         "cassette_run_job returns when the turn is settled, streaming progress notifications while it "
         "works — one call per turn, never a status loop. Route on the typed phase and next_action "
         "fields, never on prose: needs_user means ask the user then call cassette_answer_question; "
@@ -300,6 +318,7 @@ mcp = ArtifactFastMCP(
         "they would rather keep the password out of this conversation. Cassette passwords are always "
         "server-generated — never invent or guess one, always ask the user for it."
         + _startup_auth_notice()
+        + _startup_jamendo_notice()
         + update_check.notice()
         + update_check.auto_update_notice()
     ),
@@ -801,10 +820,11 @@ async def cassette_cancel_job(job_id: str, ctx: Context) -> ToolEnvelope:
 
 @mcp.tool(
     description=(
-        "Get or set the session's Cassette model and thinking level. Call with only session_id to "
-        "see the current choice and available options; pass model (id or label) and/or "
+        "Interactive model picker for the session. Before the first edit, call with only session_id "
+        "to see the current choice and available options; if source=default, ask the user to choose, "
+        "then pass model (id or label) and/or "
         "thinking_level to change them — persisted for the session, applied from the next "
-        "cassette_run_job turn. Defaults match the web editor; change only when the user asks."
+        "cassette_run_job turn. Persist an accepted default too so the question occurs only once."
     ),
     structured_output=True,
 )
@@ -850,6 +870,21 @@ async def cassette_login(
     # exclude_none only: the two booleans must survive as False so the core handler can tell
     # "not confirmed" from "absent" without re-deriving intent.
     return await _run_sync(_runtime(ctx).login, request.model_dump(exclude_none=True))
+
+
+@mcp.tool(
+    description=(
+        "Validate and privately store this machine's own Jamendo Client ID for read-only music "
+        "matching. Before calling, explain that the user creates a read-only application at "
+        "https://devportal.jamendo.com/, no Client Secret is needed, and pasting the Client ID "
+        "places it in the conversation transcript. Ask for their Client ID; never invent one and "
+        "never ask for a Client Secret. A failed validation preserves existing configuration."
+    ),
+    structured_output=True,
+)
+async def cassette_jamendo_setup(client_id: str, ctx: Context) -> ToolEnvelope:
+    request = JamendoSetupInput(client_id=client_id)
+    return await _run_sync(_runtime(ctx).jamendo_setup, request.model_dump())
 
 
 def main() -> None:

@@ -516,10 +516,76 @@ def jamendo_music_matcher(a: dict, **kw) -> str:
             session_id=str(a.get("session_id") or kw.get("task_id") or "").strip() or None,
         )
     except CassetteError as exc:
-        if _jamendo_error_disables_provider(exc):
-            _disable_jamendo_bgm(exc.code)
+        exc.details = {**exc.details, **jamendo.jamendo_setup_details(), "provider_fallback_allowed": False}
         raise
     return ok(result)
+
+
+@safe_tool
+def cassette_jamendo_setup(a: dict, **kw) -> str:
+    """Validate and privately store a host-specific Jamendo Client ID."""
+    import runtime_config
+
+    client_id = str(a.get("client_id") or "").strip()
+    if not client_id:
+        raise CassetteError("missing_required_arg", "client_id is required", jamendo.jamendo_setup_details())
+    if str(kw.get("runtime_host") or "hermes") != "mcp":
+        return err(
+            "cassette_jamendo_setup",
+            "jamendo_setup_unsupported_adapter",
+            "This setup tool is available through the shared MCP runtime.",
+            jamendo.jamendo_setup_details(),
+            recoverable=False,
+        )
+    if str(os.getenv("JAMENDO_CLIENT_ID", "") or "").strip():
+        return err(
+            "cassette_jamendo_setup",
+            "jamendo_env_precedence",
+            "JAMENDO_CLIENT_ID comes from the MCP process environment and would shadow stored setup. "
+            "Update that environment variable instead.",
+            {**jamendo.jamendo_setup_details(), "credential_source": "environment"},
+        )
+    try:
+        runtime_config.validate_jamendo_client_id(client_id)
+        verified_at = manifest.now_iso()
+        host = str(os.getenv("CASSETTE_MCP_HOST", "") or "").strip().lower()
+        if host == "hermes":
+            path = runtime_config.store_hermes_jamendo_client_id(client_id)
+            source = "hermes_env"
+        else:
+            runtime_config.store_jamendo_client_id(client_id, verified_at=verified_at)
+            path = runtime_config.settings_path()
+            source = "local_config"
+    except runtime_config.JamendoValidationError as exc:
+        return err(
+            "cassette_jamendo_setup",
+            exc.code,
+            str(exc),
+            {**exc.details, **jamendo.jamendo_setup_details(), "preserved_existing": True},
+        )
+    except runtime_config.RuntimeConfigError as exc:
+        return err(
+            "cassette_jamendo_setup",
+            exc.code,
+            str(exc),
+            {**jamendo.jamendo_setup_details(), "path": str(exc.path or "")},
+            recoverable=False,
+        )
+    global _JAMENDO_DISABLED_CODE
+    _JAMENDO_DISABLED_CODE = None
+    return ok(
+        {
+            "stored": True,
+            "client_id_masked": runtime_config.mask_client_id(client_id),
+            "verified_at": verified_at,
+            "credential_source": source,
+            "settings_path": str(path),
+            "license_notice": (
+                "BYOK controls Jamendo API access and quota only. Review each selected track's "
+                "license and attribution requirements before publishing or commercial use."
+            ),
+        }
+    )
 
 
 def _optional_int_arg(value: Any, name: str) -> int | None:
@@ -880,6 +946,19 @@ def _scrub_job(job: dict) -> dict:
     scrubbed.pop("continuation", None)
     scrubbed.pop("resume_request", None)
     scrubbed["outputs"] = _scrub_outputs(scrubbed.get("outputs") or [])
+    quality = scrubbed.get("quality") if isinstance(scrubbed.get("quality"), dict) else {}
+    if scrubbed.get("status") == "succeeded" and quality.get("completion_observed") is False:
+        scrubbed["status"] = "failed"
+        errors = list(scrubbed.get("errors") or [])
+        if not any(error.get("code") == "agent_reported_not_done" for error in errors if isinstance(error, dict)):
+            errors.append(
+                {
+                    "code": "agent_reported_not_done",
+                    "message": "Cassette reported that the requested edit was not completed.",
+                    "details": {},
+                }
+            )
+        scrubbed["errors"] = errors
     if scrubbed.get("model_selection_notification"):
         notification = dict(scrubbed["model_selection_notification"])
         notification.pop("error", None)
@@ -919,17 +998,7 @@ def _job_report(job: dict) -> dict:
     latest_progress_summary = latest_progress.get("summary") or quality.get("progress_summary", "")
     output_count = len(job.get("outputs") or job.get("output_links") or [])
     export_pending = bool(quality.get("export_pending")) or (status == "succeeded" and output_count == 0)
-    # The transport clears completion_observed when the agent itself reported it could not do the
-    # job (terminalDecision outcome 'not_done'). The run still ends 'succeeded' because the LangGraph
-    # run succeeded — the transport fact and the editorial outcome are different things. Only an
-    # explicit False downgrades: a succeeded export always sets it True, and an absent key means no
-    # transport ever measured it, so neither is mistaken for a refusal.
-    if status == "succeeded" and quality.get("completion_observed") is False:
-        user_summary = (
-            "Cassette reported it could not carry out this edit, so the timeline is unchanged. "
-            "Read the chat message for the reason and retry with a more specific instruction."
-        )
-    elif status == "succeeded" and export_pending:
+    if status == "succeeded" and export_pending:
         user_summary = "Cassette chat panel indicates the edit is complete, but no exported video was recorded."
     elif status == "succeeded":
         user_summary = "Cassette edit completed and exported output is available."
@@ -950,7 +1019,13 @@ def _job_report(job: dict) -> dict:
         user_summary = "Cassette is still working."
     elif status == "failed":
         codes = ", ".join(e.get("code", "unknown") for e in job.get("errors", [])) or "unknown"
-        user_summary = f"Cassette job failed with error code(s): {codes}."
+        if "agent_reported_not_done" in codes:
+            user_summary = (
+                "Cassette reported it could not carry out this edit, so the requested result was not completed. "
+                "Read the latest progress summary for the reason and retry with a more specific instruction."
+            )
+        else:
+            user_summary = f"Cassette job failed with error code(s): {codes}."
     else:
         user_summary = f"Cassette job status is {status}."
     report = {

@@ -11,6 +11,13 @@ import tempfile
 from pathlib import Path
 
 
+PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+if str(PLUGIN_ROOT) not in sys.path:
+    sys.path.insert(0, str(PLUGIN_ROOT))
+
+import runtime_config  # noqa: E402
+
+
 COPY_IGNORE = shutil.ignore_patterns(
     ".git",
     ".mypy_cache",
@@ -37,7 +44,6 @@ AUTH_ENV_KEYS = (
     "CASSETTE_AUTH_EMAIL",
     "CASSETTE_AUTH_PASSWORD",
     "JAMENDO_CLIENT_ID",
-    "JAMENDO_CLIENT_SECRET",
 )
 
 
@@ -396,39 +402,35 @@ def configure_jamendo_auth(
     home: Path,
     *,
     input_func=input,
-    password_func=getpass.getpass,
     interactive: bool | None = None,
 ) -> bool:
     if interactive is None:
         interactive = sys.stdin.isatty() and sys.stdout.isatty()
     env_path = home / ".env"
     if not interactive:
-        print(f"skip interactive Jamendo setup; edit {env_path} to set JAMENDO_CLIENT_ID and JAMENDO_CLIENT_SECRET.")
+        print(f"skip interactive Jamendo setup; edit {env_path} to set JAMENDO_CLIENT_ID.")
         return False
 
     existing = read_env_values(env_path)
     current_client_id = existing.get("JAMENDO_CLIENT_ID", "")
-    current_client_secret = existing.get("JAMENDO_CLIENT_SECRET", "")
-    prompt = "Configure Jamendo API credentials now? [y/N]: "
+    prompt = "Configure a Jamendo Client ID for music matching now? [y/N]: "
     if not _yes(input_func(prompt), default=False):
         print(f"skipped Jamendo setup; edit {env_path} later if needed.")
         return False
 
     client_id_prompt = f"Jamendo Client ID [{current_client_id}]: " if current_client_id else "Jamendo Client ID: "
     client_id = input_func(client_id_prompt).strip() or current_client_id
-    secret_prompt = (
-        "Jamendo Client Secret [leave blank to keep existing]: " if current_client_secret else "Jamendo Client Secret: "
-    )
-    client_secret = password_func(secret_prompt).strip() or current_client_secret
     if not client_id:
         print("Jamendo setup skipped because Client ID was empty.")
         return False
+    try:
+        runtime_config.validate_jamendo_client_id(client_id)
+    except runtime_config.JamendoValidationError as exc:
+        print(f"Jamendo setup failed: {exc} Existing configuration was unchanged.")
+        return False
 
-    updates = {"JAMENDO_CLIENT_ID": client_id}
-    if client_secret:
-        updates["JAMENDO_CLIENT_SECRET"] = client_secret
-    write_env_values(env_path, updates)
-    print(f"saved Jamendo API credentials to {env_path}")
+    write_env_values(env_path, {"JAMENDO_CLIENT_ID": client_id})
+    print(f"verified and saved Jamendo Client ID to {env_path}; no Client Secret is required")
     return True
 
 
@@ -482,7 +484,7 @@ def main() -> int:
     parser.add_argument(
         "--skip-cassette-auth", action="store_true", help="do not prompt for Cassette login credentials"
     )
-    parser.add_argument("--skip-jamendo-auth", action="store_true", help="do not prompt for Jamendo API credentials")
+    parser.add_argument("--skip-jamendo-auth", action="store_true", help="do not prompt for a Jamendo Client ID")
     parser.add_argument("--skip-ffmpeg-detect", action="store_true", help="do not detect and save ffmpeg/ffprobe paths")
     parser.add_argument(
         "--skip-gateway-restart", action="store_true", help="do not restart Hermes gateway after installation"

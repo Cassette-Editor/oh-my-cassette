@@ -912,6 +912,28 @@ def test_final_message_turn_done_without_render_headlines(tmp_path: Path):
     assert "No exported video file was detected yet." in en_failed
 
 
+def test_final_message_never_calls_an_explicit_not_done_outcome_success():
+    from cassette.core import notifier
+
+    job = {
+        "job_id": "cassette_refused",
+        "status": "succeeded",
+        "outputs": [],
+        "errors": [],
+        "quality": {
+            "completion_observed": False,
+            "progress_summary": "The agent could not satisfy final verification.",
+        },
+        "delivery": {"platform": "telegram"},
+    }
+
+    message = notifier.format_platform_final_message(job, platform="telegram")
+
+    assert "failed" in message.lower()
+    assert "agent_reported_not_done" in message
+    assert "finished this turn" not in message
+
+
 def test_terminal_notify_pushes_contact_sheet_at_turn_end(tmp_path: Path, monkeypatch):
     from cassette.core import notifier
 

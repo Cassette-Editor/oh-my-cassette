@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one real edit through the local Cassette MCP plugin")
     parser.add_argument("--media", type=Path, required=True)
     parser.add_argument("--instruction", required=True)
-    parser.add_argument("--host", choices=("codex", "claude"), default="codex")
+    parser.add_argument("--host", choices=("codex", "claude", "opencode", "hermes"), default="codex")
     parser.add_argument("--timeout-sec", type=int, default=1500)
     parser.add_argument("--model", default="GPT-5.6 Luna")
     parser.add_argument(

@@ -26,9 +26,57 @@ def local_config(tmp_path, monkeypatch):
         "CASSETTE_EMAIL",
         "CASSETTE_AUTH_PASSWORD",
         "CASSETTE_PASSWORD",
+        "JAMENDO_CLIENT_ID",
     ):
         monkeypatch.delenv(name, raising=False)
     return config, data
+
+
+def test_terminal_jamendo_setup_validates_and_stores_id_only(local_config, monkeypatch):
+    observed = []
+    monkeypatch.setattr("builtins.input", lambda _prompt: "terminal-client-id")
+    monkeypatch.setattr(
+        runtime_config,
+        "validate_jamendo_client_id",
+        lambda value: observed.append(value) or {"status": "success"},
+    )
+
+    message = setup_local_mcp.configure_jamendo(offer=False)
+
+    assert observed == ["terminal-client-id"]
+    assert runtime_config.stored_jamendo()["client_id"] == "terminal-client-id"
+    assert "terminal-client-id" not in message
+    assert "No Client Secret is required" in message
+
+
+def test_terminal_jamendo_setup_failure_preserves_existing(local_config, monkeypatch):
+    runtime_config.store_jamendo_client_id("working-client", verified_at="2026-08-06T00:00:00Z")
+    monkeypatch.setattr("builtins.input", lambda _prompt: "bad-client")
+
+    def reject(_value):
+        raise runtime_config.JamendoValidationError("jamendo_client_id_invalid", "Jamendo rejected that Client ID.")
+
+    monkeypatch.setattr(runtime_config, "validate_jamendo_client_id", reject)
+
+    with pytest.raises(setup_local_mcp.SetupError, match="unchanged"):
+        setup_local_mcp.configure_jamendo(offer=False)
+    assert runtime_config.stored_jamendo()["client_id"] == "working-client"
+
+
+def test_terminal_jamendo_setup_uses_hermes_env_when_host_selected(local_config, tmp_path, monkeypatch):
+    hermes_home = tmp_path / "hermes"
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setattr("builtins.input", lambda _prompt: "hermes-terminal-client")
+    monkeypatch.setattr(runtime_config, "validate_jamendo_client_id", lambda _value: {"status": "success"})
+
+    message = setup_local_mcp.configure_jamendo(offer=False, host="hermes")
+
+    env_path = hermes_home / ".env"
+    assert env_path.read_text("utf-8") == "JAMENDO_CLIENT_ID=hermes-terminal-client\n"
+    assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
+    assert runtime_config.stored_jamendo()["client_id"] == ""
+    assert "hermes-terminal-client" not in message
+    assert str(env_path) in message
 
 
 def test_protected_config_permissions_and_environment_precedence(local_config, monkeypatch):

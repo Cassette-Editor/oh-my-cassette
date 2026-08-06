@@ -21,6 +21,9 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 
 RUNTIME_ADAPTER_ENV = "CASSETTE_RUNTIME_ADAPTER"
@@ -28,6 +31,8 @@ MCP_ADAPTER = "mcp"
 WEB_ADAPTER = "web"
 CONFIG_DIR_MODE = 0o700
 CONFIG_FILE_MODE = 0o600
+JAMENDO_DEVELOPER_PORTAL = "https://devportal.jamendo.com/"
+JAMENDO_API_BASE_URL = "https://api.jamendo.com/v3.0"
 
 
 def _is_windows() -> bool:
@@ -46,6 +51,15 @@ class RuntimeConfigError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.path = path
+
+
+class JamendoValidationError(RuntimeError):
+    """A Client ID could not be verified without exposing it in the error."""
+
+    def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.code = code
+        self.details = details or {}
 
 
 def runtime_adapter() -> str:
@@ -229,6 +243,203 @@ def load_settings() -> dict[str, Any]:
     return read_protected_json(settings_path())
 
 
+def stored_jamendo() -> dict[str, Any]:
+    settings = load_settings()
+    providers = settings.get("providers") or {}
+    if not isinstance(providers, dict):
+        raise RuntimeConfigError("config_invalid_shape", "settings.providers must be an object", path=settings_path())
+    jamendo = providers.get("jamendo") or {}
+    if not isinstance(jamendo, dict):
+        raise RuntimeConfigError(
+            "config_invalid_shape", "settings.providers.jamendo must be an object", path=settings_path()
+        )
+    return {
+        "client_id": str(jamendo.get("client_id") or "").strip(),
+        "verified_at": jamendo.get("verified_at"),
+    }
+
+
+def store_jamendo_client_id(client_id: str, *, verified_at: str) -> None:
+    settings = load_settings()
+    providers = settings.get("providers") or {}
+    if not isinstance(providers, dict):
+        raise RuntimeConfigError("config_invalid_shape", "settings.providers must be an object", path=settings_path())
+    existing = providers.get("jamendo") or {}
+    if not isinstance(existing, dict):
+        raise RuntimeConfigError(
+            "config_invalid_shape", "settings.providers.jamendo must be an object", path=settings_path()
+        )
+    updated_providers = {
+        **providers,
+        "jamendo": {**existing, "client_id": client_id.strip(), "verified_at": verified_at},
+    }
+    write_protected_json(settings_path(), {**settings, "providers": updated_providers})
+
+
+def hermes_env_path() -> Path:
+    explicit = str(os.getenv("HERMES_ENV_FILE", "") or "").strip()
+    if explicit:
+        return _absolute_lexical(Path(os.path.expandvars(explicit)))
+    home = str(os.getenv("HERMES_HOME", "") or "").strip()
+    root = Path(os.path.expandvars(home)).expanduser() if home else _home() / ".hermes"
+    return _absolute_lexical(root / ".env")
+
+
+def _dotenv_value(path: Path, name: str) -> str:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[7:].strip()
+        if key == name:
+            text = value.strip()
+            if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+                return text[1:-1]
+            return text
+    return ""
+
+
+def stored_hermes_jamendo() -> dict[str, Any]:
+    return {"client_id": _dotenv_value(hermes_env_path(), "JAMENDO_CLIENT_ID"), "verified_at": None}
+
+
+def store_hermes_jamendo_client_id(client_id: str) -> Path:
+    """Atomically update only JAMENDO_CLIENT_ID in Hermes's private dotenv file."""
+    path = hermes_env_path()
+    if path.is_symlink():
+        raise RuntimeConfigError("config_symlink", "Hermes environment file must not be a symlink", path=path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    except OSError as exc:
+        raise RuntimeConfigError("config_read_failed", "Could not read the Hermes environment file", path=path) from exc
+    rendered: list[str] = []
+    replaced = False
+    for line in lines:
+        stripped = line.strip()
+        key = ""
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key.startswith("export "):
+                key = key[7:].strip()
+        if key == "JAMENDO_CLIENT_ID":
+            prefix = "export " if stripped.startswith("export ") else ""
+            rendered.append(f"{prefix}JAMENDO_CLIENT_ID={client_id.strip()}")
+            replaced = True
+        else:
+            rendered.append(line)
+    if not replaced:
+        rendered.append(f"JAMENDO_CLIENT_ID={client_id.strip()}")
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, CONFIG_FILE_MODE)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(rendered).rstrip("\n") + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        if not _is_windows():
+            os.chmod(path, CONFIG_FILE_MODE)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
+    return path
+
+
+def resolve_jamendo_client_id() -> dict[str, Any]:
+    direct = str(os.getenv("JAMENDO_CLIENT_ID", "") or "").strip()
+    if direct:
+        return {"client_id": direct, "source": "environment", "verified_at": None}
+    if is_mcp_runtime() and str(os.getenv("CASSETTE_MCP_HOST", "") or "").strip().lower() == "hermes":
+        stored = stored_hermes_jamendo()
+        client_id = str(stored.get("client_id") or "").strip()
+        return {"client_id": client_id, "source": "hermes_env" if client_id else "missing", "verified_at": None}
+    stored = stored_jamendo() if is_mcp_runtime() else {}
+    return {
+        "client_id": str(stored.get("client_id") or "").strip(),
+        "source": "local_config" if stored.get("client_id") else "missing",
+        "verified_at": stored.get("verified_at"),
+    }
+
+
+def mask_client_id(client_id: str) -> str:
+    value = str(client_id or "").strip()
+    if not value:
+        return ""
+    visible = min(4, max(1, len(value) // 3))
+    return f"{'*' * max(4, len(value) - visible)}{value[-visible:]}"
+
+
+def validate_jamendo_client_id(
+    client_id: str,
+    *,
+    base_url: str | None = None,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """Verify read-only Jamendo access with a one-row Tracks request."""
+    value = str(client_id or "").strip()
+    if not value:
+        raise JamendoValidationError("jamendo_client_id_missing", "A Jamendo Client ID is required.")
+    endpoint = (base_url or os.getenv("JAMENDO_BASE_URL") or JAMENDO_API_BASE_URL).rstrip("/") + "/tracks/"
+    query = urlencode({"client_id": value, "format": "json", "limit": 1})
+    request = Request(
+        f"{endpoint}?{query}",
+        headers={"Accept": "application/json", "User-Agent": "oh-my-cassette jamendo-setup/1"},
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            status = int(getattr(response, "status", 200) or 200)
+            raw = response.read().decode("utf-8")
+    except HTTPError as exc:
+        if exc.code == 429:
+            raise JamendoValidationError(
+                "jamendo_rate_limited", "Jamendo rate-limited the validation request.", details={"status": 429}
+            ) from exc
+        if exc.code in {400, 401, 403}:
+            raise JamendoValidationError(
+                "jamendo_client_id_invalid", "Jamendo rejected that Client ID.", details={"status": exc.code}
+            ) from exc
+        raise JamendoValidationError(
+            "jamendo_validation_http_error",
+            "Jamendo could not validate the Client ID.",
+            details={"status": exc.code},
+        ) from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise JamendoValidationError(
+            "jamendo_validation_network_error",
+            "Jamendo could not be reached, so the Client ID was not stored.",
+            details={"type": type(exc).__name__},
+        ) from exc
+    if status < 200 or status >= 300:
+        raise JamendoValidationError(
+            "jamendo_validation_http_error", "Jamendo could not validate the Client ID.", details={"status": status}
+        )
+    try:
+        payload = json.loads(raw)
+    except ValueError as exc:
+        raise JamendoValidationError(
+            "jamendo_validation_invalid_json", "Jamendo returned an invalid validation response."
+        ) from exc
+    headers = payload.get("headers") if isinstance(payload, dict) else None
+    if not isinstance(headers, dict) or str(headers.get("status") or "").lower() != "success":
+        details: dict[str, Any] = {}
+        if isinstance(headers, dict) and headers.get("code") is not None:
+            details["jamendo_code"] = headers.get("code")
+        raise JamendoValidationError("jamendo_client_id_invalid", "Jamendo rejected that Client ID.", details=details)
+    return {"status": "success", "results_count": int(headers.get("results_count") or 0)}
+
+
 def load_credentials() -> dict[str, Any]:
     """Resolve credentials with process-environment precedence."""
     email = (
@@ -325,6 +536,13 @@ def reset_password_command(plugin_root: Path | None = None) -> str:
     return setup_command(plugin_root) + " --reset-password"
 
 
+def jamendo_setup_command(plugin_root: Path | None = None) -> str:
+    command = setup_command(plugin_root) + " --jamendo"
+    if str(os.getenv("CASSETTE_MCP_HOST", "") or "").strip().lower() == "hermes":
+        command += " --host hermes"
+    return command
+
+
 def configure_mcp_process_environment() -> list[RuntimeConfigError]:
     """Set MCP-only process defaults without preventing server initialization.
 
@@ -366,4 +584,6 @@ def mcp_env_value(name: str) -> str:
         return str(load_credentials().get("password") or "").strip()
     if name in {"CASSETTE_API_URL", "CASSETTE_API_BASE_URL"}:
         return str(load_settings().get("api_url") or "").strip()
+    if name == "JAMENDO_CLIENT_ID":
+        return str(resolve_jamendo_client_id().get("client_id") or "").strip()
     return ""

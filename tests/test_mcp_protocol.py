@@ -27,6 +27,7 @@ EXPECTED_TOOLS = {
     "cassette_match_bgm",
     "cassette_match_exact_bgm",
     "jamendo_music_matcher",
+    "cassette_jamendo_setup",
     "cassette_answer_question",
     "cassette_run_job",
     "cassette_job_status",
@@ -225,7 +226,13 @@ def test_mcp_lists_the_shared_tools_with_flat_structured_schemas():
             "high",
             "xhigh",
         }
+        assert "first edit" in by_name["cassette_config"].description
+        assert "interactive" in by_name["cassette_config"].description.lower()
         assert "wait_for_change_sec" in by_name["cassette_job_status"].inputSchema["properties"]
+        assert set(by_name["cassette_jamendo_setup"].inputSchema["properties"]) == {"client_id"}
+        assert by_name["cassette_jamendo_setup"].inputSchema["required"] == ["client_id"]
+        assert "Client Secret" in by_name["cassette_jamendo_setup"].description
+        assert "never ask" in by_name["cassette_jamendo_setup"].description
         assert {"job_id", "response"} <= set(by_name["cassette_answer_question"].inputSchema["properties"])
         assert set(by_name["cassette_ingest_media"].inputSchema["properties"]["media_type"]["anyOf"][0]["enum"]) == {
             "video",
@@ -303,6 +310,7 @@ def test_real_stdio_process_initializes_and_calls_every_tool(tmp_path):
                     "cassette_match_bgm": {"session_id": session_id, "instruction": "", "search_queries": ["calm"]},
                     "cassette_match_exact_bgm": {"session_id": session_id, "instruction": "edit", "title": ""},
                     "jamendo_music_matcher": {"userQuery": "", "searchTerms": []},
+                    "cassette_jamendo_setup": {"client_id": ""},
                     "cassette_answer_question": {"question": "Should Cassette continue?"},
                     "cassette_run_job": {"prompt": "edit", "session_id": session_id},
                     "cassette_job_status": {"job_id": "missing"},

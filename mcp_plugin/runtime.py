@@ -161,6 +161,12 @@ class LocalMcpRuntime:
                     values.append(value)
         except runtime_config.RuntimeConfigError:
             pass
+        try:
+            client_id = str(runtime_config.resolve_jamendo_client_id().get("client_id") or "")
+            if client_id:
+                values.append(client_id)
+        except runtime_config.RuntimeConfigError:
+            pass
         return values
 
     def _redact(self, value: Any) -> Any:
@@ -569,6 +575,15 @@ class LocalMcpRuntime:
         # it yet, so without this an error envelope could echo it straight back to the host.
         with _call_secrets(str(args.get("password") or "").strip()):
             payload = self._invoke_core("cassette_login", args, session_id=None)
+            return self._envelope_from_core(payload, session_id=None)
+
+    def jamendo_setup(self, args: dict[str, Any]) -> ToolEnvelope:
+        """Validate and store machine-level Jamendo configuration before authentication."""
+        config_error = self._config_error()
+        if config_error:
+            return config_error
+        with _call_secrets(str(args.get("client_id") or "").strip()):
+            payload = self._invoke_core("cassette_jamendo_setup", args, session_id=None)
             return self._envelope_from_core(payload, session_id=None)
 
     def simple_session_tool(self, name: str, args: dict[str, Any]) -> ToolEnvelope:

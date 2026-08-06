@@ -102,10 +102,9 @@ CASSETTE_ALLOWED_SOURCE_ROOTS="$HOME/.hermes/qqbot:$HOME/.hermes/telegram:$HOME/
 
 ```bash
 JAMENDO_CLIENT_ID=your_client_id
-JAMENDO_CLIENT_SECRET=your_client_secret
 ```
 
-`JAMENDO_CLIENT_SECRET` 是为未来功能预留的字段。它不会被发送给 Jamendo，也不会写入任务元数据。
+请在 [Jamendo 开发者门户](https://devportal.jamendo.com/)创建只读应用并复制 Client ID。只读音乐流程不会使用或要求 Client Secret。BYOK 仅把 API 访问与配额归到用户自己的 Jamendo 应用，并不授予所选音乐的商用权；发布前请核对每首曲目的许可与署名要求。
 
 ## 开发
 

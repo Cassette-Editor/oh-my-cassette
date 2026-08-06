@@ -102,10 +102,9 @@ Optional Jamendo smart BGM configuration:
 
 ```bash
 JAMENDO_CLIENT_ID=your_client_id
-JAMENDO_CLIENT_SECRET=your_client_secret
 ```
 
-`JAMENDO_CLIENT_SECRET` is reserved for future use. It is not sent to Jamendo and is not written to job metadata.
+Create a read-only application in the [Jamendo developer portal](https://devportal.jamendo.com/) and copy its Client ID. The read-only music flow does not use or request a Client Secret. BYOK assigns API access and quota to the user's Jamendo application; it does not grant commercial rights to selected music. Review every track's license and attribution requirements before publishing.
 
 Transparency and direct-edit flags (API transport):
 
@@ -191,4 +190,3 @@ Do not commit:
 - downloaded media, exports, job state, browser traces, or local runtime cache.
 
 Hermes runtime state belongs under `~/.hermes/cassette`; Codex and Claude runtime state belongs under the platform-standard Oh My Cassette data directory. Neither belongs in this repository.
-
