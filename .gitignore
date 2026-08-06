@@ -29,6 +29,15 @@ logs/
 *.part
 *.log
 
+# Browser and end-to-end test artifacts
+/.playwright-mcp/
+/playwright-report/
+/test-results/
+/blob-report/
+/artifacts/
+/cassette-e2e-*.png
+/webdemo-markdown*.png
+
 # Local tooling / agent files
 AGENTS.md
 CLAUDE.md
