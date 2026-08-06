@@ -3230,7 +3230,7 @@ def test_job_status_report_still_reports_completion_when_nothing_was_refused(cas
     assert "no exported video was recorded" in status["data"]["job"]["report"]["user_summary"]
 
 
-def test_run_job_does_not_hardcode_default_model(cassette_env, monkeypatch):
+def test_run_job_records_quality_first_default_model(cassette_env, monkeypatch):
     observed = {}
 
     def fake_run(job):
@@ -3250,9 +3250,9 @@ def test_run_job_does_not_hardcode_default_model(cassette_env, monkeypatch):
     )
     status = json.loads(tools.cassette_job_status({"job_id": payload["job_id"]}))
 
-    assert observed["model_selection"]["model"] == ""
-    assert observed["model_selection"]["thinking_level"] == "Low"
-    assert status["data"]["job"]["report"]["model_selection"]["model"] == ""
+    assert observed["model_selection"]["model"] == "GPT-5.6 Luna"
+    assert observed["model_selection"]["thinking_level"] == "XHigh"
+    assert status["data"]["job"]["report"]["model_selection"]["model"] == "GPT-5.6 Luna"
 
 
 def test_run_job_accepts_user_specified_cassette_model(cassette_env, monkeypatch):
@@ -3310,7 +3310,7 @@ def test_run_job_does_not_treat_editing_words_as_thinking_level(cassette_env, mo
         )
     )
 
-    assert observed["model_selection"]["thinking_level"] == "Low"
+    assert observed["model_selection"]["thinking_level"] == "XHigh"
 
 
 def test_gateway_run_job_uses_session_model_preference_over_prompt_text(cassette_env, monkeypatch):
@@ -3497,7 +3497,7 @@ def test_cassette_config_get_returns_defaults_and_options(cassette_env):
     assert payload["ok"] is True
     data = payload["data"]
     assert data["model"] == "GPT-5.6 Luna"
-    assert data["thinking_level"] == "Low"
+    assert data["thinking_level"] == "XHigh"
     assert data["source"] == "default"
     labels = [m["label"] for m in data["options"]["models"]]
     assert labels == ["GPT-5.6 Luna", "GPT-5.4 Mini"]

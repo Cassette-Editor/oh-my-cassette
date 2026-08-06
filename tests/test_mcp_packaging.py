@@ -184,26 +184,25 @@ def test_public_demo_docs_use_the_named_https_route():
         assert not re.search(r"http://(?:\d{1,3}\.){3}\d{1,3}:8080/?", text)
 
 
-def test_opencode_project_config_and_agents_skill_copy_stay_in_sync():
+def test_opencode_project_config_and_agents_skill_copies_stay_in_sync():
     config = _json("opencode.json")["mcp"]["cassette"]
     assert config["type"] == "local"
     assert config["command"] == ["python3", "scripts/run_local_mcp.py"]
     assert config["environment"]["CASSETTE_MCP_HOST"] == "opencode"
-
-    # The whole tree, not just SKILL.md: the body defers auth and preview detail to
-    # references/*.md, so a copy missing those files is a skill with dead pointers.
-    neutral_root = ROOT / "skills" / "cassette-video-edit"
-    agents_root = ROOT / ".agents" / "skills" / "cassette-video-edit"
 
     def _tree(root: Path) -> dict[str, str]:
         return {
             str(path.relative_to(root)): path.read_text("utf-8") for path in sorted(root.rglob("*")) if path.is_file()
         }
 
-    assert _tree(agents_root) == _tree(neutral_root)
+    for skill_name in ("cassette-video-edit", "cassette-model"):
+        neutral_root = ROOT / "skills" / skill_name
+        agents_root = ROOT / ".agents" / "skills" / skill_name
+        assert _tree(agents_root) == _tree(neutral_root)
 
     # Every references/… path the body names has to resolve, on every host that
     # installs the skill by copying this directory.
+    neutral_root = ROOT / "skills" / "cassette-video-edit"
     body = (neutral_root / "SKILL.md").read_text("utf-8")
     referenced = set(re.findall(r"`(references/[\w./-]+\.md)`", body))
     assert referenced, "SKILL.md should point at its bundled references"
@@ -334,6 +333,10 @@ def test_opencode_installer_honors_the_opencode_config_env_var(tmp_path, monkeyp
     # Skills are only discovered under the global directory, so a redirected
     # config file must not drag the skill install with it.
     assert installer.skill_destination() == (tmp_path / "opencode" / "skills" / "cassette-video-edit" / "SKILL.md")
+    assert installer.skill_destination("cassette-model") == (
+        tmp_path / "opencode" / "skills" / "cassette-model" / "SKILL.md"
+    )
+    assert installer.command_destination() == tmp_path / "opencode" / "commands" / "cassette-model.md"
 
 
 def test_opencode_installer_ships_the_bundled_references_not_just_skill_md(tmp_path):
@@ -355,6 +358,19 @@ def test_opencode_installer_ships_the_bundled_references_not_just_skill_md(tmp_p
     stale.write_text("stale", encoding="utf-8")
     installer.install_skill(ROOT / "skills" / "cassette-video-edit", dest, dry_run=False)
     assert not stale.exists()
+
+
+def test_opencode_installer_ships_model_skill_and_slash_command(tmp_path):
+    installer = _load_opencode_installer()
+    skill_dest = tmp_path / "opencode" / "skills" / "cassette-model" / "SKILL.md"
+    command_dest = tmp_path / "opencode" / "commands" / "cassette-model.md"
+
+    installer.install_skill(ROOT / "skills" / "cassette-model", skill_dest, dry_run=False)
+    installer.install_command(ROOT / "opencode" / "commands" / "cassette-model.md", command_dest, dry_run=False)
+
+    assert skill_dest.is_file()
+    assert command_dest.is_file()
+    assert "cassette_config" in command_dest.read_text("utf-8")
 
 
 def test_opencode_installer_refuses_to_rewrite_a_jsonc_config(tmp_path):

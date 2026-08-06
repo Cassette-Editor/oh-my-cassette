@@ -283,10 +283,9 @@ mcp = ArtifactFastMCP(
         "A turn ends succeeded with the edit committed and nothing rendered, carrying "
         "timeline_delta + quality.timeline_ctl + a contact-sheet artifact as the per-turn "
         "preview; pass export=true only when the user expresses finish/export intent. "
-        "Model/thinking: after the first asset is ingested, call cassette_config(session_id) before "
-        "the first edit. If source=default, present its interactive model/thinking choices and wait "
-        "for the user; persist even an accepted default by calling cassette_config with that choice. "
-        "Later changes apply from the next turn. "
+        "Model/thinking: do not interrupt editing to ask for a choice. The default is GPT-5.6 Luna "
+        "with xhigh thinking. Call cassette_config only when the user explicitly asks to view or change "
+        "the model; later changes apply from the next turn. "
         "cassette_run_job returns when the turn is settled, streaming progress notifications while it "
         "works — one call per turn, never a status loop. Route on the typed phase and next_action "
         "fields, never on prose: needs_user means ask the user then call cassette_answer_question; "
@@ -820,11 +819,10 @@ async def cassette_cancel_job(job_id: str, ctx: Context) -> ToolEnvelope:
 
 @mcp.tool(
     description=(
-        "Interactive model picker for the session. Before the first edit, call with only session_id "
-        "to see the current choice and available options; if source=default, ask the user to choose, "
-        "then pass model (id or label) and/or "
-        "thinking_level to change them — persisted for the session, applied from the next "
-        "cassette_run_job turn. Persist an accepted default too so the question occurs only once."
+        "On-demand model picker for the session. Call only when the user asks to view or change the "
+        "Cassette model. With only session_id it returns the current choice and available options; pass "
+        "model (id or label) and/or thinking_level to change them. The choice persists for the session "
+        "and applies from the next cassette_run_job turn. Default: GPT-5.6 Luna with xhigh thinking."
     ),
     structured_output=True,
 )

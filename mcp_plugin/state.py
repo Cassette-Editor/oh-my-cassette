@@ -126,15 +126,13 @@ def _next_action_base(phase: SessionPhase, *, job_id: str | None = None) -> str:
         return "Call cassette_ingest_media with a trusted project media path."
     if phase == SessionPhase.GUIDED_CHOICES:
         return (
-            "Call cassette_config(session_id) before the first edit. If its source is default, present the "
-            "interactive model/thinking choices and save the user's choice; then call cassette_run_job "
-            "with message set to the user's verbatim words."
+            "Call cassette_run_job with message set to the user's verbatim words. Use the default "
+            "GPT-5.6 Luna / xhigh configuration unless the user explicitly asks to change it."
         )
     if phase == SessionPhase.ASSETS_READY:
         return (
-            "Call cassette_config(session_id) before the first edit. If its source is default, present the "
-            "interactive model/thinking choices, wait for the user, and save their choice; then call "
-            "cassette_run_job with message set to the user's verbatim words."
+            "Call cassette_run_job with message set to the user's verbatim words. Do not ask about model "
+            "selection unless the user explicitly requests the model picker."
         )
     if phase == SessionPhase.READY:
         # cassette_run_job declares wait=True at the tool signature, so the call blocks until the

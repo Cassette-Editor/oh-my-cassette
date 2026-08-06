@@ -304,7 +304,7 @@ CASSETTE_RUN_JOB = {
                 "type": "string",
                 "enum": ["off", "minimal", "low", "medium", "high", "xhigh"],
                 "description": (
-                    "Optional GPT thinking level: off, minimal, low, medium, high, or xhigh. Defaults to low."
+                    "Optional GPT thinking level: off, minimal, low, medium, high, or xhigh. Defaults to xhigh."
                 ),
             },
             "cassette_language": {
@@ -434,11 +434,10 @@ CASSETTE_CANCEL_JOB = {
 CASSETTE_CONFIG = {
     "name": "cassette_config",
     "description": (
-        "Interactive model picker for the session. Before the first edit, call with only session_id "
-        "to list the current choice and available options; if source=default ask the user to choose, "
-        "then pass model (id or label) and/or "
-        "thinking_level to change them. Changes persist for the session and apply from the next "
-        "cassette_run_job turn. Persist an accepted default too so the question occurs only once."
+        "On-demand model picker for the session. Call only when the user asks to view or change the "
+        "Cassette model. With only session_id it lists the current choice and available options; pass "
+        "model (id or label) and/or thinking_level to change them. Changes persist for the session and "
+        "apply from the next cassette_run_job turn. The default is GPT-5.6 Luna with xhigh thinking."
     ),
     "parameters": {
         "type": "object",

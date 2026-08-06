@@ -33,7 +33,8 @@ from typing import Any
 
 DEFAULT_REF = "release"
 SERVER_NAME = "cassette"
-SKILL_NAME = "cassette-video-edit"
+SKILL_NAMES = ("cassette-video-edit", "cassette-model")
+COMMAND_NAME = "cassette-model"
 OPENCODE_SCHEMA = "https://opencode.ai/config.json"
 REPO = "Cassette-Editor/oh-my-cassette"
 TARBALL_URL = "https://codeload.github.com/{repo}/tar.gz/refs/heads/{ref}"
@@ -179,10 +180,15 @@ def opencode_config_path(override: str | None = None) -> Path:
     return jsonc if jsonc.exists() else home / "opencode.json"
 
 
-def skill_destination() -> Path:
+def skill_destination(name: str = SKILL_NAMES[0]) -> Path:
     # Anchored to the opencode home, not the config file: OPENCODE_CONFIG may
     # point anywhere, but skills are only discovered under the global directory.
-    return opencode_home() / "skills" / SKILL_NAME / "SKILL.md"
+    return opencode_home() / "skills" / name / "SKILL.md"
+
+
+def command_destination(name: str = COMMAND_NAME) -> Path:
+    """Global OpenCode slash command installed alongside the MCP skills."""
+    return opencode_home() / "commands" / f"{name}.md"
 
 
 def mcp_server_entry(plugin_root: Path) -> dict[str, Any]:
@@ -275,6 +281,18 @@ def install_skill(source_dir: Path, dest: Path, *, dry_run: bool) -> None:
         remove_existing(dest_dir)
     shutil.copytree(source_dir, dest_dir)
     print(f"installed skill: {dest}")
+
+
+def install_command(source: Path, dest: Path, *, dry_run: bool) -> None:
+    """Install one native OpenCode slash-command template."""
+    if not source.is_file():
+        raise SystemExit(f"command source is missing: {source}")
+    if dry_run:
+        print(f"would install command: {dest}")
+        return
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, dest)
+    print(f"installed command: {dest}")
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -373,9 +391,15 @@ def main() -> int:
             write_config(config_path, config)
             print(f"registered MCP server '{SERVER_NAME}' in {config_path}")
 
-    install_skill(
-        plugin_root / "skills" / SKILL_NAME,
-        skill_destination(),
+    for skill_name in SKILL_NAMES:
+        install_skill(
+            plugin_root / "skills" / skill_name,
+            skill_destination(skill_name),
+            dry_run=args.dry_run,
+        )
+    install_command(
+        plugin_root / "opencode" / "commands" / f"{COMMAND_NAME}.md",
+        command_destination(),
         dry_run=args.dry_run,
     )
 
@@ -383,7 +407,7 @@ def main() -> int:
         version = (plugin_root / "version.txt").read_text(encoding="utf-8").strip()
         print(f"Oh My Cassette {version} installed at {plugin_root}")
         report_credentials(plugin_root)
-        print("restart opencode so it reloads the MCP server and skills.")
+        print("restart opencode so it reloads the MCP server, skills, and /cassette-model command.")
     return 1 if manual else 0
 
 

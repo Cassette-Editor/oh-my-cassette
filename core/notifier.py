@@ -1073,7 +1073,7 @@ def format_progress_snapshot_message(job: dict, summary: str = "") -> str:
 
 def format_model_selection_message(model_selection: dict, language: str = "zh") -> str:
     model = str(model_selection.get("model") or "GPT-5.6 Luna")
-    thinking = str(model_selection.get("thinking_level") or "Low")
+    thinking = str(model_selection.get("thinking_level") or "XHigh")
     if _language_for_platform(None, {"cassette_language": language}) == "en":
         return f"Cassette model selected: {model}; thinking level: {thinking}."
     thinking_label = {

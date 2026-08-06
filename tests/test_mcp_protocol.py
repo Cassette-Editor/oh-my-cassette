@@ -226,8 +226,9 @@ def test_mcp_lists_the_shared_tools_with_flat_structured_schemas():
             "high",
             "xhigh",
         }
-        assert "first edit" in by_name["cassette_config"].description
-        assert "interactive" in by_name["cassette_config"].description.lower()
+        assert "only when the user asks" in by_name["cassette_config"].description
+        assert "on-demand" in by_name["cassette_config"].description.lower()
+        assert "GPT-5.6 Luna with xhigh" in by_name["cassette_config"].description
         assert "wait_for_change_sec" in by_name["cassette_job_status"].inputSchema["properties"]
         assert set(by_name["cassette_jamendo_setup"].inputSchema["properties"]) == {"client_id"}
         assert by_name["cassette_jamendo_setup"].inputSchema["required"] == ["client_id"]
