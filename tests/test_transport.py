@@ -306,7 +306,7 @@ def test_api_thinking_config_uses_gpt_reasoning_levels(monkeypatch, thinking):
 def test_api_thinking_config_rejects_non_gpt_level(monkeypatch):
     monkeypatch.delenv("CASSETTE_API_THINKING", raising=False)
     monkeypatch.delenv("CASSETTE_DEFAULT_THINKING_LEVEL", raising=False)
-    assert ApiTransport._resolve_thinking_config({"model_selection": {"thinking_level": "max"}}) == "low"
+    assert ApiTransport._resolve_thinking_config({"model_selection": {"thinking_level": "max"}}) == "xhigh"
 
 
 def test_api_resume_value_classifies_and_records_interrupts():

@@ -263,7 +263,7 @@ codex plugin marketplace add https://github.com/Cassette-Editor/oh-my-cassette.g
 codex plugin add oh-my-cassette@cassette-editor
 ```
 
-安装后请新建一个 Codex 任务，让插件发现流程重新运行。插件会提供通用的 `cassette-video-edit` skill，以及名为 `cassette` 的本地 MCP 进程。
+安装后请新建一个 Codex 任务，让插件发现流程重新运行。插件会提供通用的 `cassette-video-edit`、`cassette-model` skill，以及名为 `cassette` 的本地 MCP 进程。新会话默认使用 GPT-5.6 Luna 与 Extra High 思考等级；只有需要查看或修改时才调用 `$cassette-model`。
 
 ### Claude Code
 
@@ -280,6 +280,8 @@ claude plugin details oh-my-cassette@cassette-editor
 
 给插件市场开启自动更新后，Claude Code 就会自动把插件保持在最新版本，见[更新](#更新)。
 
+新会话默认使用 GPT-5.6 Luna 与 Extra High 思考等级；需要查看或修改当前会话设置时调用 `/cassette-model`。
+
 ### OpenCode
 
 OpenCode 的插件管理器只安装 npm 包，而且它的插件无法注册 MCP 服务，因此没有可添加的插件市场条目。改用一条命令：
@@ -288,7 +290,7 @@ OpenCode 的插件管理器只安装 npm 包，而且它的插件无法注册 MC
 curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/release/scripts/install_opencode.py | python3 -
 ```
 
-它会下载当前发布版本，把 `cassette` 服务写入 `~/.config/opencode/opencode.json`（与其中已有的服务和配置合并，不会覆盖），并把通用的 `cassette-video-edit` skill 安装到 `~/.config/opencode/skills/`。完成后请重启 OpenCode。
+它会下载当前发布版本，把 `cassette` 服务写入 `~/.config/opencode/opencode.json`（与其中已有的服务和配置合并，不会覆盖），把通用 skill 安装到 `~/.config/opencode/skills/`，并把 `/cassette-model` 安装到 `~/.config/opencode/commands/`。完成后请重启 OpenCode。新会话默认使用 GPT-5.6 Luna 与 Extra High 思考等级；只有主动调用该命令时才修改设置。
 
 **更新时重跑同一条命令即可。** 无需安装 `git`——发布包用 Python 标准库下载。
 
@@ -298,7 +300,7 @@ curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/rele
 
 ### 其他 MCP 客户端
 
-运行时不绑定特定客户端，因此任何能启动本地 stdio MCP 服务的客户端都可以使用。把客户端指向 `scripts/run_local_mcp.py`（用 `python3` 运行，Windows 上用 `python`），并设置 `CASSETTE_RUNTIME_ADAPTER=mcp`。服务会在 MCP `instructions` 中提供完整的流程说明，每个工具都会返回带类型的 `phase`/`next_action`，因此即使客户端没有装配套 skill 也能驱动整个流程。为获得最佳体验，建议同时安装 `cassette-video-edit` skill（或等效的系统提示词），以便遵循引导式选择和审核步骤。
+运行时不绑定特定客户端，因此任何能启动本地 stdio MCP 服务的客户端都可以使用。把客户端指向 `scripts/run_local_mcp.py`（用 `python3` 运行，Windows 上用 `python`），并设置 `CASSETTE_RUNTIME_ADAPTER=mcp`。服务会在 MCP `instructions` 中提供完整的流程说明，每个工具都会返回带类型的 `phase`/`next_action`，因此即使客户端没有装配套 skill 也能驱动整个流程。为获得最佳体验，建议同时安装 `cassette-video-edit` 与 `cassette-model` skill（或等效的系统提示词）；其他客户端也可以直接调用 `cassette_config`，或用自然语言要求修改当前会话模型。
 
 ### Hermes
 
@@ -486,7 +488,7 @@ python3 scripts/setup_local_mcp.py --allowed-root /absolute/path/to/media
 
 1. 发送一个或多个视频、图片或音频文件。
 2. 等待素材已保存的确认消息。
-3. 首次剪辑时按提示选择模型与思考等级（之后也可发送 `/cassette_model` 修改），然后在同一个会话中发送剪辑指令，也可以在指令前加 `/edit`。你的原话会逐字发给 Cassette 智能体；指令优化与配乐仍通过 `/refine`、`/music` 显式启用。
+3. 直接在同一个会话中发送剪辑指令，也可以在指令前加 `/edit`。新会话默认使用 GPT-5.6 Luna 与 Extra High 思考等级；只有需要修改时才发送 `/cassette_model`。你的原话会逐字发给 Cassette 智能体；指令优化与配乐仍通过 `/refine`、`/music` 显式启用。
 4. 每一轮剪辑完成后会收到时间线变更和缩略图拼版预览（不渲染成片）。根据客户端能力，预览会作为图片发送，或显示为带标签的本地缩略图链接。继续在同一会话里修改；想要成片时回复"导出"，插件会渲染并在网关支持时发回视频。
 
 | 命令 | 说明 |

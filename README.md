@@ -276,7 +276,7 @@ codex plugin marketplace add https://github.com/Cassette-Editor/oh-my-cassette.g
 codex plugin add oh-my-cassette@cassette-editor
 ```
 
-Start a new Codex task after installation so plugin discovery runs again. The plugin contributes the host-neutral `cassette-video-edit` skill and a local MCP process named `cassette`.
+Start a new Codex task after installation so plugin discovery runs again. The plugin contributes the host-neutral `cassette-video-edit` and `cassette-model` skills plus a local MCP process named `cassette`. Fresh editing sessions use GPT-5.6 Luna with Extra High thinking; invoke `$cassette-model` only when you want to inspect or change that session setting.
 
 ### Claude Code
 
@@ -293,6 +293,8 @@ claude plugin details oh-my-cassette@cassette-editor
 
 Claude Code can keep the plugin up to date on its own once you enable auto-update for the marketplace — see [Update](#update).
 
+Fresh editing sessions use GPT-5.6 Luna with Extra High thinking. Invoke `/cassette-model` when you want to inspect or change the current session's model and thinking level.
+
 ### OpenCode
 
 OpenCode's plugin manager installs npm packages only, and its plugins cannot contribute MCP servers, so there is no marketplace entry to add. One command instead:
@@ -301,7 +303,7 @@ OpenCode's plugin manager installs npm packages only, and its plugins cannot con
 curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/release/scripts/install_opencode.py | python3 -
 ```
 
-That downloads the current release, writes the `cassette` server into `~/.config/opencode/opencode.json` (merging with any servers and settings already there), and installs the host-neutral `cassette-video-edit` skill into `~/.config/opencode/skills/`. Restart OpenCode afterwards.
+That downloads the current release, writes the `cassette` server into `~/.config/opencode/opencode.json` (merging with any servers and settings already there), installs the host-neutral skills into `~/.config/opencode/skills/`, and installs `/cassette-model` into `~/.config/opencode/commands/`. Restart OpenCode afterwards. Fresh editing sessions use GPT-5.6 Luna with Extra High thinking; the command changes the setting only when you invoke it.
 
 **Re-run the same command to update.** Only `git` is not required — the release tarball is fetched with Python's standard library.
 
@@ -311,7 +313,7 @@ The plugin tree lands in `~/.oh-my-cassette` (override with `OMC_HOME`). `--dry-
 
 ### Any other MCP host
 
-The runtime is host-neutral, so any client that launches a local stdio MCP server can use it. Point the client at `scripts/run_local_mcp.py` (run with `python3`, or `python` on Windows) and set `CASSETTE_RUNTIME_ADAPTER=mcp`. The server ships full workflow guidance in its MCP `instructions`, and every tool returns a typed `phase`/`next_action` so a host without the packaged skill can still drive the flow. For the best experience, also install the `cassette-video-edit` skill (or equivalent system prompt) so the guided-choice and review steps are followed.
+The runtime is host-neutral, so any client that launches a local stdio MCP server can use it. Point the client at `scripts/run_local_mcp.py` (run with `python3`, or `python` on Windows) and set `CASSETTE_RUNTIME_ADAPTER=mcp`. The server ships full workflow guidance in its MCP `instructions`, and every tool returns a typed `phase`/`next_action` so a host without the packaged skill can still drive the flow. For the best experience, also install the `cassette-video-edit` and `cassette-model` skills (or equivalent system prompts). Generic clients can call `cassette_config` or ask in natural language to change the current session's model.
 
 ### Hermes
 
@@ -520,7 +522,7 @@ This narrows exposure rather than closing it: the route still resolves for anyon
 
 Two concurrency semantics worth knowing: a plugin turn never cancels a run started from the open editor tab (it fails typed as `thread_busy` instead — wait and retry), while typing a fresh message in the tab DOES cancel an in-flight plugin turn (the tab takes over; existing product behavior).
 
-**Behavior change (0.4.14):** the agent receives the user's `message` verbatim (no brief wrapper), sessions are multi-turn on one thread, and a turn ends with the edit committed but **nothing rendered** — the envelope carries `timeline_delta`, `quality.timeline_ctl`, and a contact-sheet preview instead; pass `export=true` on the turn where the user asks to finish. After the first asset is ingested, the plugin calls `cassette_config` and offers the available model/thinking choices once; the saved session preference applies from the next turn and can be changed later with the same tool.
+**Behavior change (0.4.14):** the agent receives the user's `message` verbatim (no brief wrapper), sessions are multi-turn on one thread, and a turn ends with the edit committed but **nothing rendered** — the envelope carries `timeline_delta`, `quality.timeline_ctl`, and a contact-sheet preview instead; pass `export=true` on the turn where the user asks to finish. A fresh session starts immediately with GPT-5.6 Luna and Extra High thinking; model selection is opt-in through `$cassette-model` in Codex, `/cassette-model` in Claude Code/OpenCode, `/cassette_model` in Hermes, or an explicit natural-language request. The saved session preference applies from the next turn.
 
 **Behavior change (0.4.0):** on MCP hosts, `edit_plan_review` now surfaces as a real question by default (`CASSETTE_PLAN_REVIEW=user`) instead of being silently auto-approved — answer with `approve`, `revise <feedback>`, or `reject`, in chat or in the open editor tab (first answer wins). Set `CASSETTE_UNATTENDED=1` to restore the previous fully headless behavior. Status envelopes additionally carry `timeline_delta` (what changed) and `plan_progress`, fed by the run's SSE event stream (`CASSETTE_API_STREAM=0` disables).
 
@@ -531,7 +533,7 @@ In QQ or Telegram:
 
 1. Send one or more video, image, or audio files.
 2. Wait for the saved-material acknowledgement.
-3. Choose the model and thinking level when prompted for the first edit (or send `/cassette_model` later to change them), then send the edit instruction in the same conversation or prefix it with `/edit`. Your words go to the Cassette agent verbatim; optimization and BGM remain explicit via `/refine` and `/music`.
+3. Send the edit instruction in the same conversation or prefix it with `/edit`. The session starts with GPT-5.6 Luna and Extra High thinking; send `/cassette_model` only when you want to change them. Your words go to the Cassette agent verbatim; optimization and BGM remain explicit via `/refine` and `/music`.
 4. Each turn ends with the edit saved (timeline delta + contact-sheet preview, no render). Depending on the client, the preview is delivered as an image or a labeled local thumbnail link. Keep editing in the same conversation. Say "export" when you want the video, and the plugin renders and delivers it through the gateway when supported.
 
 | Command | Explanation |

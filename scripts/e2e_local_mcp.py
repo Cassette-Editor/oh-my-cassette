@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--thinking-level",
         choices=("off", "minimal", "low", "medium", "high", "xhigh"),
-        default="low",
+        default="xhigh",
     )
     parser.add_argument("--language", choices=("en", "zh"), default="en")
     return parser.parse_args()

@@ -92,7 +92,7 @@ _MODEL_LABEL_TO_ID = {
     "".join(ch for ch in option["label"].lower() if ch.isalnum()): option["id"] for option in AGENT_MODEL_OPTIONS
 }
 AGENT_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh")
-_DEFAULT_THINKING = "low"  # matches cassette-config DEFAULT_THINKING / per-model defaultThinking
+_DEFAULT_THINKING = "xhigh"  # quality-first default shared by the plugin, MCP, editor, and web demo
 
 
 def _require_model_selection() -> bool:
@@ -1715,7 +1715,7 @@ class ApiTransport:
     @staticmethod
     def _resolve_thinking_config(job: dict) -> str:
         # Mirror the GPT reasoning presets exposed by cassette-config. Honor an env override or the
-        # job's thinking selection (case-insensitive); default 'low' matches both product models.
+        # job's thinking selection (case-insensitive); default 'xhigh' is the quality-first preset.
         valid = set(AGENT_THINKING_LEVELS)
         override = _env("CASSETTE_API_THINKING").lower()
         if override in valid:

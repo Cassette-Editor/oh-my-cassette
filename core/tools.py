@@ -722,7 +722,7 @@ def _normalize_thinking_level(value: str | None, text: str = "") -> str:
         )
     ):
         return "Medium"
-    return os.getenv("CASSETTE_DEFAULT_THINKING_LEVEL", "Low")
+    return os.getenv("CASSETTE_DEFAULT_THINKING_LEVEL", "XHigh")
 
 
 def _cassette_model_selection(args: dict, delivery: dict | None = None) -> dict:
@@ -743,7 +743,14 @@ def _cassette_model_selection(args: dict, delivery: dict | None = None) -> dict:
         if preference:
             return {**preference, "source": "session_preference"}
     text = "\n".join(str(args.get(key) or "") for key in ("chat_message", "cassette_message", "instruction", "prompt"))
-    return {"model": "", "thinking_level": _normalize_thinking_level(None, text), "source": "default"}
+    from . import api_transport
+
+    default_label = next(
+        option["label"]
+        for option in api_transport.AGENT_MODEL_OPTIONS
+        if option["id"] == api_transport.DEFAULT_AGENT_MODEL_ID
+    )
+    return {"model": default_label, "thinking_level": _normalize_thinking_level(None, text), "source": "default"}
 
 
 def _gateway_background_jobs_enabled() -> bool:
@@ -1212,7 +1219,7 @@ def cassette_config(a: dict, **kw) -> str:
         {
             "session_id": session_id,
             "model": preference.get("model") or default_label,
-            "thinking_level": preference.get("thinking_level") or "Low",
+            "thinking_level": preference.get("thinking_level") or "XHigh",
             "source": "session_preference" if preference else "default",
             "options": _cassette_model_options(),
         }
@@ -1938,7 +1945,7 @@ def _cassette_model_preference_for_session(session_id: str) -> dict[str, str]:
     thinking = _normalize_thinking_level(str(prefs.get("cassette_thinking_level") or ""))
     if not model or not prefs.get("cassette_model_selection_completed"):
         return {}
-    return {"model": model, "thinking_level": thinking or "Low"}
+    return {"model": model, "thinking_level": thinking or "XHigh"}
 
 
 def _save_cassette_model_preference(session_id: str, model: str, thinking_level: str, *, source: str) -> dict:

@@ -231,7 +231,9 @@ jobs:
           HOME="$smoke_root/home" claude plugin marketplace add "$smoke_root/repo" --scope user
           HOME="$smoke_root/home" claude plugin install oh-my-cassette@cassette-editor --scope user
           HOME="$smoke_root/home" claude plugin details oh-my-cassette@cassette-editor | tee "$smoke_root/claude-details.txt"
-          grep -F 'Skills (1)  cassette-video-edit' "$smoke_root/claude-details.txt"
+          grep -F 'Skills (2)' "$smoke_root/claude-details.txt"
+          grep -F 'cassette-model' "$smoke_root/claude-details.txt"
+          grep -F 'cassette-video-edit' "$smoke_root/claude-details.txt"
           grep -F 'MCP servers (1)  cassette' "$smoke_root/claude-details.txt"
           # Claude keys its plugin cache on the manifest version and skips the update when it
           # matches what is installed, so a manifest left un-bumped withholds the release from

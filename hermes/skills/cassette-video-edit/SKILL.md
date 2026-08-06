@@ -48,7 +48,7 @@ The plugin talks to the Cassette server APIs directly (media upload, agent run, 
 
 ## Model and thinking level
 
-- The session model preference is set via `/cassette_model` (numbered picker) or `cassette_config`; it persists for the gateway session and applies from the next turn. The GPT thinking levels are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`. The only user-selectable models are GPT-5.6 Luna and GPT-5.4 Mini; GPT-5.6 Luna with low thinking is the default and matches the web editor.
+- The session model preference is set via `/cassette_model` (numbered picker) or `cassette_config`; it persists for the gateway session and applies from the next turn. The GPT thinking levels are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`. The only user-selectable models are GPT-5.6 Luna and GPT-5.4 Mini; GPT-5.6 Luna with `xhigh` thinking is the default and matches the web editor.
 - Never ask about the model upfront and never override it from ordinary editing text.
 
 ## Lane routing
