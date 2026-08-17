@@ -315,6 +315,8 @@ The plugin tree lands in `~/.oh-my-cassette` (override with `OMC_HOME`). `--dry-
 
 The runtime is host-neutral, so any client that launches a local stdio MCP server can use it. Point the client at `scripts/run_local_mcp.py` (run with `python3`, or `python` on Windows) and set `CASSETTE_RUNTIME_ADAPTER=mcp`. The server ships full workflow guidance in its MCP `instructions`, and every tool returns a typed `phase`/`next_action` so a host without the packaged skill can still drive the flow. For the best experience, also install the `cassette-video-edit` and `cassette-model` skills (or equivalent system prompts). Generic clients can call `cassette_config` or ask in natural language to change the current session's model.
 
+Letting an AI assistant do the install for you — Cline, or any agent with shell access? Point it at [llms-install.md](llms-install.md): a machine-readable setup guide covering the runtime pre-build, host registration, authentication, media roots, and verification.
+
 ### Hermes
 
 Install through the Hermes plugin manager (recommended):
