@@ -189,7 +189,7 @@ codex plugin add oh-my-cassette@cassette-editor
 
 上传一段素材、输入一句剪辑指令，就能看到成片过程——电脑或手机浏览器都行，本地不用装任何 Agent。
 
-<h3><a href="http://43.134.224.156:8080/">▶ 打开在线演示</a></h3>
+<h3><a href="https://trycassette.online/agent-demo">▶ 打开在线演示</a></h3>
 
 > [!WARNING]
 > **评估用演示环境，公开且未鉴权。请勿上传任何敏感、私密或受版权限制的内容。**
