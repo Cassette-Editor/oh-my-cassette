@@ -184,6 +184,41 @@ def test_public_demo_docs_use_the_named_https_route():
         assert not re.search(r"http://(?:\d{1,3}\.){3}\d{1,3}:8080/?", text)
 
 
+def test_codex_interface_assets_resolve_and_its_policy_pages_exist():
+    # Marketplaces render this block, and a directory scanner treats the whole
+    # group as one all-or-nothing check: a single dangling path or non-HTTPS URL
+    # silently drops the plugin's listing metadata.
+    interface = _json(".codex-plugin/plugin.json")["interface"]
+
+    assets = [interface["logo"], interface["composerIcon"], *interface["screenshots"]]
+    assert assets, "interface should declare renderable assets"
+    for relative in assets:
+        # The dot prefix is not cosmetic: the marketplace path validator rejects a
+        # bare "assets/x.png" outright, the same way it already requires "./skills/".
+        assert relative.startswith("./"), relative
+        assert ".." not in Path(relative).parts, relative
+        assert (ROOT / relative).is_file(), f"interface points at missing {relative}"
+
+    site = "https://cassette-editor.github.io/oh-my-cassette/"
+    for field in ("websiteURL", "privacyPolicyURL", "termsOfServiceURL"):
+        assert interface[field].startswith("https://"), field
+
+    # Both policy URLs are served by this repository's own Pages site out of
+    # docs/, so renaming or deleting a page has to break here rather than in a
+    # marketplace listing nobody on this side is watching.
+    for field in ("privacyPolicyURL", "termsOfServiceURL"):
+        url = interface[field]
+        assert url.startswith(site), f"{field} should be served from this repo's docs site"
+        page = ROOT / "docs" / f"{url[len(site) :]}.md"
+        assert page.is_file(), f"{field} points at missing {page.relative_to(ROOT)}"
+
+
+def test_every_shipped_skill_declares_its_license():
+    for skill in sorted(ROOT.glob("skills/*/SKILL.md")) + sorted(ROOT.glob("hermes/skills/*/SKILL.md")):
+        front_matter = skill.read_text("utf-8").split("---", 2)[1]
+        assert yaml.safe_load(front_matter).get("license") == "MIT", skill.relative_to(ROOT)
+
+
 def test_opencode_project_config_and_agents_skill_copies_stay_in_sync():
     config = _json("opencode.json")["mcp"]["cassette"]
     assert config["type"] == "local"

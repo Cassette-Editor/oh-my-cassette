@@ -2,6 +2,7 @@
 name: cassette-model
 description: Show or change the Cassette editing model and thinking level for the current media session. Invoke only when the user explicitly asks for the model picker, wants to inspect the current Cassette model, or requests a model/thinking change.
 version: 1.0.0
+license: MIT
 metadata:
   tags: [cassette, model, thinking, mcp]
   category: media
