@@ -1,5 +1,5 @@
 name: cassette
-version: 0.4.14 # x-release-please-version
+version: 0.4.15 # x-release-please-version
 manifest_version: 1
 description: Shared Cassette MCP video editing with a thin QQ/Telegram gateway lifecycle adapter.
 author: Oh My Cassette contributors
