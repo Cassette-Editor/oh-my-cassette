@@ -17,14 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: googleapis/release-please-action@v5
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # Codex and Claude install from `release`, so it must always point at the
       # newest tag. Hermes has no ref pinning and keeps tracking main.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: ${{ steps.release.outputs.release_created }}
       - name: Fast-forward the release channel to the new tag
         if: ${{ steps.release.outputs.release_created }}

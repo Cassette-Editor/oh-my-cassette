@@ -1,0 +1,33 @@
+# Configuration for the HOL AI plugin scanner (`plugin-scanner`), which several plugin
+# directories run against submitted repositories.
+#
+# Only findings that are wrong about this repository are suppressed here. Everything the
+# scanner was right about is fixed in the tree instead: the JOOX token literal is gone from
+# core/exact_bgm.py, every GitHub Action is pinned to a full commit SHA, and .codexignore
+# exists.
+
+[scanner]
+ignore_paths = [
+  # Test fixtures, not credentials. The secret rules match any `password = "..."` or
+  # `secret = "..."` literal, which catches the fake values the protocol and notifier tests
+  # feed through the auth and .env parsing paths. CI here is credential-free by policy and
+  # tests/test_mcp_protocol.py asserts that real credentials are redacted.
+  "tests/*",
+
+  # pyproject.toml is not a dependency manifest in this repository. It carries no [project]
+  # table on purpose (this is a plugin checkout, not a distributable package) and configures
+  # ruff only. The runtime dependency set lives in requirements-mcp.lock, a fully pinned
+  # uv-compiled lock that scripts/local_mcp_bootstrap.py installs from and hashes its venv on.
+  "pyproject.toml",
+]
+
+[rules]
+disabled = [
+  # Both rules require every marketplace entry to be a vendored local bundle
+  # (source.source = "local" + source.path). This marketplace deliberately publishes a git
+  # source pinned to the `release` branch, which is how Codex and Claude Code install the
+  # plugin and what tests/test_mcp_packaging.py enforces. The entry is neither absolute nor
+  # an escape outside the plugin directory; it is a shape the rule does not model.
+  "MARKETPLACE_SOURCE_INVALID",
+  "MARKETPLACE_UNSAFE_SOURCE",
+]

@@ -18,7 +18,10 @@ from .errors import CassetteError
 
 
 _DEFAULT_SOURCES = ("netease", "qq", "kuwo", "joox")
-_DEFAULT_JOOX_TOKEN = "f84ao9lMF_q7husBWRfgUw"
+# No default JOOX token on purpose: a token literal committed here is a credential in version
+# control no matter how public the value is, and secret scanners are right to flag it. JOOX stays
+# in the default source list and simply yields nothing until the operator supplies their own token
+# through CASSETTE_EXACT_BGM_JOOX_TOKEN; every other source is unaffected.
 _DEFAULT_JOOX_BR = "4"
 _VALID_SOURCES = {"netease", "qq", "kuwo", "joox"}
 _SOURCE_PRIORITY = {"netease": 0, "qq": 1, "kuwo": 2, "joox": 3}
@@ -35,7 +38,7 @@ class ExactBgmConfig:
     qq_base_url: str = "https://tang.api.s01s.cn/music_open_api.php"
     kuwo_base_url: str = "https://kw-api.cenguigui.cn/"
     joox_base_url: str = "https://apicx.asia/api/joox_music"
-    joox_token: str = _DEFAULT_JOOX_TOKEN
+    joox_token: str = ""
     joox_bitrate: str = _DEFAULT_JOOX_BR
     kuwo_level: str = "exhigh"
     search_limit: int = 10
@@ -49,7 +52,7 @@ class ExactBgmConfig:
     def from_env(cls) -> "ExactBgmConfig":
         enabled = _truthy(_runtime_env("CASSETTE_EXACT_BGM_ENABLED", "true"))
         sources = _source_list(_runtime_env("CASSETTE_EXACT_BGM_SOURCES", ",".join(_DEFAULT_SOURCES)))
-        joox_token = _runtime_env("CASSETTE_EXACT_BGM_JOOX_TOKEN", _DEFAULT_JOOX_TOKEN)
+        joox_token = _runtime_env("CASSETTE_EXACT_BGM_JOOX_TOKEN", "")
         if not sources:
             sources = _DEFAULT_SOURCES
         return cls(

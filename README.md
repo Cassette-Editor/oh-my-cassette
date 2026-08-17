@@ -195,7 +195,7 @@ Every case below was edited end-to-end by an AI agent through Oh My Cassette, fr
 
 Upload a clip, type an edit, watch it happen — from a desktop or mobile browser, with no agent installed locally.
 
-<h3><a href="http://43.134.224.156:8080/">▶ Open the live demo</a></h3>
+<h3><a href="https://trycassette.online/agent-demo">▶ Open the live demo</a></h3>
 
 > [!WARNING]
 > **Evaluation demo — unauthenticated and public. Don't upload anything sensitive, private, or copyrighted.**
