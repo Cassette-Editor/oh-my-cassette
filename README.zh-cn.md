@@ -302,6 +302,8 @@ curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/rele
 
 运行时不绑定特定客户端，因此任何能启动本地 stdio MCP 服务的客户端都可以使用。把客户端指向 `scripts/run_local_mcp.py`（用 `python3` 运行，Windows 上用 `python`），并设置 `CASSETTE_RUNTIME_ADAPTER=mcp`。服务会在 MCP `instructions` 中提供完整的流程说明，每个工具都会返回带类型的 `phase`/`next_action`，因此即使客户端没有装配套 skill 也能驱动整个流程。为获得最佳体验，建议同时安装 `cassette-video-edit` 与 `cassette-model` skill（或等效的系统提示词）；其他客户端也可以直接调用 `cassette_config`，或用自然语言要求修改当前会话模型。
 
+想让 AI 助手代劳安装（Cline，或任何能执行命令的 Agent）？把它指向 [llms-install.md](llms-install.md)：一份面向机器阅读的安装说明，涵盖运行时预构建、客户端注册、身份验证、媒体目录授权与安装验证。
+
 ### Hermes
 
 通过 Hermes 插件管理器安装（推荐）：
