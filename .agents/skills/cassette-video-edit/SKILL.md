@@ -2,6 +2,7 @@
 name: cassette-video-edit
 description: Edit, trim, cut, caption, subtitle, reframe, combine, add background music to, or export video, audio, and image files through Cassette. Use this skill whenever the user asks to change, preview, or render a media file in the project — even if they never say "Cassette" or name a tool — for example "trim the intro off demo.mp4", "add subtitles to this clip", "make me a 30-second cut with music", "why is there dead air at the start". Drives the local Oh My Cassette stdio MCP tools in Codex or Claude as one multi-turn conversation with the Cassette agent, with per-turn timeline previews, guided questions, and rendering only on explicit export.
 version: 2.1.0
+license: MIT
 metadata:
   tags: [cassette, video, codex, claude, hermes, opencode, mcp, media-editing]
   category: media

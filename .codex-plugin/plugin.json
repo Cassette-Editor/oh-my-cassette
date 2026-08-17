@@ -31,6 +31,14 @@
       "Write"
     ],
     "websiteURL": "https://github.com/Cassette-Editor/oh-my-cassette",
+    "privacyPolicyURL": "https://cassette-editor.github.io/oh-my-cassette/privacy",
+    "termsOfServiceURL": "https://cassette-editor.github.io/oh-my-cassette/terms",
+    "logo": "./assets/logo-400.png",
+    "composerIcon": "./assets/logo-400.png",
+    "screenshots": [
+      "./assets/contact-sheet.jpg",
+      "./assets/ctl-digest.svg"
+    ],
     "defaultPrompt": [
       "Edit this project video with Cassette.",
       "Let me choose the Cassette model for this edit.",

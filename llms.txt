@@ -11,6 +11,8 @@ Claude Code, Codex, Hermes Agent, and OpenCode launch the same local stdio MCP r
 - [Showcase](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/showcase.md): six real case videos with the exact prompt, inputs, and processing time for each
 - [Support and scope](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SUPPORT.md): what this plugin covers versus the hosted Cassette service, and where to report what
 - [Contributing](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CONTRIBUTING.md): development setup and guidelines
+- [Privacy](https://cassette-editor.github.io/oh-my-cassette/privacy): what the plugin sends where, what it stores locally, and how to delete it
+- [Terms of use](https://cassette-editor.github.io/oh-my-cassette/terms): MIT licence summary, and the boundary between this plugin and the hosted Cassette service
 - [Development and troubleshooting](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/development.md): configuration reference, transports, diagnostics, common runtime problems
 
 ## Try it

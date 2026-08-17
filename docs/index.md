@@ -38,6 +38,8 @@ Per-host setup for OpenCode, Hermes, and any other MCP host is in the
 - [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md) — release history
 - [Support and scope](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SUPPORT.md) — what this plugin covers versus the hosted Cassette service
 - [Contributing](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CONTRIBUTING.md) — development setup and guidelines
+- [Privacy](privacy.md) — what leaves your machine, what stays on it, and how to remove it
+- [Terms of use](terms.md) — the MIT licence in plain language, and where this plugin ends and Cassette begins
 
 ## 简体中文
 
