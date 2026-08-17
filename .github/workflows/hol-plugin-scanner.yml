@@ -1,0 +1,33 @@
+# Required by the plugin directories that gate submissions on the HOL AI plugin
+# scanner: they check that this workflow runs green on the default branch before
+# reviewing an entry. It also keeps the local .plugin-scanner.toml honest, since
+# the scanner picks that file up automatically and the job fails if a real
+# finding ever lands.
+name: HOL Plugin Scanner
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: HOL Plugin Scanner
+        uses: hashgraph-online/ai-plugin-scanner-action@9e7b51735441a70a122544fc072828ba2c40c791 # v1
+        with:
+          plugin_dir: "."
+          mode: scan
+          profile: public-marketplace
+          min_score: 80
+          fail_on_severity: high
+          format: sarif
+          upload_sarif: true
