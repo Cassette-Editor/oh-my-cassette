@@ -2,6 +2,7 @@
 name: cassette-gateway-video-edit
 description: Add Hermes gateway media ingestion, background notification, and delivery behavior to the canonical cassette-video-edit MCP workflow.
 version: 3.0.0
+license: MIT
 metadata:
   hermes:
     tags: [cassette, video, gateway, qqbot, telegram, media]
