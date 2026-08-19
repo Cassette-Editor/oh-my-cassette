@@ -94,6 +94,20 @@ def test_registry_manifest_fits_the_mcp_registry_limits():
     assert server["repository"]["url"] == "https://github.com/Cassette-Editor/oh-my-cassette"
     assert 0 < len(server["description"]) <= 100
 
+    # Subregistries render whatever the registry holds, so the icon has to survive
+    # being read by a stranger: HTTPS, under the schema's 255-char src cap, a MIME
+    # type from the enum, and — the part that rots silently — an asset this
+    # repository still ships at the branch the URL names.
+    icons = server["icons"]
+    assert icons, "the registry record should carry an icon for listing cards"
+    for icon in icons:
+        src = icon["src"]
+        assert src.startswith("https://") and len(src) <= 255, src
+        assert icon["mimeType"] in {"image/png", "image/jpeg", "image/jpg", "image/svg+xml", "image/webp"}
+        prefix = "https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/"
+        assert src.startswith(prefix), "icons should be served from this repository"
+        assert (ROOT / src[len(prefix) :]).is_file(), f"icon points at missing {src}"
+
 
 def test_host_configs_use_one_stdio_server_and_no_network_listener():
     assert _json(".claude-plugin/plugin.json")["mcpServers"] == "./.claude-plugin/mcp.json"

@@ -6,14 +6,19 @@ Report vulnerabilities privately through [GitHub security advisories](https://gi
 
 ## Trust boundaries
 
-Oh My Cassette has four adapters with distinct boundaries:
+Everything this repository ships runs on the user's machine and opens no port:
 
-- Codex and Claude launch a local stdio MCP child process. It opens no port and does not use the FastAPI demo service.
+- Codex, Claude Code, and OpenCode launch a local stdio MCP child process.
 - Hermes retains its gateway integration and `~/.hermes/.env` behavior.
-- The web demo retains a network-facing FastAPI server for uploads and browser application endpoints.
-- The Cassette backend is a separate service that receives credentials, media, agent requests, project state, and render requests.
 
-Do not treat the local MCP process, the web-demo server, and the Cassette backend as the same service.
+The Cassette backend is a separate service that receives credentials, media, agent requests, project
+state, and render requests. Do not treat the local process and the Cassette backend as the same
+service — a report about rendering, storage, or account handling belongs to Cassette, not here.
+
+The browser demo is no longer part of this repository — its network-facing server was moved out, so
+nothing here listens on a socket. The hosted demo at <https://trycassette.online/agent-demo> is
+operated by Cassette; it is unauthenticated and meant for evaluation, not for confidential or
+regulated material, and anything about it goes to Cassette rather than this repository.
 
 ## Native MCP credentials
 
@@ -42,12 +47,6 @@ Paths are canonicalized before use. Traversal and symlink escapes are rejected. 
 An exported artifact is returned only when its resolved path is a regular file inside `<data-root>/cassette/exports/<job_id>/`. Results include metadata and resource links, never embedded large media bytes. The MCP server has no generic local-file read tool.
 
 API continuation records contain private thread/run/interrupt metadata so jobs can survive host restarts. Public tool results strip continuation state, prompts, source paths, delivery targets, worker commands, and raw output paths. The shared data root should be treated as private runtime state.
-
-## Web demo
-
-The public demo is intentionally unauthenticated and is not suitable for confidential or regulated material. Uploads, prompts, output, job state, and diagnostics may be visible to the operator and processed by Cassette, the configured LLM provider, and music/search providers. Self-hosters must add their own network controls, retention policy, TLS, rate limits, and access control before production use.
-
-The web demo reads process environment only. Keep its service environment file outside the repository and restrict it with OS permissions.
 
 ## Repository hygiene
 
