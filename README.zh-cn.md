@@ -81,7 +81,7 @@ codex plugin add oh-my-cassette@cassette-editor
 
 重启 Agent，然后对它说：*"把 ./footage 里的素材剪成一支 30 秒的旅行 Vlog，音乐卡点。"*
 
-需要 Python 3.11–3.13、`ffmpeg` 和一个 [Cassette 账号](https://trycassette.online/signup/)。完整安装步骤（含 [OpenCode](#opencode)、[Hermes](#hermes) 及其他 MCP 客户端）见[快速开始](#-快速开始)。想先看看效果？[在浏览器里直接试用](#-无需安装试用)，免安装、免账号。
+需要 Python 3.11–3.13、`ffmpeg` 和一个 [Cassette 账号](https://trycassette.online/signup/)。完整安装步骤（含 [OpenCode](#opencode)、[Hermes](#hermes) 及其他 MCP 客户端）见[快速开始](#-快速开始)。
 
 # 🎥 项目概览
 
@@ -185,27 +185,6 @@ codex plugin add oh-my-cassette@cassette-editor
   <sub>★ 更多案例持续更新中，欢迎 Star 关注本项目。</sub>
 </p>
 
-# 🏄 无需安装试用
-
-上传一段素材、输入一句剪辑指令，就能看到成片过程——电脑或手机浏览器都行，本地不用装任何 Agent。
-
-<h3><a href="https://trycassette.online/agent-demo">▶ 打开在线演示</a></h3>
-
-> [!WARNING]
-> **评估用演示环境，公开且未鉴权。请勿上传任何敏感、私密或受版权限制的内容。**
-
-<details>
-<summary>完整演示条款——数据处理、第三方服务与可用性</summary>
-
-- 你上传的素材、提示词、生成结果、任务状态、排障信息，以及 BGM 流程中涉及的音乐搜索信息，可能会被该演示服务器、Cassette、DeepSeek 以及相关第三方音乐/搜索服务处理。请把上传到公开演示的任何内容都视为演示维护者和工作流相关外部服务可见。
-- 该演示可能随时重置、限流、不可用或变更。我们不承诺数据保留或删除时效，不承诺保密性、生产可用性、输出质量、版权合规性或服务连续性。你需要自行确认上传内容的权利状态，并在分享任何生成结果前自行审核。
-- 浏览器刷新、关闭标签页或离开演示页面时，会开启新的网页会话，并尽力清理上一个网页会话的临时上传、聊天历史和已结束任务文件。该清理策略只属于演示网页服务。
-- 默认情况下，演示会使用服务器侧配置的 DeepSeek API Key（如果可用）。你也可以在网页右上角 **设置** 中填写自己的 DeepSeek API Key 进行测试。该 key 只会随请求发送到当前演示服务器，Web 应用不会把它写入仓库或服务端磁盘；但它仍会经过公开演示服务器，请使用可以随时轮换和监控的 key。
-
-</details>
-
-演示是一套独立部署，有自己的仓库和自己的传输方式；本仓库只包含插件本身。
-
 # 🚀 快速开始
 
 ## 开始之前 🎬
@@ -239,6 +218,23 @@ Oh My Cassette 目前支持 QQ 和 Telegram 网关。
 - 使用本地 MCP 插件时需要 Codex 或 Claude Code；使用 Hermes 时需要完成 Agent 与网关配置。
 - Python 3.11–3.13。
 - `ffmpeg`，用于 Hermes 网关视频标准化，以及可选的 API 导出缩略图。
+
+### 支持的视频上传规格
+
+Cassette 当前只接受同时满足以下全部条件的视频源文件：
+
+| 限制 | 支持范围 |
+| --- | --- |
+| 容器格式 | 仅 MP4 |
+| 视频编码 | H.264/AVC、8-bit `yuv420p`、SDR |
+| 音频 | AAC 单声道、AAC 双声道或无音轨 |
+| 帧率 | 恒定 29.97 或 30 fps |
+| 横屏分辨率 | 最大 `1920×1080` |
+| 竖屏分辨率 | 最大 `1080×1920` |
+| 文件大小 | 每个视频最大 2 GiB（`2,147,483,648` 字节） |
+| 视频时长 | 每个视频最大 60 分钟 |
+
+MOV、HEVC/H.265、AV1、VP9、ProRes、HDR、10-bit、可变帧率、24/25/50/60 fps、4K、超过大小限制或超过 60 分钟的视频会被直接拒绝，不会回退到云端转码。
 
 安装系统工具：
 
@@ -364,7 +360,7 @@ python3 scripts/install_plugin.py \
 
 ## 通过本地 MCP 在 Agent 客户端中使用
 
-Codex、Claude Code、OpenCode 与 Hermes 使用同一套自包含运行时。本文所说的 **MCP server** 是由客户端通过标准输入/输出连接的本地子进程：它不会监听端口，也不依赖 FastAPI 网页演示服务。独立的 Cassette 后端仍然是剪辑引擎，继续负责身份验证、素材处理、Agent 任务、项目状态和渲染。
+Codex、Claude Code、OpenCode 与 Hermes 使用同一套自包含运行时。本文所说的 **MCP server** 是由客户端通过标准输入/输出连接的本地子进程：它不会监听端口。独立的 Cassette 后端仍然是剪辑引擎，继续负责身份验证、素材处理、Agent 任务、项目状态和渲染。
 
 ### 首次身份验证
 
@@ -627,13 +623,13 @@ hermes gateway restart
 
 ### 可以不安装直接试用吗？
 
-可以——[公开网页演示](https://trycassette.online/agent-demo)在浏览器中运行完整流程。演示未鉴权、仅供评估，请勿上传敏感内容。
+不可以。请在受支持的 Agent 客户端中安装插件，并使用 Cassette 账号登录。
 
 ### Oh My Cassette 是免费开源的吗？
 
 这个插件完全免费开源，基于 MIT 许可证——包括 MCP 服务和 skill 在内的全部代码。
 
-渲染跑在 [Cassette](https://trycassette.online) 上，它是一个独立的托管服务，需要注册账号。账号的具体费用请以 Cassette 官网为准。你也可以完全不注册账号，直接用[网页演示](#-无需安装试用)体验整套流程。
+渲染跑在 [Cassette](https://trycassette.online) 上，它是一个独立的托管服务，需要注册账号。账号的具体费用请以 Cassette 官网为准。
 
 # 🔨 开发与排障
 

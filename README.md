@@ -86,7 +86,7 @@ codex plugin add oh-my-cassette@cassette-editor
 
 Restart your agent, then say: *"Edit the clips in ./footage into a 30-second travel vlog with beat-synced cuts."*
 
-Needs Python 3.11–3.13, `ffmpeg`, and a [Cassette account](https://trycassette.online/signup/). Full setup — including [OpenCode](#opencode), [Hermes](#hermes), and any other MCP host — is in [Quick Start](#-quick-start). Want to try it first? [Run it in your browser](#-try-without-installation) — no install, no account.
+Needs Python 3.11–3.13, `ffmpeg`, and a [Cassette account](https://trycassette.online/signup/). Full setup — including [OpenCode](#opencode), [Hermes](#hermes), and any other MCP host — is in [Quick Start](#-quick-start).
 
 # 🎥 Overview
 
@@ -191,27 +191,6 @@ Every case below was edited end-to-end by an AI agent through Oh My Cassette, fr
   <sub>★ More cases are on the way. Star the project to follow along.</sub>
 </p>
 
-# 🏄 Try without installation
-
-Upload a clip, type an edit, watch it happen — from a desktop or mobile browser, with no agent installed locally.
-
-<h3><a href="https://trycassette.online/agent-demo">▶ Open the live demo</a></h3>
-
-> [!WARNING]
-> **Evaluation demo — unauthenticated and public. Don't upload anything sensitive, private, or copyrighted.**
-
-<details>
-<summary>Full demo terms — data handling, third-party processing, and availability</summary>
-
-- Uploaded files, prompts, generated outputs, job state, and troubleshooting metadata may be processed by this demo server, Cassette, DeepSeek, and third-party music/search providers used by the BGM flow. Treat anything you upload as visible to the demo operator and the external services involved in the workflow.
-- The demo may be reset, rate-limited, unavailable, or changed at any time. We do not guarantee data retention, deletion timing, confidentiality, fitness for production use, output quality, copyright compliance of generated/editing results, or uninterrupted service. You are responsible for the content you upload and for reviewing any generated output before sharing it.
-- Browser refreshes, tab closes, or navigation away from the demo start a new web session and best-effort cleanup the previous session's temporary uploads, chat history, and finished job files.
-- By default the demo uses the server-side DeepSeek configuration when available. You can open **Settings** in the web UI and provide your own DeepSeek API key for testing. Your key is sent only with requests to this demo server and is not written to this repository or server-side disk by the web app, but it still transits the public demo server; use a key you can rotate and monitor.
-
-</details>
-
-The demo is a separate deployment with its own repository and its own transport; this repository is the plugin only.
-
 # 🚀 Quick Start
 
 ## Before You Start 🎬
@@ -246,6 +225,23 @@ Oh My Cassette currently supports QQ and Telegram gateways.
 - Codex, Claude Code, or OpenCode for the local MCP plugin, or Hermes Agent with its gateway configured.
 - Python 3.11–3.13.
 - `ffmpeg`, required for Hermes gateway normalization and optional API export thumbnails.
+
+### Supported video uploads
+
+Cassette currently accepts video source files that match all of the following limits:
+
+| Limit | Accepted input |
+| --- | --- |
+| Container | MP4 only |
+| Video | H.264/AVC, 8-bit `yuv420p`, SDR |
+| Audio | AAC mono, AAC stereo, or no audio track |
+| Frame rate | Constant 29.97 or 30 fps |
+| Landscape resolution | Up to `1920×1080` |
+| Portrait resolution | Up to `1080×1920` |
+| File size | Up to 2 GiB (`2,147,483,648` bytes) per video |
+| Duration | Up to 60 minutes per video |
+
+MOV, HEVC/H.265, AV1, VP9, ProRes, HDR, 10-bit, variable-frame-rate video, 24/25/50/60 fps, 4K, oversized files, and videos longer than 60 minutes are rejected rather than transcoded in the cloud.
 
 Install system tools:
 
@@ -377,9 +373,7 @@ python3 scripts/install_plugin.py \
 
 ## Use with agent clients over local MCP
 
-Codex, Claude Code, OpenCode, and Hermes use the same self-contained runtime. In this README, **MCP server** means a local child process connected over stdin/stdout: it opens no port and does not depend on the FastAPI web-demo service. The separate Cassette backend remains the editing engine and continues to handle authentication, media processing, agent runs, project state, and rendering.
-
-The web demo is intentionally different. Browsers still need the retained FastAPI server for uploads, chat sessions, and frontend endpoints; none of that behavior is removed by the local MCP plugin.
+Codex, Claude Code, OpenCode, and Hermes use the same self-contained runtime. In this README, **MCP server** means a local child process connected over stdin/stdout: it opens no port. The separate Cassette backend remains the editing engine and continues to handle authentication, media processing, agent runs, project state, and rendering.
 
 ### First-run authentication
 
@@ -675,13 +669,13 @@ Yes. After each editing turn you get a timeline digest and a contact-sheet JPEG 
 
 ### Can I try it without installing anything?
 
-Yes — the [public web demo](https://trycassette.online/agent-demo) runs the full workflow in your browser. It is unauthenticated and for evaluation only, so don't upload sensitive content.
+No. Install the plugin in a supported agent host and sign in with a Cassette account.
 
 ### Is Oh My Cassette free and open source?
 
 This plugin is free and open source under the MIT license — all of it, including the MCP server and the skill.
 
-Rendering runs on [Cassette](https://trycassette.online), a separate hosted service that requires an account. See [Cassette's pricing](https://trycassette.online) for what an account costs. You can try the whole workflow with no account at all through the [web demo](#-try-without-installation).
+Rendering runs on [Cassette](https://trycassette.online), a separate hosted service that requires an account. See [Cassette's pricing](https://trycassette.online) for what an account costs.
 
 # 🔨 Development & Troubleshooting
 
