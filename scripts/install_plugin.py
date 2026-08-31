@@ -35,7 +35,7 @@ CASSETTE_URL_OPTIONS = (
 )
 # The API origin the plugin calls. CASSETTE_URL above is the web editor a human opens; it is
 # recorded on job records and offered during install, but no code path fetches it.
-CASSETTE_DEFAULT_API_URL = "https://remotion-canvas-server-5tdb2hkb4q-as.a.run.app"
+CASSETTE_DEFAULT_API_URL = runtime_config.DEFAULT_CASSETTE_API_URL
 AUTH_ENV_KEYS = (
     "CASSETTE_URL",
     "CASSETTE_API_URL",

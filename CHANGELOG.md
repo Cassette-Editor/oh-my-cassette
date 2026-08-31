@@ -13,6 +13,7 @@ conventional commits.
 
 * **mcp:** restore production deployment compatibility ([f0718bb](https://github.com/Cassette-Editor/oh-my-cassette/commit/f0718bbd8da4ce5d098c805707237801bbf1110e))
   * send an explicit HTTP user agent and distinguish Cloudflare edge denials from account authorization failures
+  * use the new Cloudflare deployment as the default API origin and stop reporting an obsolete-endpoint 404 as an expired password
   * generate and upload the browser-prepared H.264/AAC preview required by the new video ingest deployment
   * preserve completion review when an agent reports `not_done`, allowing explicit approval to continue to a verified export
 

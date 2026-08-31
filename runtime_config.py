@@ -33,6 +33,7 @@ CONFIG_DIR_MODE = 0o700
 CONFIG_FILE_MODE = 0o600
 JAMENDO_DEVELOPER_PORTAL = "https://devportal.jamendo.com/"
 JAMENDO_API_BASE_URL = "https://api.jamendo.com/v3.0"
+DEFAULT_CASSETTE_API_URL = "https://cassette-editor-preview.cassette-editor-crimson2077.workers.dev"
 
 
 def _is_windows() -> bool:

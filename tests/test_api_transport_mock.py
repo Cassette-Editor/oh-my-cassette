@@ -448,6 +448,18 @@ def test_agent_auth_does_not_misreport_cloudflare_1010_as_missing_access(monkeyp
     assert result["code"] == "auth_edge_access_denied"
 
 
+def test_runtime_auth_does_not_misreport_an_endpoint_404_as_a_stale_password(monkeypatch):
+    monkeypatch.setattr(api_transport, "_credentials", lambda: ("person@example.test", "generated-password"))
+    transport = ApiTransport()
+    monkeypatch.setattr(transport, "_request", lambda *_args, **_kwargs: (404, {"error": "not found"}))
+
+    with pytest.raises(ApiTransportError) as raised:
+        transport._authenticate()
+
+    assert raised.value.code == "auth_verify_failed"
+    assert "password was not changed" in raised.value.message
+
+
 def test_api_transport_retries_video_upload_with_browser_preparation(cassette_env, monkeypatch, tmp_path):
     class _BrowserPreparationRequired(_MockCassetteAPI):
         def do_POST(self):
