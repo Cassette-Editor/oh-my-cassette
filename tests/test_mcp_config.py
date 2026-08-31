@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 import runtime_config
+from cassette.core import api_transport
+from scripts import install_plugin
 from scripts import setup_local_mcp
 from scripts import local_mcp_bootstrap
 
@@ -30,6 +32,19 @@ def local_config(tmp_path, monkeypatch):
     ):
         monkeypatch.delenv(name, raising=False)
     return config, data
+
+
+def test_new_deployment_is_the_shared_default_api_origin(monkeypatch):
+    expected = "https://cassette-editor-preview.cassette-editor-crimson2077.workers.dev"
+    monkeypatch.setenv("CASSETTE_RUNTIME_ADAPTER", "web")
+    monkeypatch.delenv("CASSETTE_API_URL", raising=False)
+    monkeypatch.delenv("CASSETTE_API_BASE_URL", raising=False)
+
+    assert runtime_config.DEFAULT_CASSETTE_API_URL == expected
+    assert api_transport.DEFAULT_CASSETTE_API_URL == expected
+    assert setup_local_mcp.DEFAULT_API_URL == expected
+    assert install_plugin.CASSETTE_DEFAULT_API_URL == expected
+    assert api_transport._api_base() == expected
 
 
 def test_terminal_jamendo_setup_validates_and_stores_id_only(local_config, monkeypatch):

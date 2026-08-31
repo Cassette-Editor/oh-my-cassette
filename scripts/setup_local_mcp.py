@@ -23,7 +23,7 @@ if str(PLUGIN_ROOT / "scripts") not in sys.path:
 import runtime_config  # noqa: E402
 
 
-DEFAULT_API_URL = "https://remotion-canvas-server-5tdb2hkb4q-as.a.run.app"
+DEFAULT_API_URL = runtime_config.DEFAULT_CASSETTE_API_URL
 API_USER_AGENT = "oh-my-cassette/1.0"
 
 

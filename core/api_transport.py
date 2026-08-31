@@ -51,6 +51,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
+import runtime_config
+
 from .manifest import get_asset_root, load_manifest
 
 # Terminal Cassette job statuses (mirror jobs.update_job terminal set).
@@ -192,11 +194,10 @@ def _env_num(name: str, default, floor, *, cast=float, getter=None):
         return default
 
 
-# Deployed Cassette render-server API origin (VITE_REMOTION_RENDER_SERVER_URL in the shipped
-# frontend bundle). This is a single request-routed Cloud Run service for both regions and is NOT
-# the editor SPA route in CASSETTE_URL (which ends in /agent). Override with CASSETTE_API_URL for
-# self-hosted / non-default deployments.
-DEFAULT_CASSETTE_API_URL = "https://remotion-canvas-server-5tdb2hkb4q-as.a.run.app"
+# Stable Cloudflare edge for the deployed Cassette API. It routes /api requests to the current
+# backend deployment; CASSETTE_URL remains the human-facing editor URL. Override with
+# CASSETTE_API_URL for self-hosted / non-default deployments.
+DEFAULT_CASSETTE_API_URL = runtime_config.DEFAULT_CASSETTE_API_URL
 
 # Host-progress plumbing. A blocking run_job is the no-poll path: the host makes one tool
 # call and is answered when the job is terminal. That only works if the transport can reach
@@ -1224,12 +1225,27 @@ class ApiTransport:
         status, body = self._request(
             "POST", "/api/agent-auth/verify", json_body={"email": email, "password": password}, authed=False
         )
-        if status != 200 or not isinstance(body, dict):
+        if status in {400, 401}:
             # "Stale", not "wrong": Cassette passwords are server-generated and mailed, never
             # chosen, so the user did not mistype anything. Replacing it is the only fix.
             raise ApiTransportError(
                 "auth_failed",
                 f"The stored Cassette password is no longer valid (HTTP {status}); it needs replacing.",
+            )
+        if status == 403 and isinstance(body, dict) and _is_edge_access_denied(body):
+            raise ApiTransportError(
+                "auth_edge_access_denied",
+                "Cloudflare denied the plugin HTTP client before Cassette could verify the account.",
+            )
+        if status == 403:
+            raise ApiTransportError(
+                "auth_not_authorized",
+                "The stored Cassette account is not authorized for agent access.",
+            )
+        if status != 200 or not isinstance(body, dict):
+            raise ApiTransportError(
+                "auth_verify_failed",
+                f"Cassette credential verification failed (HTTP {status}); the stored password was not changed.",
             )
         session = body.get("session") or {}
         token = session.get("access_token")
