@@ -38,11 +38,13 @@ import mimetypes
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -93,6 +95,8 @@ _MODEL_LABEL_TO_ID = {
 }
 AGENT_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh")
 _DEFAULT_THINKING = "xhigh"  # quality-first default shared by the plugin, MCP, editor, and web demo
+_API_USER_AGENT = "oh-my-cassette/1.0"
+_BROWSER_VIDEO_PREPARATION_PROFILE_VERSION = "browser-preview-v1"
 
 
 def _require_model_selection() -> bool:
@@ -240,7 +244,7 @@ def check_cassette_connectivity(url: str | None = None, timeout_sec: float | Non
             timeout = 10.0
     target = f"{base}/healthz"
     try:
-        request = Request(target, method="GET", headers={"User-Agent": "oh-my-cassette/1.0"})
+        request = Request(target, method="GET", headers={"User-Agent": _API_USER_AGENT})
         with urlopen(request, timeout=timeout) as response:
             status = int(getattr(response, "status", 200) or 200)
         if 200 <= status < 400:
@@ -275,7 +279,11 @@ def _post_agent_auth(path: str, payload: dict[str, Any], *, timeout_sec: float |
         target,
         data=body,
         method="POST",
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": _API_USER_AGENT,
+        },
     )
     timeout = timeout_sec or _AGENT_AUTH_TIMEOUT_SEC
     try:
@@ -296,6 +304,11 @@ def _post_agent_auth(path: str, payload: dict[str, Any], *, timeout_sec: float |
     except ValueError:
         parsed = {}
     return status, parsed if isinstance(parsed, dict) else {}, str(retry_after)
+
+
+def _is_edge_access_denied(body: dict[str, Any]) -> bool:
+    """Identify Cloudflare's browser-signature denial instead of blaming Cassette access."""
+    return str(body.get("error_code") or "") == "1010" or body.get("error_name") == "browser_signature_banned"
 
 
 def _retry_after_seconds(value: str) -> int | None:
@@ -329,6 +342,8 @@ def verify_agent_credentials(email: str, password: str, *, timeout_sec: float | 
             "http_status": status,
             "retry_after_sec": _retry_after_seconds(retry_after),
         }
+    if status == 403 and _is_edge_access_denied(body):
+        return {"ok": False, "code": "auth_edge_access_denied", "http_status": status}
     if status == 403:  # password verified, address not on the allowlist
         return {"ok": False, "code": "auth_not_authorized", "http_status": status}
     if status in {400, 401}:
@@ -357,6 +372,8 @@ def request_new_agent_password(email: str, *, timeout_sec: float | None = None) 
             "http_status": status,
             "retry_after_sec": _retry_after_seconds(retry_after),
         }
+    if status == 403 and _is_edge_access_denied(body):
+        return {"ok": False, "code": "auth_edge_access_denied", "http_status": status}
     if status == 200:
         # 200 with sent=false is the server refusing to confirm who has an account; no mail
         # is coming and no password was touched, so this is the one safe negative here.
@@ -438,6 +455,167 @@ def _probe_duration_sec(file_path: Path) -> float | None:
     except (AttributeError, TypeError, ValueError):
         return None
     return duration if duration > 0 else None
+
+
+def _parse_frame_rate(raw: object) -> float | None:
+    try:
+        rate = float(Fraction(str(raw)))
+    except (ValueError, ZeroDivisionError):
+        return None
+    return rate if rate > 0 else None
+
+
+def _probe_browser_video_source(file_path: Path) -> dict[str, Any]:
+    """Validate the source against the browser-preparation contract using ffprobe."""
+    binary = str(_env("CASSETTE_FFPROBE_BIN") or os.getenv("CASSETTE_FFPROBE_BIN", "") or "ffprobe")
+    entries = (
+        "format=duration:stream=codec_type,codec_name,codec_tag_string,width,height,"
+        "avg_frame_rate,r_frame_rate,channels,pix_fmt,color_transfer,bits_per_raw_sample"
+    )
+    try:
+        proc = subprocess.run(
+            [binary, "-v", "error", "-show_entries", entries, "-of", "json", str(file_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ApiTransportError(
+            "browser_video_preparation_failed",
+            "ffprobe is required to prepare video uploads for Cassette.",
+        ) from exc
+    if proc.returncode != 0:
+        raise ApiTransportError(
+            "browser_video_preparation_failed",
+            "Cassette could not inspect this MP4 for browser-compatible upload.",
+        )
+    try:
+        payload = json.loads(proc.stdout or "{}")
+        streams = payload.get("streams") or []
+        video_streams = [stream for stream in streams if stream.get("codec_type") == "video"]
+        audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+        if len(video_streams) != 1 or len(audio_streams) > 1:
+            raise ValueError("unsupported track layout")
+        video = video_streams[0]
+        audio = audio_streams[0] if audio_streams else None
+        duration = float((payload.get("format") or {}).get("duration"))
+        width = int(video.get("width"))
+        height = int(video.get("height"))
+        avg_rate = _parse_frame_rate(video.get("avg_frame_rate"))
+        raw_rate = _parse_frame_rate(video.get("r_frame_rate"))
+        channels = int(audio.get("channels")) if audio else 0
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ApiTransportError(
+            "browser_video_preparation_failed",
+            "This video does not expose the metadata required by Cassette's browser upload profile.",
+        ) from exc
+
+    landscape = width >= height
+    if (
+        video.get("codec_name") != "h264"
+        or duration <= 0
+        or duration > 60 * 60
+        or width <= 0
+        or height <= 0
+        or (landscape and (width > 1920 or height > 1080))
+        or (not landscape and (width > 1080 or height > 1920))
+        or avg_rate is None
+        or raw_rate is None
+        or abs(avg_rate - raw_rate) > 0.05
+        or min(abs(avg_rate - 30), abs(avg_rate - (30_000 / 1_001))) > 0.05
+        or (audio is not None and (audio.get("codec_name") != "aac" or channels not in {1, 2}))
+        or str(video.get("color_transfer") or "").lower() in {"smpte2084", "arib-std-b67"}
+        or str(video.get("bits_per_raw_sample") or "8") not in {"", "8"}
+        or "10" in str(video.get("pix_fmt") or "")
+    ):
+        raise ApiTransportError(
+            "browser_video_unsupported",
+            "This video does not meet Cassette's MP4/AVC, SDR, CFR 30 fps browser upload profile.",
+        )
+
+    return {
+        "container": "mp4",
+        "videoCodec": "avc",
+        "videoCodecString": str(video.get("codec_tag_string") or "avc1"),
+        "width": width,
+        "height": height,
+        "durationSeconds": duration,
+        "frameRate": avg_rate,
+        "frameRateIsConstant": True,
+        "hasAudio": audio is not None,
+        "audioCodec": "aac" if audio is not None else "none",
+        "audioChannels": channels,
+    }
+
+
+@contextmanager
+def _prepare_browser_video_preview(file_path: Path) -> Iterator[tuple[dict[str, Any], Path]]:
+    """Create the 30 fps AVC/AAC proxy required by the deployed browser-upload contract."""
+    source = _probe_browser_video_source(file_path)
+    max_width, max_height = (1280, 720) if source["width"] >= source["height"] else (720, 1280)
+    request = {
+        "profileVersion": _BROWSER_VIDEO_PREPARATION_PROFILE_VERSION,
+        "previewRequired": True,
+        "source": source,
+    }
+    ffmpeg = str(_env("CASSETTE_FFMPEG_BIN") or os.getenv("CASSETTE_FFMPEG_BIN", "") or "ffmpeg")
+    with tempfile.TemporaryDirectory(prefix="oh-my-cassette-preview-") as directory:
+        target = Path(directory) / "preview.mp4"
+        command = [
+            ffmpeg,
+            "-v",
+            "error",
+            "-y",
+            "-i",
+            str(file_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0?",
+            "-vf",
+            f"scale={max_width}:{max_height}:force_original_aspect_ratio=decrease:force_divisible_by=2",
+            "-r",
+            "30",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "60",
+            "-keyint_min",
+            "60",
+            "-sc_threshold",
+            "0",
+        ]
+        if source["hasAudio"]:
+            command.extend(["-c:a", "aac", "-ac", str(source["audioChannels"])])
+        else:
+            command.append("-an")
+        command.extend(["-movflags", "+faststart", str(target)])
+        try:
+            proc = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=max(120, min(1800, int(source["durationSeconds"] * 4))),
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ApiTransportError(
+                "browser_video_preparation_failed",
+                "ffmpeg could not create the browser-prepared Cassette preview.",
+            ) from exc
+        if proc.returncode != 0 or not target.is_file() or target.stat().st_size <= 0:
+            raise ApiTransportError(
+                "browser_video_preparation_failed",
+                "ffmpeg could not create the browser-prepared Cassette preview.",
+            )
+        yield request, target
 
 
 def _credentials() -> tuple[str, str]:
@@ -1079,41 +1257,100 @@ class ApiTransport:
         # uploaded media is visible to the agent run AND bound to the project that gets exported.
         headers = {"x-session-id": session_id, "x-project-id": session_id}
 
-        _, init = self._request(
+        init_status, init = self._request(
             "POST",
             "/api/media/upload/init",
             json_body={"fileName": file_name, "mimeType": mime},
             headers=headers,
-            expect=200,
         )
-        if not isinstance(init, dict) or not init.get("uploadUrl") or not init.get("key"):
-            raise ApiTransportError("upload_init_failed", f"upload/init returned an unexpected body for {file_name}")
-        key = str(init["key"])
-        upload_content_type = str(init.get("uploadContentType") or mime)
-        storage_backend = str(init.get("storageBackend") or "r2")
-        upload_attempt_id = init.get("uploadAttemptId")
-
-        self._put_bytes(str(init["uploadUrl"]), file_path.read_bytes(), upload_content_type)
-
-        # upload/complete merges this into the stored row, so a duration supplied here is what
-        # media import reads back. Send it for every type: it is authoritative for audio (never
-        # probed server-side) and harmless for video, where the readiness probe overwrites it.
-        metadata: dict[str, Any] = {}
-        probed_duration = _probe_duration_sec(file_path)
-        if probed_duration is not None:
-            metadata["duration"] = probed_duration
-        complete_body = {
-            "key": key,
-            "fileName": file_name,
-            "mimeType": mime,
-            "storageBackend": storage_backend,
-            "metadata": metadata,
-        }
-        if upload_attempt_id:
-            complete_body["uploadAttemptId"] = upload_attempt_id
-        _, complete = self._request(
-            "POST", "/api/media/upload/complete", json_body=complete_body, headers=headers, expect=200
+        requires_browser_preparation = (
+            init_status == 428 and isinstance(init, dict) and init.get("code") == "BROWSER_VIDEO_PREPARATION_REQUIRED"
         )
+        if init_status != 200 and not requires_browser_preparation:
+            detail = init.get("error") if isinstance(init, dict) else None
+            raise ApiTransportError(
+                "http_error",
+                f"POST /api/media/upload/init -> HTTP {init_status}{f': {detail}' if detail else ''}",
+                details={"status": init_status, "path": "/api/media/upload/init"},
+            )
+        if requires_browser_preparation and not str(mime).startswith("video/"):
+            raise ApiTransportError(
+                "browser_video_preparation_failed",
+                "Cassette requested browser video preparation for a non-video asset.",
+            )
+
+        preparation = (
+            _prepare_browser_video_preview(file_path) if requires_browser_preparation else nullcontext((None, None))
+        )
+        with preparation as (video_preparation, preview_path):
+            if video_preparation is not None:
+                _, init = self._request(
+                    "POST",
+                    "/api/media/upload/init",
+                    json_body={
+                        "fileName": file_name,
+                        "mimeType": mime,
+                        "videoPreparation": video_preparation,
+                    },
+                    headers=headers,
+                    expect=200,
+                )
+            if not isinstance(init, dict) or not init.get("uploadUrl") or not init.get("key"):
+                raise ApiTransportError(
+                    "upload_init_failed", f"upload/init returned an unexpected body for {file_name}"
+                )
+            key = str(init["key"])
+            upload_content_type = str(init.get("uploadContentType") or mime)
+            storage_backend = str(init.get("storageBackend") or "r2")
+            upload_attempt_id = init.get("uploadAttemptId")
+
+            self._put_bytes(str(init["uploadUrl"]), file_path.read_bytes(), upload_content_type)
+
+            prepared_preview: dict[str, Any] | None = None
+            if preview_path is not None:
+                preview_upload = init.get("previewUpload")
+                if (
+                    not isinstance(preview_upload, dict)
+                    or not preview_upload.get("uploadUrl")
+                    or not preview_upload.get("key")
+                ):
+                    raise ApiTransportError(
+                        "upload_init_failed",
+                        f"upload/init returned no prepared-preview target for {file_name}",
+                    )
+                preview_bytes = preview_path.read_bytes()
+                self._put_bytes(
+                    str(preview_upload["uploadUrl"]),
+                    preview_bytes,
+                    str(preview_upload.get("uploadContentType") or "video/mp4"),
+                )
+                prepared_preview = {
+                    "key": str(preview_upload["key"]),
+                    "byteSize": len(preview_bytes),
+                    "profileVersion": _BROWSER_VIDEO_PREPARATION_PROFILE_VERSION,
+                }
+
+            # upload/complete merges this into the stored row, so a duration supplied here is what
+            # media import reads back. Send it for every type: it is authoritative for audio (never
+            # probed server-side) and harmless for video, where the readiness probe overwrites it.
+            metadata: dict[str, Any] = {}
+            probed_duration = _probe_duration_sec(file_path)
+            if probed_duration is not None:
+                metadata["duration"] = probed_duration
+            complete_body = {
+                "key": key,
+                "fileName": file_name,
+                "mimeType": mime,
+                "storageBackend": storage_backend,
+                "metadata": metadata,
+            }
+            if upload_attempt_id:
+                complete_body["uploadAttemptId"] = upload_attempt_id
+            if prepared_preview is not None:
+                complete_body["preparedPreview"] = prepared_preview
+            _, complete = self._request(
+                "POST", "/api/media/upload/complete", json_body=complete_body, headers=headers, expect=200
+            )
         if not isinstance(complete, dict) or not complete.get("mediaFileId"):
             raise ApiTransportError(
                 "upload_complete_failed", f"upload/complete returned no mediaFileId for {file_name}"
@@ -2495,7 +2732,7 @@ class ApiTransport:
 
     # ── http + result helpers ──────────────────────────────────────────────────
     def _auth_headers(self, headers: dict[str, str]) -> dict[str, str]:
-        merged = dict(headers)
+        merged = {"User-Agent": _API_USER_AGENT, **headers}
         if self._token:
             merged["Authorization"] = f"Bearer {self._token}"
         return merged
@@ -2514,7 +2751,7 @@ class ApiTransport:
     ) -> tuple[int, Any]:
         url = _api_base() + path
         data = None
-        req_headers = dict(headers or {})
+        req_headers = {"User-Agent": _API_USER_AGENT, **dict(headers or {})}
         if json_body is not None:
             data = json.dumps(json_body).encode("utf-8")
             req_headers.setdefault("Content-Type", "application/json")
@@ -2585,10 +2822,16 @@ class ApiTransport:
         outputs = outputs or []
         errors = list(errors or [])
         agent_not_done = getattr(self, "_last_terminal_outcome", None) == "not_done"
+        completion_review_pending = (
+            status == _NEEDS_USER
+            and bool((extra_quality or {}).get("completion_review_required"))
+            and _export_on_complete(getattr(self, "_job", None) or {})
+        )
         # LangGraph success only means the graph settled. The agent's terminal decision is the
-        # product outcome, and not_done must be a failure even if the caller was about to enter
-        # review/export. This also gives every host one typed terminal state to render.
-        if agent_not_done:
+        # product outcome for ordinary edit turns. An explicit export turn is different: rendering
+        # is intentionally owned by this transport, not the Cassette agent. Keep not_done as review
+        # evidence there, then let the typed completion-review decision choose export/continue/fail.
+        if agent_not_done and not completion_review_pending:
             status = _FAILED
             completion_observed = False
             export_completed = False
@@ -2602,6 +2845,8 @@ class ApiTransport:
                         "details": {"terminal_outcome": "not_done"},
                     }
                 )
+            extra_quality = {**(extra_quality or {}), "agent_terminal_outcome": "not_done"}
+        elif agent_not_done:
             extra_quality = {**(extra_quality or {}), "agent_terminal_outcome": "not_done"}
         quality = {
             "transport": "api",

@@ -86,6 +86,8 @@ codex plugin add oh-my-cassette@cassette-editor
 
 Restart your agent, then say: *"Edit the clips in ./footage into a 30-second travel vlog with beat-synced cuts."*
 
+Want to try the workflow before installing? Open the [public web demo](https://trycassette.online/agent-demo).
+
 Needs Python 3.11–3.13, `ffmpeg`, and a [Cassette account](https://trycassette.online/signup/). Full setup — including [OpenCode](#opencode), [Hermes](#hermes), and any other MCP host — is in [Quick Start](#-quick-start).
 
 # 🎥 Overview

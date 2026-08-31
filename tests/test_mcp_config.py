@@ -161,6 +161,44 @@ def test_failed_verification_does_not_write_credentials(local_config, monkeypatc
     assert not runtime_config.settings_path().exists()
 
 
+def test_terminal_setup_auth_requests_identify_the_plugin(monkeypatch):
+    requests = []
+
+    class _Response:
+        status = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        @staticmethod
+        def read():
+            return json.dumps({"session": {"access_token": "token"}}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        requests.append((request, timeout))
+        return _Response()
+
+    monkeypatch.setattr(setup_local_mcp, "urlopen", fake_urlopen)
+
+    setup_local_mcp.verify_credentials(
+        "https://cassette.example.test",
+        "person@example.test",
+        "generated-password",
+    )
+    setup_local_mcp._post_json(
+        "https://cassette.example.test",
+        "/api/agent-auth/request-code",
+        {"email": "person@example.test"},
+    )
+
+    assert len(requests) == 2
+    assert {request.get_header("User-agent") for request, _timeout in requests} == {"oh-my-cassette/1.0"}
+
+
 def test_successful_setup_stores_no_access_or_refresh_tokens(local_config, monkeypatch, tmp_path):
     media = tmp_path / "media"
     media.mkdir()
