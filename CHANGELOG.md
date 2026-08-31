@@ -12,6 +12,9 @@ conventional commits.
 ### Bug Fixes
 
 * **mcp:** restore production deployment compatibility ([f0718bb](https://github.com/Cassette-Editor/oh-my-cassette/commit/f0718bbd8da4ce5d098c805707237801bbf1110e))
+  * send an explicit HTTP user agent and distinguish Cloudflare edge denials from account authorization failures
+  * generate and upload the browser-prepared H.264/AAC preview required by the new video ingest deployment
+  * preserve completion review when an agent reports `not_done`, allowing explicit approval to continue to a verified export
 
 ## [0.4.17](https://github.com/Cassette-Editor/oh-my-cassette/compare/v0.4.16...v0.4.17) (2026-08-19)
 
