@@ -24,6 +24,7 @@ import runtime_config  # noqa: E402
 
 
 DEFAULT_API_URL = "https://remotion-canvas-server-5tdb2hkb4q-as.a.run.app"
+API_USER_AGENT = "oh-my-cassette/1.0"
 
 
 class SetupError(RuntimeError):
@@ -63,7 +64,11 @@ def _post_json(
     every call this script makes is a pre-sign-in one.
     """
     body = json.dumps(payload).encode("utf-8")
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": API_USER_AGENT,
+    }
     request = Request(api_url.rstrip("/") + path, data=body, method="POST", headers=headers)
     try:
         with urlopen(request, timeout=timeout) as response:
@@ -126,7 +131,11 @@ def verify_credentials(api_url: str, email: str, password: str, *, timeout: floa
         api_url.rstrip("/") + "/api/agent-auth/verify",
         data=body,
         method="POST",
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": API_USER_AGENT,
+        },
     )
     try:
         with urlopen(request, timeout=timeout) as response:

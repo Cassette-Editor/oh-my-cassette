@@ -1242,6 +1242,10 @@ _AUTH_MESSAGES = {
         "was fine — the account has no Cassette access. Request access for it first."
     ),
     "auth_rate_limited": "Too many attempts for that address. Wait for the retry window and try again.",
+    "auth_edge_access_denied": (
+        "Cassette's edge gateway rejected this client request before authentication. Nothing was stored; "
+        "retry after the plugin or edge policy is updated."
+    ),
     "auth_verify_failed": "Cassette could not verify the credentials; nothing was stored.",
     "auth_password_request_failed": (
         "Cassette could not send a new password. It mails the replacement before storing it, so "

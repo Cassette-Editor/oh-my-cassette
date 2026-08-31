@@ -81,6 +81,8 @@ codex plugin add oh-my-cassette@cassette-editor
 
 重启 Agent，然后对它说：*"把 ./footage 里的素材剪成一支 30 秒的旅行 Vlog，音乐卡点。"*
 
+想先体验完整流程？可以直接打开[公开网页演示](https://trycassette.online/agent-demo)。
+
 需要 Python 3.11–3.13、`ffmpeg` 和一个 [Cassette 账号](https://trycassette.online/signup/)。完整安装步骤（含 [OpenCode](#opencode)、[Hermes](#hermes) 及其他 MCP 客户端）见[快速开始](#-快速开始)。
 
 # 🎥 项目概览

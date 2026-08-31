@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import json
 import threading
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
 from cassette.core import jobs, manifest, tools
+from cassette.core import api_transport
 from cassette.core.api_transport import ApiTransport, ApiTransportError
 
 EXPORT_BYTES = b"FAKE_MP4_BYTES"
@@ -101,6 +103,7 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         body = self._body()
         self.rec["requests"].append(("POST", path))
+        self.rec.setdefault("api_user_agents", []).append(self.headers.get("User-Agent"))
 
         if path == "/api/agent-auth/verify":
             self.rec["auth_email"] = body.get("email")
@@ -158,6 +161,7 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         body = self._body()
         self.rec["requests"].append(("PATCH", path))
+        self.rec.setdefault("api_user_agents", []).append(self.headers.get("User-Agent"))
         if path.startswith("/api/langgraph/threads/"):
             self.rec.setdefault("thread_patch_bodies", []).append(body)
             return self._json(200, {"thread_id": path.rsplit("/", 1)[1]})
@@ -166,6 +170,7 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         self.rec["requests"].append(("GET", path))
+        self.rec.setdefault("api_user_agents", []).append(self.headers.get("User-Agent"))
 
         if path == "/api/media/upload/status":
             return self._json(200, {"uploadStatus": "completed"})
@@ -385,6 +390,8 @@ def test_api_transport_run_job_end_to_end(cassette_env, mock_api, tmp_path):
 
     # Auth happened with the configured account.
     assert rec["auth_email"] == "e@x.io"
+    assert rec["api_user_agents"]
+    assert set(rec["api_user_agents"]) == {"oh-my-cassette/1.0"}
     # Media uploaded via init -> PUT -> complete exactly once.
     assert (rec["init_count"], rec["put_count"], rec["complete_count"]) == (1, 1, 1)
     assert rec["init_bodies"][0]["fileName"] == "clip.mp4"
@@ -409,6 +416,140 @@ def test_api_transport_run_job_end_to_end(cassette_env, mock_api, tmp_path):
     assert rec["export_session"] == "sess"
     # The run waited for media readiness before starting the agent (empty/blank-export guard).
     assert rec["media_ready_polls"] >= 1
+
+
+def test_agent_auth_does_not_misreport_cloudflare_1010_as_missing_access(monkeypatch):
+    class _Cloudflare1010(_MockCassetteAPI):
+        def do_POST(self):
+            path = self.path.split("?", 1)[0]
+            self._body()
+            if path == "/api/agent-auth/verify":
+                return self._json(
+                    403,
+                    {
+                        "type": "https://developers.cloudflare.com/support/troubleshooting/http-status-codes/"
+                        "cloudflare-1xxx-errors/error-1010/",
+                        "title": "Error 1010: Access denied",
+                        "status": 403,
+                        "error_code": 1010,
+                        "error_name": "browser_signature_banned",
+                    },
+                )
+            return self._json(404, {"error": "not found"})
+
+    server = _serve(_Cloudflare1010, monkeypatch)
+    try:
+        result = api_transport.verify_agent_credentials("person@example.test", "generated-password")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert result["ok"] is False
+    assert result["code"] == "auth_edge_access_denied"
+
+
+def test_api_transport_retries_video_upload_with_browser_preparation(cassette_env, monkeypatch, tmp_path):
+    class _BrowserPreparationRequired(_MockCassetteAPI):
+        def do_POST(self):
+            path = self.path.split("?", 1)[0]
+            body = self._body()
+            self.rec["requests"].append(("POST", path))
+            self.rec.setdefault("api_user_agents", []).append(self.headers.get("User-Agent"))
+            if path == "/api/agent-auth/verify":
+                return self._json(200, {"session": {"access_token": "tok"}, "isFullUser": True})
+            if path == "/api/media/upload/init":
+                self.rec["init_count"] += 1
+                self.rec["init_bodies"].append(body)
+                if "videoPreparation" not in body:
+                    return self._json(
+                        428,
+                        {
+                            "error": "This video upload requires browser preparation.",
+                            "code": "BROWSER_VIDEO_PREPARATION_REQUIRED",
+                        },
+                    )
+                return self._json(
+                    200,
+                    {
+                        "uploadAttemptId": "attempt-browser",
+                        "key": "raw-assets/clip.mp4",
+                        "url": "https://cdn.example/clip.mp4",
+                        "uploadUrl": f"http://{self.headers.get('Host')}/_put/original",
+                        "uploadContentType": "video/mp4",
+                        "storageBackend": "r2",
+                        "previewUpload": {
+                            "key": "derived-assets/browser-preview/attempt-browser/clip.preview.mp4",
+                            "uploadUrl": f"http://{self.headers.get('Host')}/_put/preview",
+                            "uploadContentType": "video/mp4",
+                        },
+                    },
+                )
+            if path == "/api/media/upload/complete":
+                self.rec["complete_count"] += 1
+                self.rec["complete_bodies"].append(body)
+                return self._json(200, {"mediaFileId": "m-browser", "uploadStatus": "completed"})
+            return self._json(404, {"error": "not found"})
+
+    preview = tmp_path / "prepared-preview.mp4"
+    preview.write_bytes(b"PREPARED_MP4")
+    preparation_request = {
+        "profileVersion": "browser-preview-v1",
+        "previewRequired": True,
+        "source": {
+            "container": "mp4",
+            "videoCodec": "avc",
+            "videoCodecString": "avc1.640028",
+            "width": 1280,
+            "height": 720,
+            "durationSeconds": 15.0,
+            "frameRate": 30.0,
+            "frameRateIsConstant": True,
+            "hasAudio": True,
+            "audioCodec": "aac",
+            "audioChannels": 2,
+        },
+    }
+
+    @contextmanager
+    def fake_prepare(_source):
+        yield preparation_request, preview
+
+    monkeypatch.setattr(api_transport, "_prepare_browser_video_preview", fake_prepare, raising=False)
+    server = _serve(_BrowserPreparationRequired, monkeypatch)
+    source = Path(cassette_env["source_root"]) / "clip.mp4"
+    source.write_bytes(b"ORIGINAL_MP4")
+    try:
+        transport = ApiTransport()
+        transport._authenticate()
+        media_file_id = transport._upload_asset(
+            str(source),
+            "agent-session-browser",
+            deadline=api_transport.time.monotonic() + 30,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert media_file_id == "m-browser"
+    assert server.rec["init_count"] == 2
+    assert "videoPreparation" not in server.rec["init_bodies"][0]
+    assert server.rec["init_bodies"][1]["videoPreparation"] == preparation_request
+    assert server.rec["put_count"] == 2
+    assert server.rec["complete_bodies"] == [
+        {
+            "key": "raw-assets/clip.mp4",
+            "fileName": "clip.mp4",
+            "mimeType": "video/mp4",
+            "storageBackend": "r2",
+            "metadata": {},
+            "uploadAttemptId": "attempt-browser",
+            "preparedPreview": {
+                "key": "derived-assets/browser-preview/attempt-browser/clip.preview.mp4",
+                "byteSize": len(b"PREPARED_MP4"),
+                "profileVersion": "browser-preview-v1",
+            },
+        }
+    ]
 
 
 def test_api_transport_dedupes_uploads_in_reused_session(cassette_env, mock_api, tmp_path):
@@ -1600,6 +1741,29 @@ def test_explicit_refusal_is_a_terminal_failure():
     assert result["status"] == "failed"
     assert result["quality"]["completion_observed"] is False
     assert result["errors"][-1]["code"] == "agent_reported_not_done"
+
+
+def test_explicit_export_review_is_not_overridden_by_agent_not_done():
+    """A settled export turn is reviewed against its timeline before the plugin renders it.
+
+    The Cassette agent cannot perform the out-of-band render itself, so its not_done decision
+    must remain review evidence rather than pre-empting the typed completion-review gate.
+    """
+    from cassette.core import api_transport as T
+
+    transport = T.ApiTransport()
+    transport._job = {"export_on_complete": "true"}
+    transport._last_terminal_outcome = "not_done"
+    result = transport._result(
+        "needs_user",
+        completion_observed=False,
+        extra_quality={"completion_review_required": True, "timeline_ctl": "TIMELINE session v4"},
+    )
+
+    assert result["status"] == "needs_user"
+    assert result["quality"]["completion_review_required"] is True
+    assert result["quality"]["agent_terminal_outcome"] == "not_done"
+    assert not any(error.get("code") == "agent_reported_not_done" for error in result["errors"])
 
 
 def test_result_finalizes_every_started_stage():
