@@ -245,6 +245,10 @@ Cassette currently accepts video source files that match all of the following li
 
 MOV, HEVC/H.265, AV1, VP9, ProRes, HDR, 10-bit, variable-frame-rate video, 24/25/50/60 fps, 4K, oversized files, and videos longer than 60 minutes are rejected rather than transcoded in the cloud.
 
+### Upload retention
+
+Uploaded videos are stored for **24 hours** and are only available inside the session they were uploaded to. After 24 hours they are deleted, and another session — even on the same host or the same account — cannot reach them. Keep your own copy of every source file, and start a new upload if you come back to a project later.
+
 Install system tools:
 
 ```bash
