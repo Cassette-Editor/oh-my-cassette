@@ -759,7 +759,10 @@ async def run(args: argparse.Namespace) -> dict:
                     or _parse_timestamp(expires_at, "manifest expires_at")
                     > _parse_timestamp(ingest_expires_at, "ingest expires_at")
                 ):
-                    raise AcceptanceError("session deadline was missing or extended after ingest")
+                    raise AcceptanceError(
+                        "session deadline was missing or extended after ingest: "
+                        f"ingest={ingest_expires_at!r}, manifest={expires_at!r}"
+                    )
                 assets = [asset for asset in session_manifest.get("assets") or [] if isinstance(asset, dict)]
                 media_file_ids = [str(asset["media_file_id"]) for asset in assets if asset.get("media_file_id")]
                 if not media_file_ids:
