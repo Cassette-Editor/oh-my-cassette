@@ -284,6 +284,11 @@ def _parse_timestamp(value: object, field: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _ingest_expires_at(envelope: dict) -> str:
+    data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+    return str(data.get("expires_at") or "")
+
+
 def _assert_analysis_receipt(envelope: dict, *, expires_at: str) -> dict:
     job = (envelope.get("data") or {}).get("job") or {}
     receipts = (job.get("quality") or {}).get("analysis_receipts") or []
@@ -752,7 +757,7 @@ async def run(args: argparse.Namespace) -> dict:
                     )
                 manifest_path, session_manifest = _read_isolated_manifest(asset_root, session_id)
                 expires_at = str(session_manifest.get("expires_at") or "")
-                ingest_expires_at = str(ingest.get("expires_at") or "")
+                ingest_expires_at = _ingest_expires_at(ingest)
                 if (
                     not expires_at
                     or not ingest_expires_at

@@ -89,6 +89,18 @@ def test_agentic_receipt_rejects_legacy_field_names():
         )
 
 
+def test_ingest_deadline_comes_from_mcp_envelope_data():
+    from scripts import e2e_local_mcp
+
+    envelope = {
+        "ok": True,
+        "expires_at": "wrong-level",
+        "data": {"expires_at": "2026-09-03T12:00:00Z"},
+    }
+
+    assert e2e_local_mcp._ingest_expires_at(envelope) == "2026-09-03T12:00:00Z"
+
+
 def test_independent_qc_decodes_blue_moving_circle_cut(tmp_path):
     from scripts import e2e_local_mcp
 
