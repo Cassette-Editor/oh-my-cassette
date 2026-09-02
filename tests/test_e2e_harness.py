@@ -48,7 +48,7 @@ def test_agentic_receipt_accepts_google_stateless_null_response_id():
         "model": "gemini-3.8-flash",
         "api": "interactions",
         "processing": "agentic",
-        "fileTransport": "files_api",
+        "fileTransport": "google_files",
         "serviceTier": "standard",
         "store": False,
         "responseId": None,

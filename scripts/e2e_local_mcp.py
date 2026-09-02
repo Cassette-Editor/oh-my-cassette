@@ -300,7 +300,7 @@ def _assert_analysis_receipt(envelope: dict, *, expires_at: str) -> dict:
         "model": "gemini-3.8-flash",
         "api": "interactions",
         "processing": "agentic",
-        "fileTransport": "files_api",
+        "fileTransport": "google_files",
         "serviceTier": "standard",
         "store": False,
     }
