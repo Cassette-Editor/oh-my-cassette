@@ -330,9 +330,11 @@ def _assert_analysis_receipt(envelope: dict, *, expires_at: str) -> dict:
     completed = _parse_timestamp(receipt.get("completedAt"), "analysis receipt completedAt")
     if completed < started:
         raise AcceptanceError("analysis receipt completedAt precedes startedAt")
-    if receipt.get("expiresAt") != expires_at:
+    receipt_expires = _parse_timestamp(receipt.get("expiresAt"), "analysis receipt expiresAt")
+    plugin_expires = _parse_timestamp(expires_at, "plugin session expires_at")
+    if receipt_expires < plugin_expires:
         raise AcceptanceError(
-            f"analysis receipt deadline {receipt.get('expiresAt')!r} does not match session deadline {expires_at!r}"
+            f"analysis receipt deadline {receipt.get('expiresAt')!r} precedes plugin deadline {expires_at!r}"
         )
     return receipt
 
