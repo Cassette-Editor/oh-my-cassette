@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from fractions import Fraction
@@ -24,6 +25,8 @@ from mcp.client.stdio import stdio_client
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 DEFAULT_INSTRUCTION = "Keep only the section with the blue background, moving white circle, and KEEP THIS text."
 SERVER_HOOK_CONTRACT = (
     "POST JSON to the configured hook. snapshot: "
@@ -743,7 +746,10 @@ async def run(args: argparse.Namespace) -> dict:
                 )
                 edited = await _approve_plan_reviews(session, edited, read_timeout)
                 if edited.get("phase") != "succeeded" or edited.get("artifacts"):
-                    raise AcceptanceError(f"edit turn did not settle without rendering: {edited.get('phase')}")
+                    job_errors = ((edited.get("data") or {}).get("job") or {}).get("errors") or []
+                    raise AcceptanceError(
+                        f"edit turn did not settle without rendering: {edited.get('phase')}; errors={job_errors!r}"
+                    )
                 manifest_path, session_manifest = _read_isolated_manifest(asset_root, session_id)
                 expires_at = str(session_manifest.get("expires_at") or "")
                 ingest_expires_at = str(ingest.get("expires_at") or "")
@@ -903,6 +909,7 @@ def main() -> None:
     try:
         result = asyncio.run(run(args))
     except Exception as exc:
+        traceback.print_exception(exc, file=sys.stderr)
         print(json.dumps({"ok": False, "error": type(exc).__name__, "message": str(exc)}, ensure_ascii=False))
         raise SystemExit(1) from exc
     print(json.dumps(result, ensure_ascii=False, indent=2))
