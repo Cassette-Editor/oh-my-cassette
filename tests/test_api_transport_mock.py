@@ -192,7 +192,7 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
                         "model": "gemini-3.8-flash",
                         "api": "interactions",
                         "processing": "agentic",
-                        "fileTransport": "files_api",
+                        "fileTransport": "google_files",
                         "serviceTier": "standard",
                         "store": False,
                         "responseId": f"response-{i}",
@@ -651,7 +651,7 @@ def test_successful_upload_removes_only_managed_copy_and_persists_remote_binding
     assert receipt["model"] == "gemini-3.8-flash"
     assert receipt["api"] == "interactions"
     assert receipt["processing"] == "agentic"
-    assert receipt["fileTransport"] == "files_api"
+    assert receipt["fileTransport"] == "google_files"
     assert receipt["agenticNavigationStepCount"] == 3
     assert receipt["store"] is False
     assert "responseId" in receipt
