@@ -545,9 +545,10 @@ def mark_managed_asset_uploaded(
     path = Path(saved_path).expanduser()
     managed_media = get_session_dir(session_hash) / "media"
     try:
-        lexical = Path(os.path.abspath(str(path)))
-        if lexical.is_file() and lexical.is_relative_to(managed_media.resolve(strict=False)):
-            lexical.unlink()
+        resolved = path.resolve(strict=True)
+        managed_media_resolved = managed_media.resolve(strict=True)
+        if resolved.is_file() and resolved.is_relative_to(managed_media_resolved):
+            resolved.unlink()
     except (OSError, ValueError):
         pass
     return selected_deadline
