@@ -65,6 +65,7 @@ def cassette_env(tmp_path, monkeypatch):
     source_root = tmp_path / "source-root"
     source_root.mkdir()
     monkeypatch.setenv("CASSETTE_ASSET_ROOT", str(asset_root))
+    monkeypatch.setenv("CASSETTE_DATA_HOME", str(tmp_path / "data-root"))
     monkeypatch.setenv("CASSETTE_ALLOWED_SOURCE_ROOTS", str(source_root))
     monkeypatch.setenv("CASSETTE_ALLOWED_EXTENSIONS", ".mp4,.jpg,.png,.mp3,.txt")
     monkeypatch.setenv("CASSETTE_MAX_BYTES", "1024")

@@ -53,6 +53,7 @@ from urllib.request import Request, urlopen
 
 import runtime_config
 
+from . import manifest
 from .manifest import get_asset_root, load_manifest
 
 # Terminal Cassette job statuses (mirror jobs.update_job terminal set).
@@ -740,6 +741,25 @@ class ApiTransport:
         self._last_heartbeat: float = 0.0
         self._run_started: float = 0.0
         self._last_terminal_outcome: str | None = None
+        self._analysis_receipts: list[dict[str, Any]] = []
+        self._uploaded_expiries: dict[str, str] = {}
+
+    @staticmethod
+    def _require_job_active(job: dict) -> None:
+        expires_at = job.get("expires_at")
+        if expires_at and manifest.is_expired(expires_at):
+            raise ApiTransportError(
+                "session_expired",
+                "This Cassette media session reached its 24-hour retention deadline.",
+                details={"expires_at": expires_at},
+            )
+
+    @staticmethod
+    def _bounded_deadline(job: dict, budget_sec: float) -> float:
+        remaining = manifest.seconds_until_expiry(job.get("expires_at"))
+        if remaining is not None and remaining <= 0:
+            ApiTransport._require_job_active(job)
+        return time.monotonic() + min(budget_sec, remaining) if remaining is not None else time.monotonic() + budget_sec
 
     # ── public Transport surface ──────────────────────────────────────────────
     def check_available(self) -> bool:
@@ -763,10 +783,11 @@ class ApiTransport:
         questions = list(job.get("questions") or [])
         errors = list(job.get("errors") or [])
         prior_quality = dict(job.get("quality") or {})
-        export_deadline = time.monotonic() + self._export_timeout(job)
+        export_deadline = self._bounded_deadline(job, self._export_timeout(job))
         self._init_progress(job)
         self._enter_stage(job_id, "export", "Rendering the reviewed export")
         try:
+            self._require_job_active(job)
             self._authenticate()
             outputs = self._export_project(session_id, job_id, deadline=export_deadline)
         except _JobCancelled:
@@ -817,12 +838,14 @@ class ApiTransport:
         # box. chat_message (the user-facing text of legacy briefs) beats the make_prompt wrapper.
         prompt = str(job.get("message") or job.get("chat_message") or job.get("prompt") or "").strip()
         asset_paths = [p for p in (job.get("asset_paths") or []) if p]
+        cached_media_file_ids = [str(value) for value in (job.get("media_file_ids") or []) if value]
         questions: list[dict] = []
         errors: list[dict] = []
-        deadline = time.monotonic() + self._job_timeout(job)
+        deadline = self._bounded_deadline(job, self._job_timeout(job))
         self._init_progress(job)
 
         try:
+            self._require_job_active(job)
             if not _api_base():
                 raise ApiTransportError("api_base_missing", "CASSETTE_API_URL is not configured for the API transport")
             self._raise_if_cancelled(job_id)
@@ -834,10 +857,20 @@ class ApiTransport:
                 media_file_ids = self._upload_assets(
                     asset_paths, session_id, deadline, job_id, self._display_names(job)
                 )
+            if cached_media_file_ids:
+                available = self._available_remote_media(session_id, cached_media_file_ids)
+                missing = sorted(set(cached_media_file_ids) - available)
+                if missing:
+                    raise ApiTransportError(
+                        "media_reingest_required",
+                        "Previously uploaded media is no longer available. Ingest the source into a new session.",
+                        details={"missing_count": len(missing)},
+                    )
+                media_file_ids.extend(value for value in cached_media_file_ids if value not in media_file_ids)
 
-            # Media derivatives (analysis evidence/embeddings for the agent, render-source for the
-            # export) are generated asynchronously after upload. Starting the run early makes the
-            # agent commit an empty edit ("succeeds" but exports a blank 1-frame video); exporting
+            # Media analysis evidence and the render source are generated asynchronously after upload.
+            # Starting the run early makes the agent commit an empty edit ("succeeds" but exports
+            # a blank 1-frame video); exporting
             # early fails with "render-source is missing". Wait for full readiness first.
             if media_file_ids:
                 self._enter_stage(job_id, "media_ready", "Processing uploaded media")
@@ -1029,9 +1062,10 @@ class ApiTransport:
         continuation = job.get("continuation") if isinstance(job.get("continuation"), dict) else {}
         questions = list(job.get("questions") or [])
         errors = list(job.get("errors") or [])
-        deadline = time.monotonic() + self._job_timeout(job)
+        deadline = self._bounded_deadline(job, self._job_timeout(job))
         self._init_progress(job)
         try:
+            self._require_job_active(job)
             if continuation.get("transport") != "api":
                 raise ApiTransportError(
                     "resume_state_missing",
@@ -1373,9 +1407,63 @@ class ApiTransport:
             )
 
         media_file_id = str(complete["mediaFileId"])
+        remote_expiry = str(complete.get("expiresAt") or complete.get("expires_at") or "").strip()
+        if remote_expiry:
+            self._uploaded_expiries[media_file_id] = remote_expiry
         if str(mime).startswith("video/") and complete.get("uploadStatus") != "completed":
             self._poll_upload_completed(key, session_id, deadline, job_id)
         return media_file_id
+
+    @staticmethod
+    def _safe_analysis_receipt(value: object) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        allowed = {
+            "provider",
+            "model",
+            "api",
+            "processing",
+            "fileTransport",
+            "serviceTier",
+            "store",
+            "responseId",
+            "agenticNavigationStepCount",
+            "startedAt",
+            "completedAt",
+            "evidenceCount",
+            "expiresAt",
+        }
+        receipt = {
+            str(key): child
+            for key, child in value.items()
+            if str(key) in allowed
+            and (isinstance(child, (str, int, float, bool)) or (key == "responseId" and child is None))
+        }
+        return receipt or None
+
+    def _media_status_map(self, session_id: str, media_file_ids: list[str]) -> dict[str, dict]:
+        wanted = sorted({str(value) for value in media_file_ids if value})
+        if not wanted:
+            return {}
+        query = "?" + urlencode({"ids": ",".join(wanted)})
+        headers = {"x-session-id": session_id, "x-project-id": session_id}
+        _, body = self._request("GET", "/api/media/operations/status" + query, headers=headers, expect=200)
+        statuses = (body or {}).get("statuses") or [] if isinstance(body, dict) else []
+        return {str(item.get("mediaFileId")): item for item in statuses if isinstance(item, dict)}
+
+    def _available_remote_media(self, session_id: str, media_file_ids: list[str]) -> set[str]:
+        statuses = self._media_status_map(session_id, media_file_ids)
+        available: set[str] = set()
+        for media_file_id in media_file_ids:
+            status = statuses.get(str(media_file_id))
+            if not status:
+                continue
+            if status.get("expired") or str(status.get("readinessPhase") or "").lower() == "expired":
+                continue
+            if status.get("exists") is False or status.get("terminalState") in {"deleted", "expired"}:
+                continue
+            available.add(str(media_file_id))
+        return available
 
     def _poll_upload_completed(self, key: str, session_id: str, deadline: float, job_id: str = "") -> None:
         # The status endpoint returns 200 + uploadStatus 'completed' when finalized, 202 +
@@ -1409,14 +1497,10 @@ class ApiTransport:
         if not wanted:
             return
         ready_deadline = min(deadline, time.monotonic() + self._media_ready_timeout())
-        query = "?" + urlencode({"ids": ",".join(sorted(wanted))})
-        headers = {"x-session-id": session_id}
         last_phase = ""
         while time.monotonic() < ready_deadline:
             self._raise_if_cancelled(job_id)
-            _, body = self._request("GET", "/api/media/operations/status" + query, headers=headers, expect=200)
-            statuses = (body or {}).get("statuses") or [] if isinstance(body, dict) else []
-            by_id = {str(s.get("mediaFileId")): s for s in statuses if isinstance(s, dict)}
+            by_id = self._media_status_map(session_id, sorted(wanted))
             ready: set[str] = set()
             for mid in wanted:
                 s = by_id.get(mid) or {}
@@ -1439,6 +1523,9 @@ class ApiTransport:
                     )
                 if s.get("fullyReady") or (self._ai_ready(s) and self._export_ready(s)):
                     ready.add(mid)
+                    receipt = self._safe_analysis_receipt(s.get("analysisReceipt"))
+                    if receipt and receipt not in self._analysis_receipts:
+                        self._analysis_receipts.append(receipt)
                 else:
                     last_phase = str(s.get("readinessPhase") or last_phase)
             if wanted <= ready:
@@ -1498,26 +1585,59 @@ class ApiTransport:
         session that edits then refines would otherwise accumulate duplicate media in the project)
         via a per-session uploaded-asset cache."""
         cache = self._load_upload_cache(session_id)
+        session_expiry = manifest.session_expires_at(session_id=session_id) or manifest.retention_deadline()
         batch: dict[str, str] = {}
         ids: list[str] = []
         changed = False
+        candidates = {
+            str(entry.get("media_file_id"))
+            for fp, entry in cache.items()
+            if fp and isinstance(entry, dict) and entry.get("media_file_id")
+        }
+        available = self._available_remote_media(session_id, sorted(candidates)) if candidates else set()
         for path in asset_paths:
             fp = self._asset_fingerprint(path)
             if fp and fp in batch:
                 ids.append(batch[fp])
                 continue
-            if fp and fp in cache:
-                batch[fp] = cache[fp]
-                ids.append(cache[fp])
+            cached = cache.get(fp) if fp else None
+            cached_id = str(cached.get("media_file_id") or "") if isinstance(cached, dict) else ""
+            if cached_id and cached_id in available and not manifest.is_expired(cached.get("expires_at")):
+                batch[fp] = cached_id
+                ids.append(cached_id)
+                manifest.mark_managed_asset_uploaded(
+                    session_id,
+                    path,
+                    cached_id,
+                    fingerprint=fp,
+                    remote_expires_at=str(cached.get("expires_at") or "") or None,
+                )
                 continue
+            if fp and fp in cache:
+                cache.pop(fp, None)
+                changed = True
             media_id = self._upload_asset(path, session_id, deadline, job_id, (display_names or {}).get(path, ""))
+            if self._job is not None:
+                self._require_job_active(self._job)
             ids.append(media_id)
             if fp:
                 batch[fp] = media_id
-                cache[fp] = media_id
+                expires_at = manifest.earliest_expiry(session_expiry, self._uploaded_expiries.get(media_id))
+                cache[fp] = {"media_file_id": media_id, "expires_at": expires_at}
+                selected = manifest.mark_managed_asset_uploaded(
+                    session_id,
+                    path,
+                    media_id,
+                    fingerprint=fp,
+                    remote_expires_at=expires_at,
+                )
+                if selected:
+                    session_expiry = selected
+                    if self._job is not None:
+                        self._job["expires_at"] = selected
                 changed = True
         if changed:
-            self._save_upload_cache(session_id, cache)
+            self._save_upload_cache(session_id, cache, expires_at=session_expiry)
         return ids
 
     @staticmethod
@@ -1536,15 +1656,39 @@ class ApiTransport:
         base.mkdir(parents=True, exist_ok=True)
         return base / (safe + ".json")
 
-    def _load_upload_cache(self, session_id: str) -> dict[str, str]:
+    def _load_upload_cache(self, session_id: str) -> dict[str, dict[str, Any]]:
         try:
-            return json.loads(self._upload_cache_path(session_id).read_text("utf-8")) or {}
+            path = self._upload_cache_path(session_id)
+            payload = json.loads(path.read_text("utf-8")) or {}
         except (OSError, ValueError):
             return {}
+        if not isinstance(payload, dict) or payload.get("version") != 2:
+            return {}
+        if manifest.is_expired(payload.get("expires_at")):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            return {}
+        entries = payload.get("entries")
+        if not isinstance(entries, dict):
+            return {}
+        return {
+            str(fp): entry
+            for fp, entry in entries.items()
+            if isinstance(entry, dict)
+            and entry.get("media_file_id")
+            and not manifest.is_expired(entry.get("expires_at"))
+        }
 
-    def _save_upload_cache(self, session_id: str, cache: dict[str, str]) -> None:
+    def _save_upload_cache(
+        self, session_id: str, cache: dict[str, dict[str, Any]], *, expires_at: str | None = None
+    ) -> None:
         try:
-            self._upload_cache_path(session_id).write_text(json.dumps(cache), "utf-8")
+            self._upload_cache_path(session_id).write_text(
+                json.dumps({"version": 2, "expires_at": expires_at, "entries": cache}, sort_keys=True),
+                "utf-8",
+            )
         except OSError:
             pass
 
@@ -2514,6 +2658,9 @@ class ApiTransport:
             deadline = time.monotonic() + 600.0
         from urllib.parse import quote
 
+        if self._job is not None:
+            self._require_job_active(self._job)
+
         _, created = self._request(
             "POST", f"/api/export/projects/{quote(str(session_id), safe='')}/jobs", json_body={}, expect=202
         )
@@ -2543,6 +2690,8 @@ class ApiTransport:
         if not file_url:
             raise ApiTransportError("export_timeout", "Export job did not complete in time")
 
+        if self._job is not None:
+            self._require_job_active(self._job)
         target = _exports_dir(job_id) / f"{job_id}.mp4"
         self._download(f"/api/export/jobs/{export_job_id}/file", target)
         return [
@@ -2595,6 +2744,8 @@ class ApiTransport:
         self._last_heartbeat = now  # first heartbeat waits one full interval
         self._run_started = now
         self._last_terminal_outcome = None
+        self._analysis_receipts = []
+        self._uploaded_expiries = {}
 
     def _enter_stage(self, job_id: str, stage: str, summary: str) -> None:
         """Mark the start of a phase: finalize the previous stage timing, write current_stage +
@@ -2873,6 +3024,8 @@ class ApiTransport:
             "local_output_count": sum(1 for o in outputs if isinstance(o, dict) and o.get("local_path")),
             "risk": risk,
         }
+        if self._analysis_receipts:
+            quality["analysis_receipts"] = list(self._analysis_receipts)
         if extra_quality:
             quality.update({k: v for k, v in extra_quality.items() if v is not None})
         if export_completed:
@@ -2948,8 +3101,8 @@ class ApiTransport:
 
     @staticmethod
     def _media_ready_timeout() -> float:
-        # How long to wait for uploaded media to become fully ready. Generous — analysis + embeddings +
-        # render-source take real time for longer clips. Prefer CASSETTE_API_MEDIA_READY_TIMEOUT_SEC,
+        # How long to wait for uploaded media to become fully ready. Agentic analysis and the
+        # render source take real time for longer clips. Prefer CASSETTE_API_MEDIA_READY_TIMEOUT_SEC,
         # then the older CASSETTE_UPLOAD_TIMEOUT_SEC, then a default.
         raw = _env("CASSETTE_API_MEDIA_READY_TIMEOUT_SEC") or _env("CASSETTE_UPLOAD_TIMEOUT_SEC")
         try:

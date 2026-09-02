@@ -640,8 +640,8 @@ def _scrub_list_assets(data: dict) -> dict:
         if not isinstance(asset, dict):
             continue
         cleaned = {key: value for key, value in asset.items() if key not in {"saved_path"}}
-        if asset.get("saved_path"):
-            cleaned["stored"] = True
+        if asset.get("saved_path") or asset.get("media_file_id"):
+            cleaned["stored"] = bool(asset.get("exists") or asset.get("media_file_id"))
         assets.append(cleaned)
     manifest_data["assets"] = assets
     delivery = dict(manifest_data.pop("delivery", {}) or {})
@@ -949,6 +949,7 @@ def _scrub_job(job: dict) -> dict:
     scrubbed = dict(job)
     scrubbed.pop("prompt", None)
     scrubbed.pop("asset_paths", None)
+    scrubbed.pop("media_file_ids", None)
     scrubbed.pop("worker_command", None)
     scrubbed.pop("continuation", None)
     scrubbed.pop("resume_request", None)
@@ -1412,7 +1413,7 @@ def _sheet_media_lookup(session_id: str) -> tuple[dict[str, str], dict[str, str]
     split = api_mod.split_session_prefix(session_id)
     if split:
         candidates.append(split[1])
-    cache: dict[str, str] = {}
+    cache: dict[str, dict[str, Any]] = {}
     for sid in candidates:
         try:
             cache.update(api_mod.ApiTransport()._load_upload_cache(sid) or {})
@@ -1429,7 +1430,8 @@ def _sheet_media_lookup(session_id: str) -> tuple[dict[str, str], dict[str, str]
             if not path or not Path(path).exists():
                 continue
             fingerprint = api_mod.ApiTransport._asset_fingerprint(path)
-            media_id = cache.get(fingerprint)
+            cached = cache.get(fingerprint)
+            media_id = asset.get("media_file_id") or (cached.get("media_file_id") if isinstance(cached, dict) else None)
             if media_id:
                 by_id.setdefault(str(media_id), path)
             for key in (asset.get("original_name"), Path(path).name):
@@ -1781,6 +1783,25 @@ def cassette_timeline(a: dict, **kw) -> str:
         "duration_sec": round(timeline_mod.total_duration_seconds(document), 1),
         "clip_count": len(timeline_mod.clips_in_timeline_order(document)),
     }
+    fps = float((document.get("sequenceTimebase") or {}).get("num") or document.get("fps") or 30) / float(
+        (document.get("sequenceTimebase") or {}).get("den") or 1
+    )
+    data["clips"] = [
+        {
+            "id": str(clip.get("id") or ""),
+            "media_file_id": str(clip.get("mediaFileId") or "") or None,
+            "name": str(clip.get("sourceDisplayName") or clip.get("name") or ""),
+            "timeline_start_sec": round(float(clip.get("startFrame") or 0) / fps, 3),
+            "duration_sec": round(float(clip.get("durationInFrames") or 0) / fps, 3),
+            "source_start_sec": round(float(clip.get("inSec") or 0), 3),
+            "source_end_sec": round(
+                float(clip.get("inSec") or 0)
+                + (float(clip.get("durationInFrames") or 0) / fps) * float(clip.get("speed") or 1),
+                3,
+            ),
+        }
+        for clip in timeline_mod.clips_in_timeline_order(document)
+    ]
     if a.get("contact_sheet"):
         sheet = build_contact_sheet(document, session_id)
         if sheet:
@@ -1836,7 +1857,7 @@ def _gateway_asset_count(session_id: str) -> int:
     except Exception:
         return 0
     assets = data.get("manifest", {}).get("assets", [])
-    return len([asset for asset in assets if asset.get("exists", True)])
+    return len([asset for asset in assets if asset.get("exists", True) or asset.get("media_file_id")])
 
 
 def _fixed_flow_busy_message(language: str = "zh") -> str:

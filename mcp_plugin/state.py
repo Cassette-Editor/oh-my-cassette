@@ -211,6 +211,20 @@ class StateStore:
         write_protected_json(self._path(session_id), updated.model_dump(mode="json"))
         return updated
 
+    def bind_expiry(self, session_id: str, expires_at: str | None) -> SessionState:
+        state = self.load(session_id)
+        if not expires_at or state.expires_at == expires_at:
+            return state
+        updated = state.model_copy(
+            update={
+                "expires_at": expires_at,
+                "revision": state.revision + 1,
+                "updated_at": now_iso(),
+            }
+        )
+        write_protected_json(self._path(session_id), updated.model_dump(mode="json"))
+        return updated
+
     def sync_job(self, session_id: str, job: dict) -> SessionState:
         return self.transition(
             session_id,

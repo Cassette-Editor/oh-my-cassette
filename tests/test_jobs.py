@@ -10,11 +10,13 @@ def test_job_create_status_cancel(cassette_env):
     loaded = jobs.load_job(job["job_id"])
     assert loaded["prompt"] == "prompt text"
     assert loaded["prompt_redacted"].startswith("<redacted:")
+    assert loaded["expires_at"]
 
     listed = jobs.list_jobs("sess")
     assert listed[0]["job_id"] == job["job_id"]
     assert "prompt" not in listed[0]
     assert "asset_paths" not in listed[0]
+    assert "media_file_ids" not in listed[0]
 
     cancelled = jobs.request_cancel(job["job_id"])
     assert cancelled["status"] == "cancel_requested"
@@ -57,3 +59,22 @@ def test_create_job_defaults_to_agent_session_namespace(cassette_env):
     assert defaulted["cassette_session_id"] == "agent-session-h4sh"
     explicit = jobs.create_job("h4sh", "prompt", None, [], {"cassette_session_id": "legacy-id"})
     assert explicit["cassette_session_id"] == "legacy-id"
+
+
+def test_late_worker_save_cannot_resurrect_expired_job(cassette_env):
+    job = jobs.create_job("expired", "prompt", None, [], {})
+    job["expires_at"] = "2000-01-01T00:00:00Z"
+
+    try:
+        jobs.save_job(job)
+    except CassetteError as exc:
+        assert exc.code == "session_expired"
+    else:
+        raise AssertionError("expired job output was persisted")
+
+    try:
+        jobs.load_job(job["job_id"])
+    except CassetteError as exc:
+        assert exc.code == "job_not_found"
+    else:
+        raise AssertionError("expired job was resurrected")

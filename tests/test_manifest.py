@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from cassette.core import manifest
 
 
@@ -125,7 +127,7 @@ def test_session_thread_corrupt_file_returns_empty(cassette_env):
     assert manifest.load_session_thread(sess_hash) == {}
 
 
-def test_sweep_removes_stale_derived_artifacts_only(cassette_env, monkeypatch):
+def test_sweep_removes_all_stale_managed_artifacts(cassette_env, monkeypatch):
     import os
     import time
 
@@ -146,14 +148,14 @@ def test_sweep_removes_stale_derived_artifacts_only(cassette_env, monkeypatch):
 
     removed = manifest.sweep_stale_artifacts()
 
-    assert removed == {"previews": 1, "api_uploads": 1}
+    assert removed == {"previews": 1, "api_uploads": 1, "exports": 1}
     assert not stale_sheet.exists()
     assert not stale_sheet.parent.exists()  # emptied session dir pruned
     assert fresh_sheet.exists()
-    assert export.exists()  # exports are never swept
+    assert not export.exists()
 
 
-def test_sweep_disabled_by_zero_ttl(cassette_env, monkeypatch):
+def test_retention_cannot_be_disabled_by_legacy_ttl_setting(cassette_env, monkeypatch):
     import os
     import time
 
@@ -167,5 +169,108 @@ def test_sweep_disabled_by_zero_ttl(cassette_env, monkeypatch):
     old = time.time() - 90 * 86400
     os.utime(stale, (old, old))
 
-    assert manifest.sweep_stale_artifacts() == {}
-    assert stale.exists()
+    assert manifest.sweep_stale_artifacts() == {"previews": 1}
+    assert not stale.exists()
+
+
+def test_first_ingest_deadline_is_immutable_and_user_source_is_untouched(cassette_env):
+    from datetime import datetime
+
+    media = cassette_env["source_root"] / "source.mp4"
+    media.write_bytes(b"video")
+
+    first = manifest.ingest_asset(str(media), session_id="deadline")
+    second = manifest.ingest_asset(str(media), session_id="deadline")
+    stored = manifest.list_assets(session_id="deadline")["manifest"]
+
+    created = datetime.fromisoformat(stored["created_at"].replace("Z", "+00:00"))
+    expires = datetime.fromisoformat(stored["expires_at"].replace("Z", "+00:00"))
+    assert (expires - created).total_seconds() == manifest.MEDIA_RETENTION_SECONDS
+    assert first["expires_at"] == second["expires_at"] == stored["expires_at"]
+    assert media.exists()
+
+
+def test_sweep_uses_session_deadline_for_jobs_exports_previews_cache_and_state(cassette_env, monkeypatch):
+    import hashlib
+    import json
+    from datetime import datetime
+
+    data_root = cassette_env["asset_root"].parent / "data"
+    monkeypatch.setenv("CASSETTE_DATA_HOME", str(data_root))
+    source = cassette_env["source_root"] / "keep.mp4"
+    source.write_bytes(b"source")
+    ingested = manifest.ingest_asset(str(source), session_id="session-deadline")
+    session_hash = ingested["session_hash"]
+    stored = manifest.load_manifest(session_hash)
+    expires = datetime.fromisoformat(stored["expires_at"].replace("Z", "+00:00")).timestamp()
+    job_id = "cassette_retention_test"
+    job = {
+        "job_id": job_id,
+        "session_hash": session_hash,
+        "cassette_session_id": "session-deadline",
+        "expires_at": stored["expires_at"],
+    }
+    paths = [
+        cassette_env["asset_root"] / "jobs" / f"{job_id}.json",
+        cassette_env["asset_root"] / "exports" / job_id / "cut.mp4",
+        cassette_env["asset_root"] / "previews" / "session-deadline" / "sheet.jpg",
+        cassette_env["asset_root"] / "screenshots" / job_id / "frame.jpg",
+        cassette_env["asset_root"] / "api_uploads" / "session-deadline.json",
+        data_root / "mcp-state" / "sessions" / f"{hashlib.sha256(b'session-deadline').hexdigest()}.json",
+    ]
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(job), encoding="utf-8")
+
+    removed = manifest.sweep_stale_artifacts(now=expires)
+
+    assert removed["sessions"] >= 1
+    assert removed["jobs"] == 1
+    assert removed["exports"] == 1
+    assert removed["previews"] == 1
+    assert removed["screenshots"] == 1
+    assert removed["api_uploads"] == 1
+    assert removed["state"] == 1
+    assert all(not path.exists() for path in paths)
+    assert source.exists(), "retention must never delete the user's source outside managed roots"
+    assert manifest.sweep_stale_artifacts(now=expires) == {}, "a repeated production sweep must be idempotent"
+
+    with pytest.raises(manifest.CassetteError) as exc:
+        manifest.ingest_asset(str(source), session_id="session-deadline")
+    assert exc.value.code == "session_expired", "the session tombstone must prevent late-ingest resurrection"
+    assert source.exists(), "a rejected late ingest must not touch the user's source"
+
+
+def test_sweep_removes_old_corrupt_and_missing_manifest_sessions(cassette_env):
+    import os
+    import time
+
+    root = cassette_env["asset_root"] / "sessions"
+    corrupt = root / "corrupt-session"
+    missing = root / "missing-session"
+    corrupt.mkdir(parents=True)
+    missing.mkdir(parents=True)
+    (corrupt / "manifest.json").write_text("not-json", encoding="utf-8")
+    (corrupt / "media.mp4").write_bytes(b"managed")
+    (missing / "media.mp4").write_bytes(b"managed")
+    old = time.time() - manifest.MEDIA_RETENTION_SECONDS - 10
+    os.utime(corrupt, (old, old))
+    os.utime(missing, (old, old))
+
+    removed = manifest.sweep_stale_artifacts(now=time.time())
+
+    assert removed["sessions"] == 3
+    assert not corrupt.exists()
+    assert not missing.exists()
+    assert len(list((cassette_env["asset_root"] / "session_tombstones").glob("*.json"))) == 2
+
+
+def test_file_backed_acceptance_clock_is_double_gated(cassette_env, monkeypatch, tmp_path):
+    clock = tmp_path / "clock.txt"
+    clock.write_text("1234.5", encoding="utf-8")
+    monkeypatch.setenv("CASSETTE_RETENTION_TEST_CLOCK_FILE", str(clock))
+    monkeypatch.delenv("CASSETTE_RETENTION_TEST_MODE", raising=False)
+    assert manifest.retention_now() != 1234.5
+
+    monkeypatch.setenv("CASSETTE_RETENTION_TEST_MODE", "1")
+    assert manifest.retention_now() == 1234.5
