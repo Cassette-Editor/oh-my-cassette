@@ -55,6 +55,36 @@ def test_list_assets_accepts_existing_session_hash(cassette_env):
     assert len(listed["manifest"]["assets"]) == 1
 
 
+def test_uploaded_managed_copy_is_removed_through_a_resolved_asset_root_alias(cassette_env, monkeypatch, tmp_path):
+    actual_root = tmp_path / "actual-asset-root"
+    actual_root.mkdir()
+    alias_root = tmp_path / "asset-root-alias"
+    try:
+        alias_root.symlink_to(actual_root, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable on this platform")
+    monkeypatch.setenv("CASSETTE_ASSET_ROOT", str(alias_root))
+    source = cassette_env["source_root"] / "clip.mp4"
+    source.write_bytes(b"video")
+
+    ingested = manifest.ingest_asset(str(source), session_id="alias-session")
+    saved_path = Path(ingested["saved_path"])
+    assert saved_path.exists()
+
+    manifest.mark_managed_asset_uploaded(
+        "alias-session",
+        str(saved_path),
+        "00000000-0000-4000-8000-000000000001",
+        fingerprint="clip.mp4:5",
+    )
+
+    assert source.exists()
+    assert not saved_path.exists()
+    stored = manifest.load_manifest(ingested["session_hash"])
+    assert stored["assets"][0]["media_file_id"] == "00000000-0000-4000-8000-000000000001"
+    assert stored["assets"][0]["exists"] is False
+
+
 def test_weixin_video_is_saved_as_internal_h264(cassette_env, monkeypatch):
     monkeypatch.setenv("CASSETTE_WEIXIN_FORCE_H264", "1")
     media = cassette_env["source_root"] / "wechat.mp4"
