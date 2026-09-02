@@ -22,7 +22,9 @@ from pathlib import Path
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from pydantic import AnyUrl
 
+from mcp_plugin.server import RetainedFileResource
 from test_api_transport_mock import EXPORT_BYTES, _MockCassetteAPI
 
 
@@ -103,6 +105,8 @@ def test_mcp_flow_ingest_converse_export_reaches_a_validated_artifact(tmp_path):
 
                 listed = (await session.call_tool("cassette_list_assets", {"session_id": session_id})).structuredContent
                 assert len(listed["data"]["manifest"]["assets"]) == 1
+                configured = (await session.call_tool("cassette_config", {"session_id": session_id})).structuredContent
+                assert configured["ok"] is True
 
                 # A conversational turn commits the edit and renders NOTHING.
                 turn = (
@@ -116,12 +120,20 @@ def test_mcp_flow_ingest_converse_export_reaches_a_validated_artifact(tmp_path):
                 # The per-turn preview hangs off data.job, not the top of the envelope. Reading it
                 # from the envelope root returns None, which is indistinguishable from "no preview".
                 assert turn["data"]["job"]["quality"]["timeline_ctl"].startswith(f"TIMELINE {session_id} v7")
+                receipt = turn["data"]["job"]["quality"]["analysis_receipts"][0]
+                assert receipt["model"] == "gemini-3.8-flash"
+                assert receipt["processing"] == "agentic"
+                assert receipt["store"] is False
+                assert "googleFileUri" not in receipt
                 assert not any(path.startswith("/api/export/projects/") for _, path in server.rec["requests"])
 
                 # cassette_timeline answers in its OWN shape: data.ctl, not data.job.quality.
-                timeline = (await session.call_tool("cassette_timeline", {"session_id": session_id})).structuredContent
+                timeline = (
+                    await session.call_tool("cassette_timeline", {"session_id": session_id, "contact_sheet": True})
+                ).structuredContent
                 assert timeline["ok"] is True
                 assert timeline["data"]["ctl"].startswith(f"TIMELINE {session_id} v7")
+                assert timeline["data"]["clips"][0]["duration_sec"] == 3.0
 
                 # An export turn stops for review rather than rendering on its own.
                 export_turn = (
@@ -227,3 +239,25 @@ def test_only_an_export_decision_renders(tmp_path, decision):
         server.server_close()
 
     assert server.rec["export_session"] is None, f"decision={decision} must not render"
+
+
+def test_artifact_resource_checks_deadline_on_every_read(tmp_path, monkeypatch):
+    artifact = tmp_path / "artifact.mp4"
+    artifact.write_bytes(b"video")
+    clock = tmp_path / "clock.txt"
+    clock.write_text("1000", encoding="utf-8")
+    monkeypatch.setenv("CASSETTE_RETENTION_TEST_MODE", "1")
+    monkeypatch.setenv("CASSETTE_RETENTION_TEST_CLOCK_FILE", str(clock))
+    resource = RetainedFileResource(
+        uri=AnyUrl(artifact.as_uri()),
+        name="artifact.mp4",
+        path=artifact,
+        mime_type="video/mp4",
+        is_binary=True,
+        expires_at="1970-01-01T00:16:41Z",
+    )
+
+    assert asyncio.run(resource.read()) == b"video"
+    clock.write_text("1001", encoding="utf-8")
+    with pytest.raises(ValueError, match="24-hour retention deadline"):
+        asyncio.run(resource.read())

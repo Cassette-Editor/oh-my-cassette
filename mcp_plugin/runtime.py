@@ -354,6 +354,7 @@ class LocalMcpRuntime:
                     mime_type=mime,
                     size=size,
                     name=resolved.name,
+                    expires_at=str(job.get("expires_at") or "") or None,
                 )
             )
         return artifacts, None
@@ -435,6 +436,9 @@ class LocalMcpRuntime:
         phase = self._load_state_phase(session_id)
         if payload.get("ok"):
             try:
+                data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+                if self.state is not None:
+                    self.state.bind_expiry(session_id, str(data.get("expires_at") or "") or None)
                 phase = self._transition(session_id, SessionPhase.ASSETS_READY)
             except InvalidTransition as exc:
                 return self._failure("invalid_transition", str(exc), session_id=session_id, phase=exc.current)
@@ -465,6 +469,7 @@ class LocalMcpRuntime:
                         mime_type="image/jpeg",
                         size=resolved.stat().st_size,
                         name=resolved.name,
+                        expires_at=self.tools.manifest.session_expires_at(session_id=session_id),
                     )
                 )
             except OSError:

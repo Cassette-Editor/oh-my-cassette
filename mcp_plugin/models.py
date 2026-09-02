@@ -42,6 +42,7 @@ class Artifact(StrictModel):
     mime_type: str
     size: int = Field(ge=0)
     name: str
+    expires_at: str | None = None
 
 
 class ToolEnvelope(StrictModel):
@@ -70,6 +71,7 @@ class SessionState(StrictModel):
     job_id: str | None = None
     revision: int = Field(default=0, ge=0)
     updated_at: str
+    expires_at: str | None = None
 
 
 class IngestMediaInput(StrictModel):

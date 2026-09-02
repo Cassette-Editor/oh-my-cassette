@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import CassetteError
-from .manifest import get_asset_root, now_iso
+from .manifest import get_asset_root, is_expired, load_manifest, now_iso, remote_media_ids
 
 
 def get_jobs_dir() -> Path:
@@ -48,6 +48,8 @@ def create_job(
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     job_id = f"cassette_{ts}_{secrets.token_hex(3)}"
     options = options or {}
+    session_manifest = load_manifest(session_hash)
+    expires_at = str(session_manifest.get("expires_at") or "") or None
     job = {
         "job_id": job_id,
         "session_hash": session_hash,
@@ -57,6 +59,7 @@ def create_job(
         "cassette_session_id": options.get("cassette_session_id") or f"agent-session-{session_hash}",
         "status": "queued",
         "created_at": now_iso(),
+        "expires_at": expires_at,
         "updated_at": now_iso(),
         "started_at": None,
         "finished_at": None,
@@ -66,6 +69,7 @@ def create_job(
         "chat_message": options.get("chat_message") or instruction or prompt,
         "instruction": instruction or "",
         "asset_paths": asset_paths,
+        "media_file_ids": remote_media_ids(session_hash),
         "url": options.get("url") or os.getenv("CASSETTE_URL", "https://sg.trycassette.online/agent"),
         "timeout_sec": _job_timeout_sec(options),
         "selectors": options.get("selectors") or {},
@@ -100,6 +104,16 @@ def load_job(job_id: str) -> dict:
 
 def save_job(job: dict) -> None:
     path = _job_path(job["job_id"])
+    if job.get("expires_at") and is_expired(job.get("expires_at")):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise CassetteError(
+            "session_expired",
+            "This Cassette media session reached its 24-hour retention deadline; late job output was discarded.",
+            {"expires_at": job.get("expires_at")},
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     job["updated_at"] = now_iso()
     fd, tmp_name = tempfile.mkstemp(prefix=".job.", suffix=".json", dir=str(path.parent))
@@ -164,6 +178,7 @@ def list_jobs(session_hash: str | None = None, limit: int = 10) -> list[dict]:
                 continue
             job.pop("prompt", None)
             job.pop("asset_paths", None)
+            job.pop("media_file_ids", None)
             job.pop("worker_command", None)
             job.pop("continuation", None)
             job.pop("resume_request", None)

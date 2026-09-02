@@ -187,8 +187,25 @@ class _MockCassetteAPI(BaseHTTPRequestHandler):
                     "renderStatus": "completed",
                     "terminalState": "succeeded",
                     "readinessPhase": "ready",
+                    "analysisReceipt": {
+                        "provider": "google",
+                        "model": "gemini-3.8-flash",
+                        "api": "interactions",
+                        "processing": "agentic",
+                        "fileTransport": "files_api",
+                        "serviceTier": "standard",
+                        "store": False,
+                        "responseId": f"response-{i}",
+                        "agenticNavigationStepCount": 3,
+                        "startedAt": "2026-09-02T00:00:00Z",
+                        "completedAt": "2026-09-02T00:00:02Z",
+                        "evidenceCount": 4,
+                        "expiresAt": "2099-01-01T00:00:00Z",
+                        "googleFileUri": "must-not-cross-plugin-boundary",
+                    },
                 }
                 for i in range(1, self.rec["complete_count"] + 1)
+                if f"m-{i}" not in set(self.rec.get("missing_media_ids") or [])
             ]
             return self._json(200, {"statuses": statuses})
         if path == "/api/langgraph/threads/th-1/runs/r-1":
@@ -582,6 +599,100 @@ def test_api_transport_dedupes_uploads_in_reused_session(cassette_env, mock_api,
     ApiTransport().run_job({**base, "job_id": "job-b"})
     # The second job reused the already-uploaded asset — no new upload/init.
     assert mock_api.rec["init_count"] == first_inits
+
+
+def test_upload_cache_does_not_reuse_remote_missing_media(cassette_env, mock_api, tmp_path):
+    asset = tmp_path / "missing-remote.mp4"
+    asset.write_bytes(b"x" * 64)
+    base = {
+        "session_hash": "remote-missing",
+        "cassette_session_id": "remote-missing",
+        "prompt": "edit",
+        "asset_paths": [str(asset)],
+        "timeout_sec": 60,
+    }
+    ApiTransport().run_job({**base, "job_id": "job-remote-a"})
+    assert mock_api.rec["init_count"] == 1
+    mock_api.rec["missing_media_ids"] = ["m-1"]
+
+    ApiTransport().run_job({**base, "job_id": "job-remote-b"})
+
+    assert mock_api.rec["init_count"] == 2
+
+
+def test_successful_upload_removes_only_managed_copy_and_persists_remote_binding(cassette_env, mock_api):
+    source = cassette_env["source_root"] / "original.mp4"
+    source.write_bytes(b"x" * 64)
+    ingested = manifest.ingest_asset(str(source), session_id="managed-copy")
+    managed_copy = Path(ingested["saved_path"])
+
+    result = ApiTransport().run_job(
+        {
+            "job_id": "job-managed-copy",
+            "session_hash": ingested["session_hash"],
+            "cassette_session_id": "managed-copy",
+            "prompt": "edit",
+            "asset_paths": [str(managed_copy)],
+            "timeout_sec": 60,
+        }
+    )
+
+    stored = manifest.load_manifest(ingested["session_hash"])
+    assert result["status"] == "succeeded"
+    assert source.exists(), "the user-owned source must remain untouched"
+    assert not managed_copy.exists(), "the redundant managed upload copy must be removed"
+    assert stored["assets"][0]["media_file_id"] == "m-1"
+    assert stored["assets"][0]["exists"] is False
+    cache = ApiTransport()._load_upload_cache("managed-copy")
+    entry = next(iter(cache.values()))
+    assert entry["media_file_id"] == "m-1"
+    assert entry["expires_at"] == stored["expires_at"]
+    receipt = result["quality"]["analysis_receipts"][0]
+    assert receipt["model"] == "gemini-3.8-flash"
+    assert receipt["api"] == "interactions"
+    assert receipt["processing"] == "agentic"
+    assert receipt["fileTransport"] == "files_api"
+    assert receipt["agenticNavigationStepCount"] == 3
+    assert receipt["store"] is False
+    assert "responseId" in receipt
+    assert "apiType" not in receipt
+    assert "transport" not in receipt
+    assert "googleFileUri" not in receipt
+
+
+def test_expired_upload_cache_entry_is_never_reused(cassette_env, mock_api, tmp_path):
+    asset = tmp_path / "expired-cache.mp4"
+    asset.write_bytes(b"x" * 64)
+    transport = ApiTransport()
+    transport.run_job(
+        {
+            "job_id": "job-cache-a",
+            "session_hash": "cache-expiry",
+            "cassette_session_id": "cache-expiry",
+            "prompt": "edit",
+            "asset_paths": [str(asset)],
+            "timeout_sec": 60,
+        }
+    )
+    path = transport._upload_cache_path("cache-expiry")
+    payload = json.loads(path.read_text("utf-8"))
+    payload["expires_at"] = "2000-01-01T00:00:00Z"
+    for entry in payload["entries"].values():
+        entry["expires_at"] = "2000-01-01T00:00:00Z"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    ApiTransport().run_job(
+        {
+            "job_id": "job-cache-b",
+            "session_hash": "cache-expiry",
+            "cassette_session_id": "cache-expiry",
+            "prompt": "edit",
+            "asset_paths": [str(asset)],
+            "timeout_sec": 60,
+        }
+    )
+
+    assert mock_api.rec["init_count"] == 2
 
 
 def test_api_transport_uploads_the_name_the_user_knows(cassette_env, mock_api):

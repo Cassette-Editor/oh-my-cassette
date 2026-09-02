@@ -5,16 +5,94 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .errors import CassetteError
 from . import security
 
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+MEDIA_RETENTION_SECONDS = 24 * 60 * 60
+_RETENTION_TEST_MODE = "CASSETTE_RETENTION_TEST_MODE"
+_RETENTION_TEST_CLOCK_FILE = "CASSETTE_RETENTION_TEST_CLOCK_FILE"
+
+
+def retention_now() -> float:
+    """Return the wall clock, with an explicit file-backed clock for acceptance tests.
+
+    The override is deliberately double-gated and read on every call so a long-lived MCP
+    process can be advanced without sleeping for 24 hours. Production deployments that do
+    not opt into test mode always use the system clock.
+    """
+    if os.getenv(_RETENTION_TEST_MODE) != "1":
+        return time.time()
+    raw_path = str(os.getenv(_RETENTION_TEST_CLOCK_FILE, "") or "").strip()
+    if not raw_path:
+        return time.time()
+    try:
+        return float(Path(raw_path).expanduser().read_text("utf-8").strip())
+    except (OSError, ValueError):
+        return time.time()
+
+
+def now_iso(now: float | None = None) -> str:
+    value = datetime.fromtimestamp(now if now is not None else retention_now(), tz=timezone.utc)
+    return value.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def retention_deadline(now: float | None = None) -> str:
+    current = datetime.fromtimestamp(now if now is not None else retention_now(), tz=timezone.utc)
+    return (
+        (current + timedelta(seconds=MEDIA_RETENTION_SECONDS)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
+
+
+def _parse_iso(value: object) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _retention_fields(created_at: object, expires_at: object = None, *, now: float | None = None) -> tuple[str, str]:
+    created = _parse_iso(created_at)
+    if created is None:
+        created = datetime.fromtimestamp(now if now is not None else retention_now(), tz=timezone.utc)
+    expires = _parse_iso(expires_at)
+    if expires is None:
+        expires = created + timedelta(seconds=MEDIA_RETENTION_SECONDS)
+    return (
+        created.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        expires.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    )
+
+
+def is_expired(expires_at: object, *, now: float | None = None) -> bool:
+    deadline = _parse_iso(expires_at)
+    if deadline is None:
+        return False
+    current = datetime.fromtimestamp(now if now is not None else retention_now(), tz=timezone.utc)
+    return current >= deadline
+
+
+def earliest_expiry(*values: object) -> str | None:
+    parsed = [value for value in (_parse_iso(item) for item in values) if value is not None]
+    if not parsed:
+        return None
+    return min(parsed).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def seconds_until_expiry(expires_at: object, *, now: float | None = None) -> float | None:
+    deadline = _parse_iso(expires_at)
+    if deadline is None:
+        return None
+    current = datetime.fromtimestamp(now if now is not None else retention_now(), tz=timezone.utc)
+    return max(0.0, (deadline - current).total_seconds())
 
 
 def get_asset_root() -> Path:
@@ -28,46 +106,243 @@ def get_asset_root() -> Path:
     return Path(os.getenv("CASSETTE_ASSET_ROOT", str(security._hermes_home() / "cassette"))).expanduser().resolve()
 
 
-# Derived/staging artifact classes swept at MCP startup, with default max ages in days.
-# exports/, jobs/, and sessions/ are deliberately NOT here: exports are user deliverables
-# and jobs/sessions power history and resume — only explicit cleanup may touch those.
-_SWEEP_CLASSES: dict[str, int] = {
-    "previews": 30,
-    "api_uploads": 7,
-    "screenshots": 30,
-}
+_MANAGED_CLASSES = ("previews", "api_uploads", "screenshots", "exports", "jobs")
+
+
+def _remove_managed_path(path: Path) -> int:
+    """Remove one app-owned path without following symlinks; return files removed."""
+    try:
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+            return 1
+        if not path.is_dir():
+            return 0
+        count = sum(1 for item in path.rglob("*") if item.is_file() or item.is_symlink())
+        shutil.rmtree(path)
+        return count
+    except OSError:
+        return 0
+
+
+def _safe_session_name(value: object) -> str:
+    return "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(value or ""))[:120]
+
+
+def _state_path(session_id: str) -> Path:
+    import runtime_config
+
+    digest = __import__("hashlib").sha256(session_id.encode("utf-8")).hexdigest()
+    return runtime_config.data_root() / "mcp-state" / "sessions" / f"{digest}.json"
+
+
+def _tombstone_path(session_hash: str) -> Path:
+    digest = security.safe_hash_id(session_hash)
+    return get_asset_root() / "session_tombstones" / f"{digest}.json"
+
+
+def _load_tombstone(session_hash: str) -> dict | None:
+    path = _tombstone_path(session_hash)
+    if path.is_symlink():
+        return {"expires_at": None, "corrupt": True}
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        # A tombstone is fail-closed: corruption must not silently resurrect media.
+        return {"expires_at": None, "corrupt": True}
+    return value if isinstance(value, dict) else {"expires_at": None, "corrupt": True}
+
+
+def _write_tombstone(session_hash: str, expires_at: object, *, now: float) -> bool:
+    """Persist a non-media session tombstone before removing managed session data."""
+    path = _tombstone_path(session_hash)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        return False
+    if path.exists():
+        return True
+    payload = {
+        "version": 1,
+        "session_digest": security.safe_hash_id(session_hash),
+        "expires_at": str(expires_at or "") or None,
+        "deleted_at": now_iso(now),
+    }
+    fd, temporary = tempfile.mkstemp(prefix=".tombstone.", suffix=".json", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
+            handle.write("\n")
+        os.replace(temporary, path)
+        return True
+    except OSError:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        return False
+
+
+def _raise_if_tombstoned(session_hash: str) -> None:
+    tombstone = _load_tombstone(session_hash)
+    if tombstone is None:
+        return
+    raise CassetteError(
+        "session_expired",
+        "This Cassette media session reached its 24-hour retention deadline. Ingest the source into a new session.",
+        {"expires_at": tombstone.get("expires_at")},
+        recoverable=True,
+    )
 
 
 def sweep_stale_artifacts(now: float | None = None) -> dict[str, int]:
-    """Delete derived/staging artifacts past their max age; prune emptied subdirs.
+    """Delete every plugin-managed object at its immutable first-ingest +24h deadline.
 
-    CASSETTE_ARTIFACT_TTL_DAYS overrides every class TTL; 0 disables the sweep.
-    Best-effort by design — a locked or vanished file never breaks startup."""
-    import time as _time
-
-    override = os.getenv("CASSETTE_ARTIFACT_TTL_DAYS")
-    ttl_override: int | None = None
-    if override is not None and override.strip():
-        try:
-            ttl_override = int(override)
-        except ValueError:
-            ttl_override = None
-        if ttl_override == 0:
-            return {}
-    current = now if now is not None else _time.time()
+    Session manifests and job records are the authoritative links between otherwise separate
+    directories. A final mtime pass removes unlinked/orphaned managed files after 24 hours.
+    User source paths are never traversed or deleted. Best-effort by design: cleanup must not
+    prevent startup or a tool call from returning."""
+    current = now if now is not None else retention_now()
     root = get_asset_root()
     removed: dict[str, int] = {}
-    for class_name, default_days in _SWEEP_CLASSES.items():
+    jobs_dir = root / "jobs"
+    job_records: list[tuple[Path, dict]] = []
+    if jobs_dir.is_dir():
+        for path in jobs_dir.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text("utf-8"))
+                if isinstance(payload, dict):
+                    job_records.append((path, payload))
+            except (OSError, ValueError):
+                continue
+
+    sessions_root = root / "sessions"
+    if sessions_root.is_dir():
+        for session_dir in list(sessions_root.iterdir()):
+            if not session_dir.is_dir() or session_dir.is_symlink():
+                continue
+            manifest_path = session_dir / "manifest.json"
+            try:
+                session_manifest = json.loads(manifest_path.read_text("utf-8"))
+            except (OSError, ValueError):
+                try:
+                    stale = current - session_dir.stat().st_mtime >= MEDIA_RETENTION_SECONDS
+                except OSError:
+                    stale = False
+                if stale and _write_tombstone(session_dir.name, None, now=current):
+                    count = _remove_managed_path(session_dir)
+                    if count:
+                        removed["sessions"] = removed.get("sessions", 0) + count
+                continue
+            if not isinstance(session_manifest, dict):
+                try:
+                    stale = current - session_dir.stat().st_mtime >= MEDIA_RETENTION_SECONDS
+                except OSError:
+                    stale = False
+                if stale and _write_tombstone(session_dir.name, None, now=current):
+                    count = _remove_managed_path(session_dir)
+                    if count:
+                        removed["sessions"] = removed.get("sessions", 0) + count
+                continue
+            created_at, expires_at = _retention_fields(
+                session_manifest.get("created_at"), session_manifest.get("expires_at"), now=current
+            )
+            if session_manifest.get("created_at") != created_at or session_manifest.get("expires_at") != expires_at:
+                session_manifest["created_at"] = created_at
+                session_manifest["expires_at"] = expires_at
+                try:
+                    save_manifest_atomic(session_dir.name, session_manifest)
+                except Exception:  # noqa: BLE001 - cleanup remains best effort
+                    pass
+            if not is_expired(expires_at, now=current):
+                continue
+            if not _write_tombstone(session_dir.name, expires_at, now=current):
+                continue
+
+            aliases = {session_dir.name}
+            for job_path, job in job_records:
+                if str(job.get("session_hash") or "") != session_dir.name:
+                    continue
+                alias = str(job.get("cassette_session_id") or "").strip()
+                if alias:
+                    aliases.add(alias)
+                job_id = str(job.get("job_id") or job_path.stem)
+                count = _remove_managed_path(root / "exports" / job_id)
+                if count:
+                    removed["exports"] = removed.get("exports", 0) + count
+                count = _remove_managed_path(root / "screenshots" / job_id)
+                if count:
+                    removed["screenshots"] = removed.get("screenshots", 0) + count
+                if _remove_managed_path(job_path):
+                    removed["jobs"] = removed.get("jobs", 0) + 1
+            for alias in aliases:
+                safe = _safe_session_name(alias)
+                for class_name in ("previews", "screenshots"):
+                    count = _remove_managed_path(root / class_name / safe)
+                    if count:
+                        removed[class_name] = removed.get(class_name, 0) + count
+                count = _remove_managed_path(root / "api_uploads" / f"{safe[:96] or 'default'}.json")
+                if count:
+                    removed["api_uploads"] = removed.get("api_uploads", 0) + count
+                count = _remove_managed_path(_state_path(alias))
+                if count:
+                    removed["state"] = removed.get("state", 0) + count
+            count = _remove_managed_path(session_dir)
+            if count:
+                removed["sessions"] = removed.get("sessions", 0) + count
+
+    # Jobs can outlive a missing/corrupt session manifest. Their own copied deadline is enough
+    # to remove the job and export without guessing from prose or status.
+    for job_path, job in job_records:
+        if not job_path.exists() or not is_expired(job.get("expires_at"), now=current):
+            continue
+        job_id = str(job.get("job_id") or job_path.stem)
+        count = _remove_managed_path(root / "exports" / job_id)
+        if count:
+            removed["exports"] = removed.get("exports", 0) + count
+        count = _remove_managed_path(root / "screenshots" / job_id)
+        if count:
+            removed["screenshots"] = removed.get("screenshots", 0) + count
+        if _remove_managed_path(job_path):
+            removed["jobs"] = removed.get("jobs", 0) + 1
+
+    try:
+        import runtime_config
+
+        state_root = runtime_config.data_root() / "mcp-state" / "sessions"
+        if state_root.is_dir():
+            for state_path in state_root.glob("*.json"):
+                try:
+                    state = json.loads(state_path.read_text("utf-8"))
+                except (OSError, ValueError):
+                    try:
+                        if current - state_path.stat().st_mtime >= MEDIA_RETENTION_SECONDS:
+                            if _remove_managed_path(state_path):
+                                removed["state"] = removed.get("state", 0) + 1
+                    except OSError:
+                        pass
+                    continue
+                if isinstance(state, dict) and is_expired(state.get("expires_at"), now=current):
+                    if _remove_managed_path(state_path):
+                        removed["state"] = removed.get("state", 0) + 1
+                elif current - state_path.stat().st_mtime >= MEDIA_RETENTION_SECONDS:
+                    if _remove_managed_path(state_path):
+                        removed["state"] = removed.get("state", 0) + 1
+    except Exception:  # noqa: BLE001 - cleanup remains best effort
+        pass
+
+    # Orphan backstop. This includes caches created before retention metadata existed. It does
+    # not extend on access and never walks outside the application-owned roots.
+    for class_name in _MANAGED_CLASSES:
         base = root / class_name
         if not base.is_dir():
             continue
-        max_age = (ttl_override if ttl_override and ttl_override > 0 else default_days) * 86400
         count = 0
         for path in sorted(base.rglob("*"), reverse=True):
             try:
                 if path.is_symlink():
                     continue
-                if path.is_file() and current - path.stat().st_mtime > max_age:
+                if path.is_file() and current - path.stat().st_mtime >= MEDIA_RETENTION_SECONDS:
                     path.unlink()
                     count += 1
                 elif path.is_dir() and not any(path.iterdir()):
@@ -75,7 +350,7 @@ def sweep_stale_artifacts(now: float | None = None) -> dict[str, int]:
             except OSError:
                 continue
         if count:
-            removed[class_name] = count
+            removed[class_name] = removed.get(class_name, 0) + count
     return removed
 
 
@@ -134,15 +409,17 @@ def manifest_lock(session_hash: str):
                 pass
 
 
-def _empty_manifest(key: str, sess_hash: str) -> dict:
-    ts = now_iso()
+def _empty_manifest(key: str, sess_hash: str, *, now: float | None = None) -> dict:
+    ts = now_iso(now)
+    _, expires_at = _retention_fields(ts, now=now)
     return {
-        "version": 1,
+        "version": 2,
         "session_id": sess_hash,
         "session_hash": sess_hash,
         "chat_hash": security.safe_hash_id(key),
         "user_hash": "",
         "created_at": ts,
+        "expires_at": expires_at,
         "updated_at": ts,
         "delivery": {},
         "assets": [],
@@ -155,7 +432,12 @@ def load_manifest(session_hash: str) -> dict:
         return _empty_manifest("default", session_hash)
     try:
         with path.open("r", encoding="utf-8") as fh:
-            return json.load(fh)
+            manifest = json.load(fh)
+        if isinstance(manifest, dict):
+            created_at, expires_at = _retention_fields(manifest.get("created_at"), manifest.get("expires_at"))
+            manifest["created_at"] = created_at
+            manifest["expires_at"] = expires_at
+        return manifest
     except Exception as exc:
         raise CassetteError("manifest_read_failed", "Failed to read session manifest", {"path": str(path)}) from exc
 
@@ -176,6 +458,99 @@ def save_manifest_atomic(session_hash: str, manifest: dict) -> None:
         except OSError:
             pass
         raise CassetteError("manifest_write_failed", "Failed to write session manifest") from exc
+
+
+def session_expires_at(
+    session_id: str | None = None, chat_id: str | None = None, task_id: str | None = None
+) -> str | None:
+    session_hash = resolve_session_hash(session_id, chat_id, task_id)
+    path = get_manifest_path(session_hash)
+    if not path.exists():
+        return None
+    manifest = load_manifest(session_hash)
+    return str(manifest.get("expires_at") or "") or None
+
+
+def require_active_session(
+    session_id: str | None = None, chat_id: str | None = None, task_id: str | None = None
+) -> dict:
+    session_hash = resolve_session_hash(session_id, chat_id, task_id)
+    _raise_if_tombstoned(session_hash)
+    manifest = load_manifest(session_hash)
+    if get_manifest_path(session_hash).exists() and is_expired(manifest.get("expires_at")):
+        raise CassetteError(
+            "session_expired",
+            "This Cassette media session reached its 24-hour retention deadline. Ingest the source into a new session.",
+            {"expires_at": manifest.get("expires_at")},
+            recoverable=True,
+        )
+    return manifest
+
+
+def remote_media_ids(session_hash: str) -> list[str]:
+    manifest = load_manifest(session_hash)
+    if is_expired(manifest.get("expires_at")):
+        return []
+    return [
+        str(asset.get("media_file_id"))
+        for asset in manifest.get("assets") or []
+        if isinstance(asset, dict) and asset.get("media_file_id")
+    ]
+
+
+def mark_managed_asset_uploaded(
+    session_id: str,
+    saved_path: str,
+    media_file_id: str,
+    *,
+    fingerprint: str,
+    remote_expires_at: str | None = None,
+) -> str | None:
+    """Persist the remote binding and remove the now-redundant app-owned upload copy.
+
+    The original user path is never stored or touched. Only a file inside this session's
+    ``media`` directory is eligible for removal.
+    """
+    session_hash = resolve_session_hash(session_id=session_id)
+    manifest_path = get_manifest_path(session_hash)
+    if not manifest_path.exists():
+        return None
+    with manifest_lock(session_hash):
+        manifest = load_manifest(session_hash)
+        if is_expired(manifest.get("expires_at")):
+            return str(manifest.get("expires_at") or "") or None
+        local_deadline = str(manifest.get("expires_at") or "") or None
+        remote_deadline = _parse_iso(remote_expires_at)
+        local_dt = _parse_iso(local_deadline)
+        selected_deadline = local_deadline
+        if remote_deadline is not None and (local_dt is None or remote_deadline < local_dt):
+            selected_deadline = remote_deadline.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            manifest["expires_at"] = selected_deadline
+        target = str(Path(saved_path).expanduser())
+        for asset in manifest.get("assets") or []:
+            if not isinstance(asset, dict) or str(asset.get("saved_path") or "") != target:
+                continue
+            asset.update(
+                {
+                    "media_file_id": str(media_file_id),
+                    "upload_fingerprint": str(fingerprint),
+                    "uploaded_at": now_iso(),
+                    "remote_expires_at": selected_deadline,
+                    "exists": False,
+                }
+            )
+            break
+        save_manifest_atomic(session_hash, manifest)
+
+    path = Path(saved_path).expanduser()
+    managed_media = get_session_dir(session_hash) / "media"
+    try:
+        lexical = Path(os.path.abspath(str(path)))
+        if lexical.is_file() and lexical.is_relative_to(managed_media.resolve(strict=False)):
+            lexical.unlink()
+    except (OSError, ValueError):
+        pass
+    return selected_deadline
 
 
 def session_thread_path(session_hash: str) -> Path:
@@ -323,11 +698,19 @@ def _register_asset(
     the session manifest and return the ingestion result. ``on_manifest`` runs inside the lock to
     apply caller-specific manifest fields (e.g. gateway delivery); ``asset_extra`` adds
     caller-specific asset fields (e.g. internal metadata)."""
+    _raise_if_tombstoned(sess_hash)
     asset_id = f"asset_{digest[:12]}"
     with manifest_lock(sess_hash):
+        _raise_if_tombstoned(sess_hash)
         manifest = load_manifest(sess_hash)
         if not manifest.get("assets") and manifest.get("session_id") == "default":
             manifest = _empty_manifest(empty_manifest_key, sess_hash)
+        if is_expired(manifest.get("expires_at")):
+            raise CassetteError(
+                "session_expired",
+                "This Cassette media session reached its 24-hour retention deadline. Ingest the source into a new session.",
+                {"expires_at": manifest.get("expires_at")},
+            )
         manifest["session_id"] = sess_hash
         manifest["session_hash"] = sess_hash
         if on_manifest is not None:
@@ -360,6 +743,7 @@ def _register_asset(
         "size_bytes": size,
         "session_hash": sess_hash,
         "deduplicated": deduplicated or existing is not None,
+        "expires_at": manifest.get("expires_at"),
     }
 
 
@@ -383,6 +767,7 @@ def ingest_asset(
     digest = security.sha256_file(source)
     key = session_key(session_id, chat_id, task_id)
     sess_hash = security.safe_hash_id(key)
+    require_active_session(session_id=session_id, chat_id=chat_id, task_id=task_id)
 
     resolved_media_type = (
         media_type if media_type in {"video", "image", "audio", "file", "unknown"} else _media_type_from_ext(ext)
@@ -455,6 +840,7 @@ def ingest_internal_asset(
     size = source.stat().st_size
     digest = security.sha256_file(source)
     sess_hash = resolve_session_hash(session_id=session_id)
+    require_active_session(session_id=session_id)
     media_dir = get_session_dir(sess_hash) / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
     dest = media_dir / f"{digest}{ext}"
@@ -482,7 +868,7 @@ def ingest_internal_asset(
 
 def list_assets(session_id: str | None = None, chat_id: str | None = None, task_id: str | None = None) -> dict:
     sess_hash = resolve_session_hash(session_id, chat_id, task_id)
-    manifest = load_manifest(sess_hash)
+    manifest = require_active_session(session_id, chat_id, task_id)
     changed = False
     for asset in manifest.get("assets", []):
         exists = Path(asset.get("saved_path", "")).exists()

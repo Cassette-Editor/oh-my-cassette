@@ -56,6 +56,37 @@ class McpLifespanContext:
     client_profile_logged: bool = False
 
 
+class RetainedFileResource(FileResource):
+    """File resource that enforces the artifact deadline at every read."""
+
+    expires_at: str = Field(description="Immutable first-ingest retention deadline")
+
+    async def read(self) -> str | bytes:
+        from cassette.core import manifest as cassette_manifest
+
+        if cassette_manifest.is_expired(self.expires_at):
+            raise ValueError("Cassette artifact reached its 24-hour retention deadline")
+        return await super().read()
+
+
+async def _sweep_managed_artifacts() -> None:
+    try:
+        from cassette.core import manifest as cassette_manifest
+
+        await asyncio.to_thread(cassette_manifest.sweep_stale_artifacts)
+    except Exception:  # noqa: BLE001 — cleanup must never fail a tool call or server startup
+        return
+
+
+async def _retention_janitor(stop: asyncio.Event) -> None:
+    while not stop.is_set():
+        await _sweep_managed_artifacts()
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=300.0)
+        except TimeoutError:
+            continue
+
+
 def _startup_auth_notice() -> str:
     """One line on whether this machine held Cassette credentials when the server started.
 
@@ -107,7 +138,13 @@ async def lifespan(_: FastMCP) -> AsyncIterator[McpLifespanContext]:
             file=sys.stderr,
             flush=True,
         )
-    yield McpLifespanContext(runtime=runtime)
+    stop = asyncio.Event()
+    janitor = asyncio.create_task(_retention_janitor(stop))
+    try:
+        yield McpLifespanContext(runtime=runtime)
+    finally:
+        stop.set()
+        await janitor
 
 
 def _client_supports_roots(context: Context) -> bool:
@@ -176,7 +213,7 @@ def _log_client_profile_once(context: Context) -> None:
 class ArtifactFastMCP(FastMCP[McpLifespanContext]):
     """Append validated artifact ResourceLink blocks to structured tool output."""
 
-    def _register_artifact_resource(self, artifact: dict[str, Any]) -> None:
+    def _register_artifact_resource(self, artifact: dict[str, Any]) -> bool:
         """Make a validated local artifact readable through MCP resources/read.
 
         ResourceLink is a pointer, not a file server.  Hosts such as Hermes follow the
@@ -187,9 +224,14 @@ class ArtifactFastMCP(FastMCP[McpLifespanContext]):
         """
         raw_path = str(artifact.get("path") or "").strip()
         raw_uri = str(artifact.get("resource_uri") or artifact.get("uri") or "").strip()
-        if not raw_path or not raw_uri:
-            return
+        expires_at = str(artifact.get("expires_at") or "").strip()
+        if not raw_path or not raw_uri or not expires_at:
+            return False
         try:
+            from cassette.core import manifest as cassette_manifest
+
+            if cassette_manifest.is_expired(expires_at):
+                return False
             resolved = Path(raw_path).expanduser().resolve(strict=True)
             asset_root = runtime_config.asset_root().resolve(strict=True)
             allowed_roots = (asset_root / "previews", asset_root / "exports")
@@ -198,22 +240,25 @@ class ArtifactFastMCP(FastMCP[McpLifespanContext]):
                 or not any(resolved.is_relative_to(root.resolve(strict=False)) for root in allowed_roots)
                 or raw_uri != resolved.as_uri()
             ):
-                return
+                return False
             mime_type = str(artifact.get("mime_type") or "application/octet-stream")
             self.add_resource(
-                FileResource(
+                RetainedFileResource(
                     uri=raw_uri,
                     name=str(artifact.get("name") or resolved.name),
                     description="Validated Cassette artifact",
                     mime_type=mime_type,
                     path=resolved,
                     is_binary=not mime_type.startswith("text/"),
+                    expires_at=expires_at,
                 )
             )
+            return True
         except (OSError, ValueError):
-            return
+            return False
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        await _sweep_managed_artifacts()
         try:
             _log_client_profile_once(self.get_context())
         except Exception:  # noqa: BLE001 — never let diagnostics block the tool surface
@@ -252,7 +297,8 @@ class ArtifactFastMCP(FastMCP[McpLifespanContext]):
         for artifact in structured.get("artifacts") or []:
             if not isinstance(artifact, dict):
                 continue
-            self._register_artifact_resource(artifact)
+            if not self._register_artifact_resource(artifact):
+                continue
             blocks.append(
                 types.ResourceLink(
                     type="resource_link",
