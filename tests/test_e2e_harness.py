@@ -68,6 +68,57 @@ def test_agentic_receipt_accepts_google_stateless_null_response_id():
     )
 
 
+def test_agentic_receipt_allows_the_server_deadline_after_the_earlier_plugin_deadline():
+    from scripts import e2e_local_mcp
+
+    receipt = {
+        "provider": "google",
+        "model": "gemini-3.8-flash",
+        "api": "interactions",
+        "processing": "agentic",
+        "fileTransport": "google_files",
+        "serviceTier": "standard",
+        "store": False,
+        "responseId": None,
+        "agenticNavigationStepCount": 2,
+        "startedAt": "2026-09-02T00:00:00Z",
+        "completedAt": "2026-09-02T00:00:03Z",
+        "evidenceCount": 4,
+        "expiresAt": "2026-09-03T00:00:02Z",
+    }
+
+    assert e2e_local_mcp._assert_analysis_receipt(
+        {"data": {"job": {"quality": {"analysis_receipts": [receipt]}}}},
+        expires_at="2026-09-03T00:00:00Z",
+    ) == receipt
+
+
+def test_agentic_receipt_rejects_a_server_deadline_before_the_plugin_deadline():
+    from scripts import e2e_local_mcp
+
+    receipt = {
+        "provider": "google",
+        "model": "gemini-3.8-flash",
+        "api": "interactions",
+        "processing": "agentic",
+        "fileTransport": "google_files",
+        "serviceTier": "standard",
+        "store": False,
+        "responseId": None,
+        "agenticNavigationStepCount": 2,
+        "startedAt": "2026-09-02T00:00:00Z",
+        "completedAt": "2026-09-02T00:00:03Z",
+        "evidenceCount": 4,
+        "expiresAt": "2026-09-02T23:59:59Z",
+    }
+
+    with pytest.raises(e2e_local_mcp.AcceptanceError, match="precedes plugin deadline"):
+        e2e_local_mcp._assert_analysis_receipt(
+            {"data": {"job": {"quality": {"analysis_receipts": [receipt]}}}},
+            expires_at="2026-09-03T00:00:00Z",
+        )
+
+
 def test_agentic_receipt_rejects_legacy_field_names():
     from scripts import e2e_local_mcp
 
