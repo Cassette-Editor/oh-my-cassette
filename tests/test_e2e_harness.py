@@ -87,10 +87,13 @@ def test_agentic_receipt_allows_the_server_deadline_after_the_earlier_plugin_dea
         "expiresAt": "2026-09-03T00:00:02Z",
     }
 
-    assert e2e_local_mcp._assert_analysis_receipt(
-        {"data": {"job": {"quality": {"analysis_receipts": [receipt]}}}},
-        expires_at="2026-09-03T00:00:00Z",
-    ) == receipt
+    assert (
+        e2e_local_mcp._assert_analysis_receipt(
+            {"data": {"job": {"quality": {"analysis_receipts": [receipt]}}}},
+            expires_at="2026-09-03T00:00:00Z",
+        )
+        == receipt
+    )
 
 
 def test_agentic_receipt_rejects_a_server_deadline_before_the_plugin_deadline():
