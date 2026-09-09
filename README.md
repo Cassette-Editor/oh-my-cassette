@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/cassette-editor-oh-my-cassette-badge.png)](https://mseep.ai/app/cassette-editor-oh-my-cassette)
+
 <p align="center">
   <img src="assets/banner.jpg" width="80%" alt="Oh My Cassette banner" />
 </p>
