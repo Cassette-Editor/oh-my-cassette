@@ -3,11 +3,13 @@
   "mcp": {
     "cassette": {
       "type": "local",
-      "command": ["python3", "scripts/run_local_mcp.py"],
-      "enabled": true,
+      "command": ["uvx", "oh-my-cassette==0.5.0"],
       "environment": {
-        "CASSETTE_MCP_HOST": "opencode"
-      }
+        "CASSETTE_API_URL": "http://127.0.0.1:8787",
+        "CASSETTE_WEB_URL": "http://127.0.0.1:8080"
+      },
+      "timeout": 3600000,
+      "enabled": true
     }
   }
 }

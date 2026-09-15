@@ -13,321 +13,70 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Cheap path filter so docs-only changes skip the expensive jobs.
-  # Job-level skips still satisfy branch-protection required checks.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      python: ${{ steps.filter.outputs.python }}
-      install: ${{ steps.filter.outputs.install }}
-      mcp: ${{ steps.filter.outputs.mcp }}
-      native: ${{ steps.filter.outputs.native }}
+      code: ${{ steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         id: filter
         with:
           filters: |
-            python:
-              - '**/*.py'
-              - 'pyproject.toml'
-              - 'requirements-mcp.in'
-              - 'requirements-mcp.lock'
-              - 'pytest.ini'
-              - 'plugin.yaml'
-              - 'after-install.md'
+            code:
+              - 'src/**'
               - 'tests/**'
+              - 'contracts/**'
               - 'skills/**'
-              - 'hermes/**'
-              - 'mcp_plugin/**'
-              - 'prompts/**'
-              - '.gitignore'
-              - '.env.example'
-              - 'version.txt'
-              - 'release-please-config.json'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/e2e.yml'
-            mcp:
-              - 'mcp_plugin/**'
-              - 'runtime_config.py'
-              - 'core/**'
-              - 'version.txt'
-              - 'requirements-mcp.in'
-              - 'requirements-mcp.lock'
-              - 'scripts/run_local_mcp.py'
-              - 'scripts/local_mcp_bootstrap.py'
-              - 'scripts/setup_local_mcp.py'
-              - 'scripts/diagnose_local_mcp.py'
-              - 'scripts/e2e_local_mcp.py'
-              - 'scripts/install_opencode.py'
-              - 'tests/test_mcp_*.py'
+              - '.agents/skills/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
               - '.mcp.json'
               - 'opencode.json'
-              - '.codex-plugin/**'
+              - 'server.json'
               - '.claude-plugin/**'
-              - '.agents/plugins/**'
-              - 'skills/**'
-              - 'release-please-config.json'
-              - '.github/workflows/ci.yml'
-              - '.github/workflows/e2e.yml'
-            native:
-              - '.mcp.json'
               - '.codex-plugin/**'
-              - '.claude-plugin/**'
-              - '.agents/plugins/**'
-              - 'skills/**'
-              - 'scripts/run_local_mcp.py'
-              - 'scripts/local_mcp_bootstrap.py'
-              - 'requirements-mcp.lock'
               - 'release-please-config.json'
-              - '.github/workflows/ci.yml'
-            install:
-              - 'plugin.yaml'
-              - 'after-install.md'
-              - 'scripts/**'
-              - '__init__.py'
-              - 'core/**'
-              - '.gitignore'
-              - '.env.example'
               - '.github/workflows/ci.yml'
 
   lint:
     needs: changes
-    if: needs.changes.outputs.python == 'true'
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v7
         with:
-          python-version: "3.13"
-      # Pinned so formatter-output changes in new ruff releases can't break CI.
-      - name: Install ruff
-        run: python -m pip install ruff==0.15.22
-      - run: ruff check .
-      - run: ruff format --check .
+          enable-cache: true
+      - run: uv sync --frozen --group dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
 
   test:
     needs: changes
-    if: needs.changes.outputs.python == 'true'
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        # Oldest and newest Python supported by hermes-agent (>=3.11,<3.14).
         python: ["3.11", "3.13"]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v7
         with:
+          enable-cache: true
           python-version: ${{ matrix.python }}
-          cache: pip
-          cache-dependency-path: requirements-mcp.lock
-      - name: Install dependencies
-        # pyyaml is a test-only dependency: the packaging tests parse plugin.yaml.
-        # It used to arrive transitively via requirements-web.txt, which the web
-        # demo took with it when it moved to its own repository.
-        run: python -m pip install -r requirements-mcp.lock pytest pytest-xdist pyyaml
-      - name: Compile check
-        run: python -m compileall -q .
-      - name: Run tests
-        # xdist cuts wall time several-fold; loadfile keeps same-file tests together.
-        run: python -m pytest -q -rs -n 4 --dist loadfile
-
-  mcp-macos-smoke:
-    needs: changes
-    if: needs.changes.outputs.mcp == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: requirements-mcp.lock
-      - name: Install local MCP test dependencies
-        run: python -m pip install -r requirements-mcp.lock pytest pyyaml
-      - name: Run host-neutral MCP tests
-        run: >-
-          python -m pytest -q
-          tests/test_mcp_config.py
-          tests/test_mcp_host_launch.py
-          tests/test_mcp_packaging.py
-          tests/test_mcp_protocol.py
-          tests/test_mcp_runtime.py
-          tests/test_mcp_state.py
-          tests/test_mcp_update_check.py
-          tests/test_timeline.py
-      - name: Smoke-test locked launcher bootstrap twice
+      - name: Install ffmpeg (video preparation and contact-sheet tests)
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg
+      - run: uv sync --frozen --group dev
+      - run: uv run pytest -q -rs
+      - name: Build the distribution the hosts will install
+        run: uv build
+      - name: Smoke-run the built wheel the way hosts do (uvx)
         run: |
-          export CASSETTE_MCP_PYTHON="$(command -v python)"
-          export CASSETTE_CONFIG_HOME="$(mktemp -d)/config"
-          export CASSETTE_DATA_HOME="$(mktemp -d)/data"
-          first="$(python scripts/run_local_mcp.py --bootstrap-only)"
-          second="$(python scripts/run_local_mcp.py --bootstrap-only)"
-          test "$first" = "$second"
-          test -x "$first"
-
-  native-packaging:
-    needs: changes
-    if: needs.changes.outputs.native == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: requirements-mcp.lock
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22
-      - name: Install pinned native host CLIs and validator dependencies
-        run: |
-          python -m pip install -r requirements-mcp.lock pyyaml
-          npm install --global @openai/codex@0.143.0 @anthropic-ai/claude-code@2.1.212
-      - name: Validate Claude plugin and marketplace manifests
-        run: |
-          claude plugin validate --strict .claude-plugin/plugin.json
-          claude plugin validate --strict .claude-plugin/marketplace.json
-      - name: Smoke-install with Codex CLI
-        run: |
-          smoke_root="$(mktemp -d)"
-          mkdir -p "$smoke_root/codex-home"
-          cp -R "$GITHUB_WORKSPACE" "$smoke_root/repo"
-          jq '.plugins[0].source={"source":"local","path":"./"}' \
-            "$smoke_root/repo/.agents/plugins/marketplace.json" > "$smoke_root/marketplace.json"
-          mv "$smoke_root/marketplace.json" "$smoke_root/repo/.agents/plugins/marketplace.json"
-          CODEX_HOME="$smoke_root/codex-home" codex plugin marketplace add "$smoke_root/repo"
-          CODEX_HOME="$smoke_root/codex-home" codex plugin add oh-my-cassette@cassette-editor
-          CODEX_HOME="$smoke_root/codex-home" codex plugin list | tee "$smoke_root/codex-list.txt"
-          grep -F 'oh-my-cassette@cassette-editor' "$smoke_root/codex-list.txt"
-          grep -F 'installed, enabled' "$smoke_root/codex-list.txt"
-          # The manifest-referenced .codex-plugin/mcp.json must win over the
-          # repo-root .mcp.json (which is the Claude project-scope config).
-          CODEX_HOME="$smoke_root/codex-home" codex mcp get cassette --json | tee "$smoke_root/codex-mcp.json"
-          grep -F 'run_local_mcp.py' "$smoke_root/codex-mcp.json"
-          ! grep -F 'CLAUDE_PROJECT_DIR' "$smoke_root/codex-mcp.json"
-          expected_version="$(jq -r .version .codex-plugin/plugin.json)"
-          installed_manifest="$(find "$smoke_root/codex-home/plugins/cache/cassette-editor/oh-my-cassette" \
-            -path '*/.codex-plugin/plugin.json' -print -quit)"
-          test -n "$installed_manifest"
-          test "$(jq -r .version "$installed_manifest")" = "$expected_version"
-      - name: Smoke-install with Claude CLI
-        run: |
-          smoke_root="$(mktemp -d)"
-          mkdir -p "$smoke_root/home"
-          cp -R "$GITHUB_WORKSPACE" "$smoke_root/repo"
-          # The marketplace pins the plugin to the `release` branch, so installing
-          # it verbatim would clone a published tag from GitHub instead of testing
-          # this checkout. Rewrite to a relative source, mirroring the Codex step.
-          jq '.plugins[0].source="./"' \
-            "$smoke_root/repo/.claude-plugin/marketplace.json" > "$smoke_root/marketplace.json"
-          mv "$smoke_root/marketplace.json" "$smoke_root/repo/.claude-plugin/marketplace.json"
-          HOME="$smoke_root/home" claude plugin marketplace add "$smoke_root/repo" --scope user
-          HOME="$smoke_root/home" claude plugin install oh-my-cassette@cassette-editor --scope user
-          HOME="$smoke_root/home" claude plugin details oh-my-cassette@cassette-editor | tee "$smoke_root/claude-details.txt"
-          grep -F 'Skills (2)' "$smoke_root/claude-details.txt"
-          grep -F 'cassette-model' "$smoke_root/claude-details.txt"
-          grep -F 'cassette-video-edit' "$smoke_root/claude-details.txt"
-          grep -F 'MCP servers (1)  cassette' "$smoke_root/claude-details.txt"
-          # Claude keys its plugin cache on the manifest version and skips the update when it
-          # matches what is installed, so a manifest left un-bumped withholds the release from
-          # every user. Same assertion the Codex step makes above.
-          expected_version="$(jq -r .version .claude-plugin/plugin.json)"
-          test "$(jq -r '.plugins["oh-my-cassette@cassette-editor"][0].version' \
-            "$smoke_root/home/.claude/plugins/installed_plugins.json")" = "$expected_version"
-          echo "smoke_root=$smoke_root" >> "$GITHUB_ENV"
-      - name: Launch the MCP through Claude itself (plugin and project scope)
-        # `claude mcp list` performs a real stdio initialize against every
-        # configured server — the check that would have caught the repo-root
-        # .mcp.json launching the Codex cache glob inside Claude.
-        env:
-          MCP_TIMEOUT: "300000"
-        run: |
-          export CASSETTE_CONFIG_HOME="$(mktemp -d)/config"
-          export CASSETTE_DATA_HOME="$(mktemp -d)/data"
-          project="$(mktemp -d)"
-          cd "$project"
-          HOME="$smoke_root/home" claude mcp list | tee "$project/health.txt"
-          grep -F 'plugin:oh-my-cassette:cassette' "$project/health.txt" | grep -F '✔ Connected'
-          # Project scope: the repo-root .mcp.json everyone gets by opening
-          # this checkout in Claude Code.
-          mkdir -p "$smoke_root/home/.claude"
-          echo '{"enableAllProjectMcpServers": true}' > "$smoke_root/home/.claude/settings.json"
-          cd "$smoke_root/repo"
-          HOME="$smoke_root/home" claude mcp list | tee "$smoke_root/project-health.txt"
-          grep -E '^cassette:' "$smoke_root/project-health.txt" | grep -F '✔ Connected'
-
-  # Real end-to-end test of the official install channel: installs the
-  # hermes-agent CLI from PyPI and drives `hermes plugins install` against
-  # this checkout, then exercises enable/update and the --setup-only
-  # finisher exactly as a user would.
-  install-smoke:
-    needs: changes
-    if: needs.changes.outputs.install == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      HERMES_ACCEPT_HOOKS: "1"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: requirements-mcp.lock
-      - name: Install hermes-agent CLI
-        run: python -m pip install hermes-agent pyyaml
-      - name: Put workspace on a branch (file:// clone fails on detached HEAD)
-        run: git checkout -B ci-install-smoke
-      - name: Isolate HERMES_HOME
-        run: echo "HERMES_HOME=$(mktemp -d)" >> "$GITHUB_ENV"
-      - name: Install via official CLI
-        run: |
-          hermes plugins install "file://$GITHUB_WORKSPACE" --no-enable
-          test -e "$HERMES_HOME/plugins/cassette/.git"
-          test -f "$HERMES_HOME/plugins/cassette/plugin.yaml"
-          test -f "$HERMES_HOME/plugins/cassette/after-install.md"
-      - name: List shows cassette with the manifest version
-        run: |
-          version="$(python -c "import yaml; print(yaml.safe_load(open('plugin.yaml'))['version'])")"
-          hermes plugins list | tee /tmp/plugins-list.txt
-          grep -i cassette /tmp/plugins-list.txt
-          grep -F "$version" /tmp/plugins-list.txt
-      - name: Enable non-interactively
-        run: hermes plugins enable cassette
-      - name: Update via official CLI (git pull path)
-        run: hermes plugins update cassette
-      - name: setup-only finisher and diagnose against the CLI clone
-        run: |
-          python3 "$HERMES_HOME/plugins/cassette/scripts/install_plugin.py" --setup-only \
-            --skip-gateway-restart
-          # diagnose exits 1 because gateway/login checks legitimately fail in
-          # CI; we assert on the JSON contents of the plugin check instead.
-          python3 "$HERMES_HOME/plugins/cassette/scripts/diagnose_install.py" --json > /tmp/diagnose.json || true
-          cat /tmp/diagnose.json
-          python3 - <<'EOF'
-          import json
-          payload = json.load(open("/tmp/diagnose.json"))
-          checks = {check["name"]: check for check in payload["checks"]}
-          assert checks["plugin"]["status"] == "ok", checks["plugin"]
-          EOF
-
-  # Single stable required check for branch protection. Path-skipped jobs
-  # never expand their matrix, so their per-leg check names don't exist on
-  # docs-only PRs — this aggregate tolerates skips but fails on any failure.
-  ci-ok:
-    needs: [changes, lint, test, mcp-macos-smoke, native-packaging, install-smoke]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    steps:
-      - name: Fail if any needed job failed or was cancelled
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-        run: exit 1
-      - run: echo "all required jobs passed or were skipped by path filters"
+          set -eu
+          wheel="$(ls dist/oh_my_cassette-*.whl)"
+          uvx --from "$wheel" oh-my-cassette --version

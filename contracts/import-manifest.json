@@ -1,0 +1,122 @@
+{
+ "files": [
+  {
+   "id": "ff1e761c-1553-42d6-a4e5-a2b00ef6f803",
+   "kind": "audio",
+   "name": "tone.mp3",
+   "order": 0,
+   "folderId": null,
+   "revision": 1,
+   "contentId": null,
+   "createdAt": "2026-09-15T16:37:45.918Z",
+   "deletedAt": null,
+   "lifecycle": "active",
+   "byteLength": 12890,
+   "capturedAt": null,
+   "durationUs": null,
+   "trashBatchId": null,
+   "uploadStatus": "pending",
+   "importBatchId": "eb5a6367-f768-4a91-ae27-9fadde273b1a",
+   "publishedAnalysisRevision": null
+  },
+  {
+   "id": "3d9f103d-d8a0-46dd-95d0-d1f600995abe",
+   "kind": "image",
+   "name": "slide.png",
+   "order": 0,
+   "folderId": null,
+   "revision": 1,
+   "contentId": null,
+   "createdAt": "2026-09-15T16:37:45.918Z",
+   "deletedAt": null,
+   "lifecycle": "active",
+   "byteLength": 1504,
+   "capturedAt": null,
+   "durationUs": null,
+   "trashBatchId": null,
+   "uploadStatus": "pending",
+   "importBatchId": "eb5a6367-f768-4a91-ae27-9fadde273b1a",
+   "publishedAnalysisRevision": null
+  },
+  {
+   "id": "58d6a680-33f3-4e10-99d0-5e07a33a1ce1",
+   "kind": "video",
+   "name": "clip.mp4",
+   "order": 0,
+   "folderId": null,
+   "revision": 1,
+   "contentId": null,
+   "createdAt": "2026-09-15T16:37:45.918Z",
+   "deletedAt": null,
+   "lifecycle": "active",
+   "byteLength": 1087871,
+   "capturedAt": null,
+   "durationUs": null,
+   "trashBatchId": null,
+   "uploadStatus": "pending",
+   "importBatchId": "eb5a6367-f768-4a91-ae27-9fadde273b1a",
+   "publishedAnalysisRevision": null
+  }
+ ],
+ "folders": [],
+ "request": {
+  "files": [
+   {
+    "id": "ff1e761c-1553-42d6-a4e5-a2b00ef6f803",
+    "kind": "audio",
+    "name": "tone.mp3",
+    "path": [],
+    "rootId": null,
+    "sha256": "3745652898184b1ac169a7caced5ed9163efdaa5121a24e78aa438fbf8d857e3",
+    "mimeType": "audio/mpeg",
+    "byteLength": 12890,
+    "lastModified": 1789490034680
+   },
+   {
+    "id": "3d9f103d-d8a0-46dd-95d0-d1f600995abe",
+    "kind": "image",
+    "name": "slide.png",
+    "path": [],
+    "rootId": null,
+    "sha256": "2976b9d36d107b2b286edf19b0b86663fe6883a5c310a7e2fcceffe34701dc1c",
+    "mimeType": "image/png",
+    "byteLength": 1504,
+    "lastModified": 1789490034710
+   },
+   {
+    "id": "58d6a680-33f3-4e10-99d0-5e07a33a1ce1",
+    "kind": "video",
+    "name": "clip.mp4",
+    "path": [],
+    "rootId": null,
+    "sha256": "c4a64478001e489633c65cd821480d14f4c1311a4c366228793829d3687a18bd",
+    "mimeType": "video/mp4",
+    "byteLength": 1087871,
+    "lastModified": 1789490034892
+   }
+  ],
+  "roots": [],
+  "batchId": "eb5a6367-f768-4a91-ae27-9fadde273b1a",
+  "conflicts": {},
+  "sessionId": "try-session-d7f25efb-2486-4f7c-aa30-5fc096321acb",
+  "directories": [],
+  "destinationId": null,
+  "duplicateEntries": "keep",
+  "expectedRevision": 7
+ },
+ "rejected": [],
+ "conflicts": [],
+ "duplicates": [
+  {
+   "id": "ff1e761c-1553-42d6-a4e5-a2b00ef6f803",
+   "existingMediaId": "d1f1504e-fe75-49cf-9487-a568a5d7a5d0"
+  },
+  {
+   "id": "3d9f103d-d8a0-46dd-95d0-d1f600995abe",
+   "existingMediaId": "e33cb5f0-e72e-4065-aa5d-978ba80727f8"
+  }
+ ],
+ "folderMapping": {},
+ "reservedBytes": 1102265,
+ "incompleteEmptyDirectoryRoots": []
+}

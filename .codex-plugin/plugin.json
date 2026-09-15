@@ -1,7 +1,7 @@
 {
   "name": "oh-my-cassette",
-  "version": "0.4.19",
-  "description": "Edit local project media through a self-contained stdio MCP runtime that connects directly to Cassette.",
+  "version": "0.5.0",
+  "description": "Edit video with the Cassette agent from Codex: import local media, send editing turns, read the timeline, export.",
   "author": {
     "name": "Oh My Cassette contributors",
     "url": "https://github.com/Cassette-Editor/oh-my-cassette"
@@ -18,11 +18,31 @@
     "claude"
   ],
   "skills": "./skills/",
-  "mcpServers": "./.codex-plugin/mcp.json",
+  "mcpServers": {
+    "cassette": {
+      "command": "uvx",
+      "args": [
+        "oh-my-cassette==0.5.0"
+      ],
+      "env": {},
+      "env_vars": [
+        "CASSETTE_API_URL",
+        "CASSETTE_WEB_URL",
+        "CASSETTE_AUTH_TOKEN",
+        "CASSETTE_EMAIL",
+        "CASSETTE_PASSWORD",
+        "OH_MY_CASSETTE_HOME",
+        "CASSETTE_MODEL",
+        "CASSETTE_REASONING_EFFORT"
+      ],
+      "startup_timeout_sec": 120,
+      "tool_timeout_sec": 3600
+    }
+  },
   "interface": {
     "displayName": "Oh My Cassette",
-    "shortDescription": "Edit project videos through local MCP",
-    "longDescription": "Use a local stdio MCP runtime to ingest trusted project media, guide Cassette edits, monitor background jobs, answer follow-up questions, review completion, and return validated export artifacts.",
+    "shortDescription": "Edit video with the Cassette agent",
+    "longDescription": "Bind a workspace to a Cassette project, import local media, send the user's editing requests to the Cassette agent one turn at a time, ground replies in the live timeline, undo/redo, and export the final video.",
     "developerName": "Oh My Cassette contributors",
     "category": "Productivity",
     "capabilities": [

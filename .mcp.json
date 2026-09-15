@@ -1,13 +1,14 @@
 {
   "mcpServers": {
     "cassette": {
-      "command": "python3",
-      "args": [
-        "${CLAUDE_PROJECT_DIR:-.}/scripts/run_local_mcp.py"
-      ],
+      "command": "uvx",
+      "args": ["oh-my-cassette==0.5.0"],
       "env": {
-        "CASSETTE_MCP_HOST": "claude"
-      }
+        "CASSETTE_API_URL": "${user_config.api_url}",
+        "CASSETTE_WEB_URL": "${user_config.web_url}",
+        "CASSETTE_AUTH_TOKEN": "${user_config.auth_token}"
+      },
+      "timeout": 3600000
     }
   }
 }

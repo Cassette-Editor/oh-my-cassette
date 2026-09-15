@@ -1,7 +1,7 @@
 {
   "name": "oh-my-cassette",
-  "version": "0.4.19",
-  "description": "Edit local project media through a self-contained stdio MCP runtime that connects directly to Cassette.",
+  "version": "0.5.0",
+  "description": "Edit video with the Cassette agent from Claude Code: import local media, send editing turns, read the timeline, export.",
   "author": {
     "name": "Oh My Cassette contributors",
     "url": "https://github.com/Cassette-Editor/oh-my-cassette"
@@ -9,11 +9,28 @@
   "homepage": "https://github.com/Cassette-Editor/oh-my-cassette",
   "repository": "https://github.com/Cassette-Editor/oh-my-cassette",
   "license": "MIT",
-  "keywords": [
-    "cassette",
-    "video-editing",
-    "media",
-    "mcp"
-  ],
-  "mcpServers": "./.claude-plugin/mcp.json"
+  "keywords": ["cassette", "video-editing", "media", "mcp"],
+  "mcpServers": "./.mcp.json",
+  "userConfig": {
+    "api_url": {
+      "type": "string",
+      "title": "Cassette API URL",
+      "description": "Base URL of the Cassette-Editor backend (render server).",
+      "default": "http://127.0.0.1:8787"
+    },
+    "web_url": {
+      "type": "string",
+      "title": "Cassette web URL",
+      "description": "Base URL of the Cassette web editor, used to build editor links.",
+      "default": "http://127.0.0.1:8080"
+    },
+    "auth_token": {
+      "type": "string",
+      "title": "Cassette access token",
+      "description": "Bearer token for a deployed backend. Leave empty for a local stack started with AGENT_AUTH_ENABLED=false.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    }
+  }
 }

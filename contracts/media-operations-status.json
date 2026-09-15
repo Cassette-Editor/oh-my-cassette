@@ -1,0 +1,161 @@
+{
+ "statuses": [
+  {
+   "mediaFileId": "d1f1504e-fe75-49cf-9487-a568a5d7a5d0",
+   "terminalState": "active",
+   "fileName": "tone.mp3",
+   "uploadStatus": "completed",
+   "fileUrl": "<redacted>",
+   "r2Key": "<redacted>",
+   "metadata": {
+    "size": 12890,
+    "duration": 3,
+    "hasAudio": true,
+    "mimeType": "audio/mpeg",
+    "durationUs": 3000000,
+    "containerFormat": "mp3"
+   },
+   "previewDerivativeId": null,
+   "previewFileUrl": null,
+   "previewStatus": null,
+   "analyzeStatus": null,
+   "searchIndexStatus": null,
+   "description": null,
+   "errorMessage": null,
+   "analysisReady": false,
+   "readinessPhase": "missing_artifact",
+   "operations": {
+    "upload_processing": {
+     "stage": "upload_processing",
+     "status": "succeeded",
+     "attempt": 0,
+     "maxAttempts": 1,
+     "lastError": null,
+     "startedAt": null,
+     "updatedAt": "2026-09-15T16:34:51.987306+00:00",
+     "completedAt": "2026-09-15T16:34:51.987306+00:00",
+     "failedAt": null,
+     "progress": null
+    },
+    "preview_proxy": {
+     "stage": "preview_proxy",
+     "status": "skipped",
+     "attempt": 0,
+     "maxAttempts": 3,
+     "lastError": null,
+     "startedAt": null,
+     "updatedAt": "2026-09-15T16:34:51.987306+00:00",
+     "completedAt": "2026-09-15T16:34:51.987306+00:00",
+     "failedAt": null,
+     "progress": null
+    },
+    "analysis": {
+     "stage": "analysis",
+     "status": "idle",
+     "attempt": 0,
+     "maxAttempts": 3,
+     "lastError": null,
+     "startedAt": null,
+     "updatedAt": "2026-09-15T16:34:51.987306+00:00",
+     "completedAt": null,
+     "failedAt": null,
+     "progress": null
+    },
+    "indexing": {
+     "stage": "indexing",
+     "status": "skipped",
+     "attempt": 0,
+     "maxAttempts": 2,
+     "lastError": null,
+     "startedAt": null,
+     "updatedAt": "2026-09-15T16:34:51.987306+00:00",
+     "completedAt": "2026-09-15T16:34:51.987306+00:00",
+     "failedAt": null,
+     "progress": null
+    }
+   },
+   "aiReady": false,
+   "playbackReady": true,
+   "fullyReady": false,
+   "updatedAt": "2026-09-15T16:34:51.987306+00:00"
+  },
+  {
+   "mediaFileId": "e33cb5f0-e72e-4065-aa5d-978ba80727f8",
+   "terminalState": "active",
+   "fileName": "slide.png",
+   "uploadStatus": "completed",
+   "fileUrl": "<redacted>",
+   "r2Key": "<redacted>",
+   "metadata": {
+    "size": 1504,
+    "hasAudio": false,
+    "mimeType": "image/png",
+    "durationUs": null,
+    "containerFormat": "png"
+   },
+   "previewDerivativeId": null,
+   "previewFileUrl": null,
+   "previewStatus": null,
+   "analyzeStatus": null,
+   "searchIndexStatus": null,
+   "description": null,
+   "errorMessage": null,
+   "analysisReady": false,
+   "readinessPhase": "missing_artifact",
+   "operations": {
+    "upload_processing": {
+     "stage": "upload_processing",
+     "status": "succeeded",
+     "attempt": 0,
+     "maxAttempts": 1,
+     "lastError": null,
+     "startedAt": null,
+     "updatedAt": "2026-09-15T16:34:53.831826+00:00",
+     "completedAt": "2026-09-15T16:34:53.831826+00:00",
+     "failedAt": null,
+     "progress": null
+    },
+    "preview_proxy": {
+     "stage": "preview_proxy",
+     "status": "skipped",
+     "attempt": 0,
+     "maxAttempts": 3,
+     "lastError": null,
+     "startedAt": null,
+     "updatedAt": "2026-09-15T16:34:53.831826+00:00",
+     "completedAt": "2026-09-15T16:34:53.831826+00:00",
+     "failedAt": null,
+     "progress": null
+    },
+    "analysis": {
+     "stage": "analysis",
+     "status": "idle",
+     "attempt": 0,
+     "maxAttempts": 3,
+     "lastError": null,
+     "startedAt": null,
+     "updatedAt": "2026-09-15T16:34:53.831826+00:00",
+     "completedAt": null,
+     "failedAt": null,
+     "progress": null
+    },
+    "indexing": {
+     "stage": "indexing",
+     "status": "skipped",
+     "attempt": 0,
+     "maxAttempts": 2,
+     "lastError": null,
+     "startedAt": null,
+     "updatedAt": "2026-09-15T16:34:53.831826+00:00",
+     "completedAt": "2026-09-15T16:34:53.831826+00:00",
+     "failedAt": null,
+     "progress": null
+    }
+   },
+   "aiReady": false,
+   "playbackReady": true,
+   "fullyReady": false,
+   "updatedAt": "2026-09-15T16:34:53.831826+00:00"
+  }
+ ]
+}

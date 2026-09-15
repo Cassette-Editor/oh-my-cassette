@@ -1,0 +1,61 @@
+{
+ "files": [
+  {
+   "id": "d1f1504e-fe75-49cf-9487-a568a5d7a5d0",
+   "session_id": "try-session-d7f25efb-2486-4f7c-aa30-5fc096321acb",
+   "file_name": "tone.mp3",
+   "file_url": "<redacted>",
+   "r2_key": "<redacted>",
+   "upload_status": "completed",
+   "analyze_status": null,
+   "file_type": "audio",
+   "metadata": {
+    "size": 12890,
+    "duration": 3,
+    "hasAudio": true,
+    "mimeType": "audio/mpeg",
+    "durationUs": 3000000,
+    "containerFormat": "mp3"
+   },
+   "error_message": null,
+   "created_at": "2026-09-15T16:34:50.241461+00:00",
+   "updated_at": "2026-09-15T16:34:51.987306+00:00",
+   "description": null,
+   "folder_id": null,
+   "search_index_status": null,
+   "search_index_error": null,
+   "deleted_at": null,
+   "analysisReady": false,
+   "readinessPhase": "missing_artifact"
+  },
+  {
+   "id": "e33cb5f0-e72e-4065-aa5d-978ba80727f8",
+   "session_id": "try-session-d7f25efb-2486-4f7c-aa30-5fc096321acb",
+   "file_name": "slide.png",
+   "file_url": "<redacted>",
+   "r2_key": "<redacted>",
+   "upload_status": "completed",
+   "analyze_status": null,
+   "file_type": "image",
+   "metadata": {
+    "size": 1504,
+    "width": 640,
+    "height": 360,
+    "hasAudio": false,
+    "mimeType": "image/png",
+    "durationUs": null,
+    "containerFormat": "png"
+   },
+   "error_message": null,
+   "created_at": "2026-09-15T16:34:50.241461+00:00",
+   "updated_at": "2026-09-15T16:34:53.831826+00:00",
+   "description": null,
+   "folder_id": null,
+   "search_index_status": null,
+   "search_index_error": null,
+   "deleted_at": null,
+   "analysisReady": false,
+   "readinessPhase": "missing_artifact"
+  }
+ ]
+}

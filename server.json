@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Cassette-Editor/oh-my-cassette",
   "title": "Oh My Cassette",
-  "description": "Chat-driven AI video montage: beat-synced cuts, auto-matched music, subtitles, transitions.",
-  "version": "0.4.19",
+  "description": "Video editing through the Cassette agent: import media, edit by chat turn, read the timeline, export.",
+  "version": "0.5.0",
   "websiteUrl": "https://cassette-editor.github.io/oh-my-cassette/",
   "icons": [
     {
@@ -18,5 +18,35 @@
     "url": "https://github.com/Cassette-Editor/oh-my-cassette",
     "source": "github",
     "id": "1265161922"
-  }
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "oh-my-cassette",
+      "version": "0.5.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "CASSETTE_API_URL",
+          "description": "Cassette-Editor backend base URL",
+          "isRequired": false,
+          "default": "http://127.0.0.1:8787"
+        },
+        {
+          "name": "CASSETTE_WEB_URL",
+          "description": "Cassette web editor base URL",
+          "isRequired": false,
+          "default": "http://127.0.0.1:8080"
+        },
+        {
+          "name": "CASSETTE_AUTH_TOKEN",
+          "description": "Bearer token for a deployed backend",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
 }
