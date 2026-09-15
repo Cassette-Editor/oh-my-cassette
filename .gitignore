@@ -40,3 +40,5 @@ CLAUDE.md
 .agents/skills/*
 !.agents/skills/cassette-video-edit/
 skills-lock.json
+docs/v2/design.md
+docs/v2/backend-changes.md
