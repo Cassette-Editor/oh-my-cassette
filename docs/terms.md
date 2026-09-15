@@ -13,7 +13,7 @@ top of the licence.
 
 ## The software is MIT licensed
 
-All of it — the MCP server, the skill, and the installer scripts — under the
+All of it — the MCP server and the skill — under the
 [MIT licence](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/LICENSE). You may use,
 copy, modify, and redistribute it, commercially included, provided the copyright notice and
 permission notice travel with it. The licence text governs; nothing here overrides it.

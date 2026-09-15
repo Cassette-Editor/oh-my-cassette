@@ -2,13 +2,14 @@
 title: Oh My Cassette
 ---
 
-Oh My Cassette is an open-source AI video editing plugin and local MCP server for
-[Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex),
-[Hermes Agent](https://github.com/nousresearch/hermes-agent), and [OpenCode](https://opencode.ai).
+Oh My Cassette is an open-source MCP server that lets [Claude Code](https://claude.com/claude-code),
+[Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai) and
+[Hermes Agent](https://github.com/nousresearch/hermes-agent) edit video through the
+[Cassette](https://trycassette.online) editing agent.
 
-Point your agent at a folder of raw clips, describe the video you want, and get back a
-finished, beat-synced cut — shot selection, auto-matched music, subtitles, transitions,
-and picture-in-picture. No timeline, no editing software, no GPU.
+Point your agent at a folder of clips, describe the video you want, and the Cassette agent builds the
+timeline while you watch it in the browser. Every turn comes back with what changed (`v3→v4`), a
+digest of the timeline, and an editor link. Undo, redo and export are one sentence away.
 
 ## Install
 
@@ -24,19 +25,25 @@ codex plugin marketplace add https://github.com/Cassette-Editor/oh-my-cassette.g
 codex plugin add oh-my-cassette@cassette-editor
 ```
 
-Restart your agent, then say:
-*"Edit the clips in ./footage into a 30-second travel vlog with beat-synced cuts."*
+```bash
+# Hermes, OpenCode, any MCP host
+uvx oh-my-cassette==0.5.0
+```
 
-Requires Python 3.11–3.13, `ffmpeg`, and a [Cassette account](https://trycassette.online).
-Per-host setup for OpenCode, Hermes, and any other MCP host is in the
-[README](https://github.com/Cassette-Editor/oh-my-cassette#-quick-start).
+Restart your agent, then say:
+*"Import the clips in ./footage and cut a 30-second travel vlog with a title at the start."*
+
+Requires [uv](https://docs.astral.sh/uv/), `ffmpeg`, and a reachable Cassette backend
+(`CASSETTE_API_URL`; the local development stack by default). Per-host setup is in the
+[README](https://github.com/Cassette-Editor/oh-my-cassette#install).
 
 ## Documentation
 
 - [Showcase](showcase.md) — six real case videos with the exact prompt, inputs, and processing time for each
-- [Development and troubleshooting](development.md) — configuration reference, transports, diagnostics, common runtime problems
+- [Development and troubleshooting](development.md) — architecture, configuration reference, tests, common errors
+- [Backend changes](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/v2/backend-changes.md) — what the Cassette backend still needs for video import
 - [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md) — release history
-- [Support and scope](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SUPPORT.md) — what this plugin covers versus the hosted Cassette service
+- [Support and scope](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SUPPORT.md) — what this plugin covers versus the Cassette service
 - [Contributing](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CONTRIBUTING.md) — development setup and guidelines
 - [Privacy](privacy.md) — what leaves your machine, what stays on it, and how to remove it
 - [Terms of use](terms.md) — the MIT licence in plain language, and where this plugin ends and Cassette begins
@@ -49,13 +56,11 @@ Per-host setup for OpenCode, Hermes, and any other MCP host is in the
 
 ## How it works
 
-The plugin runs locally beside your agent as a stdio MCP server — it opens no port — and
-handles media ingestion, edit planning, and job supervision. Editing and rendering happen
-on [Cassette](https://trycassette.online), a separate hosted service.
+The server runs locally beside your agent over stdio and opens no port. It uploads media through
+presigned URLs, sends each editing request to the Cassette agent runtime as one durable run, follows
+the run's event stream, and reads the versioned project document back when the run ends. Editing and
+rendering happen on the Cassette backend you point it at.
 
-Every editing turn returns a timeline delta, a CTL digest, and a contact sheet, so you
-review the plan before a frame is rendered. The runtime is host-neutral and sessions live
-in a host-agnostic data directory, so an edit started in one host can continue in another.
-
-The plugin is MIT licensed — all of it, including the MCP server and the skill.
+Nine tools cover the whole loop: project, import, run, answer, status, stop, timeline, history, export.
+The plugin is MIT licensed, including the skill.
 [Source on GitHub](https://github.com/Cassette-Editor/oh-my-cassette).

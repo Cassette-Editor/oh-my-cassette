@@ -1,25 +1,15 @@
 # Oh My Cassette
 
-> Oh My Cassette is an open-source AI video editing plugin and local MCP server for Claude Code, Codex, Hermes Agent, and OpenCode. It turns natural-language chat into finished montage videos on Cassette (https://trycassette.online) — beat-synced cuts, auto-matched music, subtitles, transitions, and picture-in-picture.
+> Oh My Cassette is an open-source MCP server (PyPI: `oh-my-cassette`) that lets Claude Code, Codex, OpenCode and Hermes drive the Cassette video editor: import local media, send the user's editing requests to the Cassette agent one turn at a time, read the versioned timeline back, undo/redo, and export.
 
-Claude Code, Codex, Hermes Agent, and OpenCode launch the same local stdio MCP runtime. It handles media ingestion, edit planning, and job supervision; editing and rendering happen on the Cassette cloud service. Each editing turn returns a timeline delta, a CTL digest, and a contact-sheet JPEG saved locally with a clickable link, so an edit can be reviewed before anything renders. The runtime emits no editor deep link, and agents must not construct one. MIT licensed. Requires a Cassette account.
+Hosts start it with `uvx oh-my-cassette==0.5.0`. It talks to a Cassette-Editor backend (`/api/agent/*` runtime) over HTTP and SSE; nothing renders during an edit. Each turn returns a typed `status`, the agent's answer, `version_from→version_to`, a bounded timeline digest and an `editor_url` the user can open to watch live. MIT licensed.
 
 ## Docs
 
-- [README](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.md): overview, case videos with prompts, and per-host install guides (Claude Code, Codex, OpenCode, Hermes, any MCP host)
-- [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md): release history
-- [Showcase](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/showcase.md): six real case videos with the exact prompt, inputs, and processing time for each
-- [Support and scope](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SUPPORT.md): what this plugin covers versus the hosted Cassette service, and where to report what
-- [Contributing](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CONTRIBUTING.md): development setup and guidelines
-- [Privacy](https://cassette-editor.github.io/oh-my-cassette/privacy): what the plugin sends where, what it stores locally, and how to delete it
-- [Terms of use](https://cassette-editor.github.io/oh-my-cassette/terms): MIT licence summary, and the boundary between this plugin and the hosted Cassette service
-- [Development and troubleshooting](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/development.md): configuration reference, transports, diagnostics, common runtime problems
-
-## Try it
-
-- [Public web demo](https://trycassette.online/agent-demo): the full workflow in a browser, no install (evaluation only)
-- [Cassette](https://trycassette.online): the AI video editing service the plugin drives
-
-## Optional
-
-- [简体中文 README](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.zh-cn.md)
+- [README](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.md): overview, install per host, configuration
+- [Install guide for agents](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/llms-install.md)
+- [Skill](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/skills/cassette-video-edit/SKILL.md): how a host should drive the nine tools
+- [Development](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/development.md): architecture, tests, live stack
+- [Backend changes](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/v2/backend-changes.md): what Cassette-Editor still needs for video import
+- [Showcase](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/showcase.md)
+- [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md)

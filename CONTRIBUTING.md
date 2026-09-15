@@ -1,6 +1,8 @@
 # Contributing to Oh My Cassette
 
-Thanks for helping. This repository ships three adapters—Codex, Claude, and Hermes—so changes must preserve their isolation as well as shared-core behavior. The browser-based web demo lives in [oh-my-cassette-web](https://github.com/Cassette-Editor/oh-my-cassette-web).
+Thanks for helping. This repository is a single Python package (`src/oh_my_cassette`) that every host
+runs the same way, plus one skill that is copied to two places. Changes must keep the tool contract
+(the typed `status` results) and the backend contract (`contracts/`) intact.
 
 ## Conventional commits
 
@@ -12,110 +14,57 @@ Release Please derives versions and changelog entries from commits on `main`:
 - `docs: …`, `ci: …`, `chore: …`, `test: …`, and `refactor: …` — no release bump by themselves.
 
 PRs are squash-merged using the PR title, so the title must itself be a conventional commit line.
-
-Branch from `main` and target `main`. The `release` branch is machine-owned — the release workflow force-pushes it to each new tag so Codex and Claude install a tested release rather than `main`. Anything committed there is lost at the next release. See [RELEASING.md](RELEASING.md) for the channel map.
+Branch from `main` and target `main`. The `release` branch is machine-owned (see [RELEASING.md](RELEASING.md)).
 
 ## Development setup
 
 ```bash
-uv venv --python 3.13 .venv
-uv pip install --python .venv/bin/python \
-  -r requirements-mcp.lock pytest pytest-xdist pyyaml
+uv sync --group dev          # creates .venv with the package, pytest, ruff, starlette, uvicorn
+uv run pytest -q             # fake backend, no network, ~10 s
+uv run ruff check src tests
+uv run ruff format src tests
 ```
 
-Run the CI-equivalent checks:
+`ffmpeg`/`ffprobe` must be on PATH: the video-import and contact-sheet tests use them.
+
+Run the server from the checkout inside a host while you work:
 
 ```bash
-uvx ruff@0.15.22 check .
-uvx ruff@0.15.22 format --check .
-.venv/bin/python -m compileall -q .
-.venv/bin/python -m pytest -q -rs -n 4 --dist loadfile
+claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -- uv run --directory "$PWD" oh-my-cassette
 ```
 
-`ruff format .` fixes formatting in place; configuration lives in `pyproject.toml`. The
-version is pinned because ruff's default rule set changes between minor releases — an
-unpinned `uvx ruff` reports hundreds of findings CI does not. `pyproject.toml` sets
-`required-version`, so a mismatched ruff refuses to run instead of inventing errors.
+## Tests
 
-Validate native packaging with supported host CLIs:
+- `tests/fake_cassette/` is a Starlette fake of the backend routes the plugin uses. Every tool has an
+  end-to-end test through the real MCP client (`tests/test_tools_smoke.py` and the per-area files).
+- `tests/test_models.py` validates the pydantic mirrors against the JSON captured in `contracts/`.
+  When the backend changes a payload, recapture the file (see `contracts/README.md`) rather than
+  loosening the model.
+- `tests/test_manifests.py` pins the version and the `uvx oh-my-cassette==X.Y.Z` pins across every
+  manifest, and checks that both skill copies are identical and mention every tool.
+- Live tests run against a local Cassette-Editor stack and are skipped by default:
 
-```bash
-python3 /path/to/plugin-creator/scripts/validate_plugin.py .
-claude plugin validate --strict .claude-plugin/plugin.json
-claude plugin validate --strict .claude-plugin/marketplace.json
-```
+  ```bash
+  RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q -rs
+  RUN_CASSETTE_LIVE=1 RUN_CASSETTE_LIVE_EXPORT=1 uv run pytest tests/live -q -rs   # also renders
+  ```
 
-The CI `native-packaging` job also smoke-installs the plugin with pinned Codex and Claude CLI versions and launches the MCP through `claude mcp list`, which performs a real stdio initialize against every configured server. `mcp-macos-smoke` exercises the locked launcher and real stdio protocol on macOS; the Python matrix covers 3.11 and 3.13 on Ubuntu.
+CI runs lint and the fake-backend suite on Linux only (Python 3.11 and 3.13), builds the wheel and
+starts it once with `uvx`. Keep it credential-free and deterministic.
 
-To exercise the MCP inside real hosts locally:
+## Adding or changing a tool
 
-```bash
-# Claude project scope: the repo-root .mcp.json launches this checkout directly.
-claude mcp list           # run inside the repo; expect "cassette: … ✔ Connected"
+1. Implement it in `src/oh_my_cassette/tools/` and register it in `server.py` (add the name to
+   `TOOL_NAMES`).
+2. Return a dict with a typed `status`; wrap failures with `@guarded` so errors come back as
+   `{"status": "failed", "error": {...}}` instead of exceptions.
+3. Add the fake route(s) and a test.
+4. Document it in `skills/cassette-video-edit/SKILL.md` and copy the file to
+   `.agents/skills/cassette-video-edit/SKILL.md` (the manifest test fails if the copies differ or a
+   tool is undocumented).
+5. Update `README.md` and `README.zh-cn.md` together.
 
-# Claude plugin: install from this checkout into an isolated HOME, then health-check.
-# The marketplace pins the plugin to the `release` branch, so the source must be
-# rewritten to a relative path first or Claude clones a published tag instead.
-tmp_home="$(mktemp -d)"
-tmp_repo="$(mktemp -d)/repo"
-cp -R "$PWD" "$tmp_repo"
-jq '.plugins[0].source="./"' "$tmp_repo/.claude-plugin/marketplace.json" > "$tmp_repo/m.json"
-mv "$tmp_repo/m.json" "$tmp_repo/.claude-plugin/marketplace.json"
-HOME="$tmp_home" claude plugin marketplace add "$tmp_repo" --scope user
-HOME="$tmp_home" claude plugin install oh-my-cassette@cassette-editor --scope user
-(cd "$(mktemp -d)" && HOME="$tmp_home" claude mcp list)
+## What not to commit
 
-```
-
-For the Codex side, follow the `Smoke-install with Codex CLI` step in `.github/workflows/ci.yml` — it rewrites the marketplace source to `local`, installs into an isolated `CODEX_HOME`, and asserts the resolved server config with `codex mcp get cassette --json`.
-
-`tests/test_mcp_host_launch.py` covers the same three launch paths deterministically: it parses each host config file, resolves variables the way that host does, and completes initialize + tools/list over stdio.
-
-## Architecture rules
-
-- `mcp_plugin` may reuse repository core modules, but it must not depend on any host-specific adapter.
-- Hermes keeps its hooks, commands, notifier, gateway roots, and `.env` behavior.
-- Codex and Claude use the protected host-neutral config/data roots and the host-neutral skill under `skills/`.
-- Keep the 14 tool names in parity unless a deliberate compatibility change is approved.
-- Never make prompt wording the enforcement boundary for routing, transitions, tool choice, progress, completion, recovery, or export. Use Pydantic schemas, typed persisted state, runtime transition validation, bound tools, and deterministic tests.
-- Semantic keyword/regex classifiers and fixed semantic counters must not be added for agent routing or public gate decisions. Mechanical parsing, sanitization, redaction, exact schema checks, and named runtime budgets are allowed.
-- MCP stdout is protocol-only. Send diagnostics to stderr.
-- Return media as validated metadata/resource links; never embed large media bytes or add a generic file-reading surface.
-
-## Dependencies and generated locks
-
-`requirements-mcp.in` pins the MCP SDK. Regenerate universal locks with the supported `uv` version when dependencies change:
-
-```bash
-uv pip compile --python-version 3.11 --universal --no-emit-index-url \
-  requirements-mcp.in -o requirements-mcp.lock
-```
-
-The launcher hashes the lock and reconciles its plugin-managed environment on first start or upgrade.
-
-## Tests and live acceptance
-
-PR CI must remain deterministic and credential-free. Mock protocol tests should initialize a real stdio process and cover success, validation/error envelopes, auth, state transitions, restart/resume, cancellation, long-polling, artifact links, path containment, and redaction.
-
-Real Cassette acceptance is maintainer-triggered:
-
-```bash
-CASSETTE_AUTH_EMAIL=… CASSETTE_AUTH_PASSWORD=… \
-.venv/bin/python scripts/e2e_local_mcp.py \
-  --host codex --transport api \
-  --media /absolute/path/to/test.mp4 \
-  --instruction "Make a short captioned video."
-```
-
-Use a realistic non-sensitive clip and ephemeral environment variables. Never paste credentials into test source, command history intended for sharing, logs, a PR body, or fixtures. Rotate any password that was shared in conversation after acceptance.
-
-## Pull requests
-
-- Keep `README.md` and `README.zh-cn.md` natural, semantically matched counterparts.
-- Update both plugin manifests and both marketplaces when packaging changes.
-- Update `plugin.yaml` when Hermes tool/hook registration changes.
-- Adapt `.env.example`, security, release, CI, and troubleshooting docs when configuration changes.
-- Preserve unrelated working-tree changes and never commit runtime state.
-- Include verification evidence and the tested Codex/Claude CLI versions in the PR body.
-
-See [SECURITY.md](./SECURITY.md) before handling credentials or media.
+`.venv`, `exports/`, anything under `~/.oh-my-cassette`, real tokens or passwords, media beyond the
+tiny fixtures in `tests/fixtures/`, and backend URLs that are not the local defaults.

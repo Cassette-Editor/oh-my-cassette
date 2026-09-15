@@ -3,160 +3,102 @@
 [← 返回 README](../README.zh-cn.md)
 
 > [!TIP]
-> 加入我们的Discord社区和`oh-my-cassette` 用户一起交流
+> 加入我们的 Discord 社区和 `oh-my-cassette` 用户一起交流
 >
 > [![Discord](https://img.shields.io/discord/1514649803626250452?style=for-the-badge&logo=discord&logoColor=white&label=Discord&labelColor=black&color=5865F2)](https://discord.gg/qd9NY4k8d7)
 
-## 常见问答
+## 整体结构
 
-### 1. 为什么 Hermes Agent 在 QQ 或 Telegram 中没有响应？
-
-请检查 Hermes Agent 的模型配置、网络连接和 API 连通性。你也可以重启网关：
-
-```bash
-hermes gateway stop
-hermes gateway restart
+```text
+宿主 (Claude Code / Codex / OpenCode / Hermes)
+  └─ stdio ─ uvx oh-my-cassette            src/oh_my_cassette/server.py   9 个工具 + instructions
+               ├─ tools/                     project · media · run · timeline · export
+               ├─ app.py                     组装：settings、state、HTTP、各 client
+               ├─ cassette/                  HTTP + SSE 客户端，后端契约的 pydantic 镜像
+               │    projects · agent · media · export · prepare (ffmpeg) · auth
+               ├─ render/                    时间线摘要 / delta，本地 contact sheet
+               └─ state.py                   ~/.oh-my-cassette/state.json
+                        │ HTTP + SSE
+                        ▼
+              Cassette-Editor 后端           /api/projects · /api/agent · /api/media · /api/export
 ```
 
-### 2. 为什么连接 Cassette 时出现网络问题？
+一次剪辑 turn（`cassette_run`）：
 
-请检查是否可以访问 https://sg.trycassette.online/agent 或 https://trycassette.online/agent 。如果无法访问，请检查网络设置，确保可以打开 Cassette。
+1. 解析项目：显式 `project_id` → 当前目录的绑定 → 最近使用的项目（`app.resolve`）。
+2. `POST /api/agent/sessions/<chat>/commands` 发送 `start` 命令（幂等键由项目、会话、turn 序号和消息推导；`expectedRevision` 来自 `/state`，409 时重试一次）。
+3. 跟随 `GET /api/agent/sessions/<chat>/events?after=<cursor>`（SSE）。持久事件转成进度通知；`run_terminal` / `run_aborted` / `run_failed` 结束这个 turn。流断开后从最后的 sequence 重连；流提前结束则重读 run 记录。
+4. 重读项目快照，计算 `version_from→version_to`、delta 和摘要。
+5. 持久化事件游标和 run id，宿主超时后 `cassette_status` 可以接回。
 
-### 3. 为什么运行速度比较慢？
-
-剪辑过程取决于 Hermes Agent 的 API 延迟和 Cassette 服务负载。根据任务复杂度、所选模型和思考等级不同，一次剪辑任务大约需要 5-20 分钟。
-
-如果 Hermes 或 Cassette 卡住，可以先发送 `/cut` 停止当前 Cassette 剪辑，再发送 `/stop` 停止 Hermes。之后可以在同一个会话中重试。
-
-## 诊断
-
-诊断 Codex 与 Claude 本地 MCP 插件：
-
-```bash
-python3 scripts/diagnose_local_mcp.py
-```
-
-它会检查运行时引导、受保护配置、项目与媒体根目录，以及与客户端无关的数据路径，并且不会输出凭据。常见 MCP 错误都带有可执行的说明：`auth_required` 会提供私人设置命令，`source_path_not_allowed` 会指出可信目录问题。
-
-诊断 Hermes：
-
-```bash
-python3 scripts/diagnose_install.py
-```
-
-诊断项包括：
-
-- 插件安装路径（符号链接安装和 `hermes plugins install` 的 git 克隆安装都能识别）；
-- 插件是否已在 Hermes 中启用；
-- `~/.hermes/.env` 中的配置值，并隐藏敏感信息；
-- `ffmpeg` 和 `ffprobe`；
-- Cassette 地址是否可访问；
-- 通过 agent-auth 接口检查 Cassette 登录凭据；
-- Hermes 网关状态。
-
-如果接收媒体时报错 `transcoder_missing`，请重新运行安装器，让它记录明确的 `CASSETTE_FFMPEG_BIN` 和 `CASSETTE_FFPROBE_BIN` 路径：
-
-```bash
-python3 scripts/install_plugin.py \
-  --skip-plugin-enable \
-  --skip-cassette-url \
-  --skip-cassette-auth \
-  --skip-jamendo-auth
-```
+run 在服务端是持久的，所以插件没有任务队列也没有 worker：关掉宿主不会丢 run。
 
 ## 配置
 
-Codex 与 Claude 共用操作系统标准的 Oh My Cassette 配置和数据目录，其凭据与任务状态和 Hermes 相互独立。当前客户端打开的项目会自动加入可信范围；其他媒体目录必须通过 `setup_local_mcp.py --allowed-root` 显式添加。
+全部是环境变量，见 [README 的配置表](../README.zh-cn.md#配置)。默认值指向本地 Cassette-Editor 开发栈（API `http://127.0.0.1:8787`，web `http://127.0.0.1:8080`），不带凭证。
 
-安装器会把常规运行时设置写入 `~/.hermes/.env`。你也可以手动编辑该文件。
+工具作用的项目按此优先级：`project_id` 参数 → `state.json` 里当前目录的绑定 → 最近使用的项目。`cassette_project` 的 `action=open` 把已有项目绑定到当前目录。
 
+## 运行本地 Cassette 栈
 
-最小可用配置示例：
-
-```bash
-CASSETTE_URL=https://sg.trycassette.online/agent
-CASSETTE_AUTH_EMAIL=you@example.com
-CASSETTE_AUTH_PASSWORD=your-generated-cassette-password
-CASSETTE_ASSET_ROOT=$HOME/.hermes/cassette
-CASSETTE_HEADLESS=true
-CASSETTE_FORCE_H264=true
-```
-
-默认媒体来源目录：
-
-```text
-~/.hermes/qqbot
-~/.hermes/telegram
-~/.hermes/weixin
-~/.hermes/cache
-~/.hermes/tmp
-```
-
-如果你的网关把媒体保存在其他位置：
+在 Cassette-Editor 仓库里：
 
 ```bash
-CASSETTE_ALLOWED_SOURCE_ROOTS="$HOME/.hermes/qqbot:$HOME/.hermes/telegram:$HOME/.hermes/cache:$HOME/.hermes/tmp:/path/to/media"
+AGENT_AUTH_ENABLED=false bun run dev:lambda
 ```
 
-可选的 Jamendo 智能配乐配置：
+web 编辑器在 `:8080`，API 在 `:8787`，worker 在 `:8788`，插件无需账号即可工作。绕过登录时插件创建匿名 demo 项目（`try-session-<uuid>`），编辑器链接是 `http://127.0.0.1:8080/try?projectSessionId=<uuid>`。
 
-```bash
-JAMENDO_CLIENT_ID=your_client_id
-```
-
-请在 [Jamendo 开发者门户](https://devportal.jamendo.com/)创建只读应用并复制 Client ID。只读音乐流程不会使用或要求 Client Secret。BYOK 仅把 API 访问与配额归到用户自己的 Jamendo 应用，并不授予所选音乐的商用权；发布前请核对每首曲目的许可与署名要求。
+对未改动的后端，视频导入会返回 `video_import_requires_backend_update`：上传注册只接受浏览器端的媒体处理器，需要的改动见 [v2/backend-changes.md](./v2/backend-changes.md)。音频/图片导入、run、历史、导出现在都可用。
 
 ## 开发
 
-
-创建本地测试环境：
-
 ```bash
-uv venv .venv
-uv pip install --python .venv/bin/python pytest
+uv sync --group dev
+uv run pytest -q                                   # 假后端（tests/fake_cassette），约 10 秒
+uv run ruff check src tests && uv run ruff format --check src tests
+RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q -rs                              # 本地栈
+RUN_CASSETTE_LIVE=1 RUN_CASSETTE_LIVE_EXPORT=1 uv run pytest tests/live -q -rs   # 再加一次真实渲染
+uv build && uvx --from dist/*.whl oh-my-cassette --version
 ```
 
-运行检查：
+在宿主里直接跑检出的代码：
 
 ```bash
-python3 -m compileall -q .
-.venv/bin/python -m pytest -q
+claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -e OH_MY_CASSETTE_HOME=/tmp/omc-dev \
+  -- uv run --directory "$PWD" oh-my-cassette
 ```
 
-使用开发环境运行真实的 stdio MCP 进程：
+`OH_MY_CASSETTE_HOME` 让开发用的状态文件与真实的分开。
 
-```bash
-CASSETTE_MCP_SKIP_BOOTSTRAP=1 \
-CASSETTE_MCP_PYTHON="$PWD/.venv/bin/python" \
-.venv/bin/python scripts/run_local_mcp.py
-```
+### 后端契约
 
-确定性测试会覆盖核心能力对齐、全部 14 个工具、真实 stdio 协议调用、长轮询、重启与续跑、状态转换、资源链接、身份验证和文件系统安全、两种插件清单，以及现有 Hermes 测试。由维护者手动触发的实时 E2E 会通过临时环境变量读取仓库 Secret；PR CI 本身不使用凭据。
+`contracts/` 是从真实后端抓取的 JSON（session state、chat session、snapshot、命令结果、run 事件、媒体状态、导入清单、时间线历史）。`tests/test_models.py` 用它们校验 `cassette/models.py` 里的 pydantic 镜像。响应用 `extra="allow"` 解析，后端新增字段不会弄坏插件；请求用 `extra="forbid"`，请求模型里的拼写错误会在测试里失败而不是打到后端。后端改了 payload 时按 `contracts/README.md` 重新抓取。
 
-运行本地 Cassette 端到端测试工具：
+### 新增工具
 
-```bash
-.venv/bin/python scripts/e2e_local_cassette.py \
-  --media tests/fixtures/sample.mp4 \
-  --instruction "制作一个 10 秒以内、带字幕的短视频。"
-```
+在 `tools/` 实现，在 `server.py` 注册并加入 `TOOL_NAMES`，返回带类型化 `status` 的 dict，用 `@guarded` 包住，补假后端路由和测试，然后写进 `skills/cassette-video-edit/SKILL.md`（再复制到 `.agents/skills/cassette-video-edit/`）。工具没写进 skill 或两份 skill 不一致时 `tests/test_manifests.py` 会失败。
 
-网页演示已经不在本仓库内，迁到了 [oh-my-cassette-web](https://github.com/Cassette-Editor/oh-my-cassette-web)，连同它自己的 FastAPI 服务、Vite/React 前端和部署模板。它跑在一个共享的 Cassette 账号上，依赖 Playwright 传输——这正是它没法跟着本仓库切到 agent 账号 API 路径的原因。
+## 排障
 
-真实网关端到端测试是可选项，默认会跳过：
+| 结果 | 含义 | 处理 |
+|---|---|---|
+| `error.code = no_project` | 当前目录没有绑定项目，之前也没用过。 | `cassette_project`（`create` 或 `open <id>`）。 |
+| `cassette_import` 条目 `file_not_found` / `unsupported_type` | 路径不存在，或扩展名不是视频/音频/图片。 | 用绝对路径；转换文件。 |
+| 条目 `video_import_requires_backend_update` | 后端拒绝了 ffmpeg 的准备档案。 | 先落地 [v2/backend-changes.md](./v2/backend-changes.md) 的 P0 改动。 |
+| 条目 `failed` 且带 `readiness` | 后端处理失败或超时（`CASSETTE_IMPORT_READY_TIMEOUT_SEC`）。 | 看 worker 日志；重新导入。 |
+| `cassette_run` → `needs_input` | agent 提了问题。 | 把 `question` 给用户看，再 `cassette_answer`。 |
+| `cassette_run` → `timeout` | turn 超过了 `CASSETTE_RUN_TIMEOUT_SEC` 或宿主的工具超时。 | `cassette_status` 接回；把宿主超时调到一小时。 |
+| `cassette_run` → `running` 且带 `note` | 项目上已经有 run 在跑。 | 用 `cassette_status` 等待，或 `cassette_stop`。 |
+| `cassette_history` → `rejected`（`at_start`、`at_end`、`target_not_found`） | 没有可撤销/重做的内容，或 group id 未知。 | `cassette_history list`。 |
+| `error.code = project_timeline_locked` | run 进行中，历史只读。 | 等 run 结束再试。 |
+| 导出 `error.code = timeline_empty` | 活动序列没有 clip。 | 先剪辑。 |
+| `error.code = contact_sheet_unavailable` | 没有任何 clip 的原始素材在本机。 | 从本机导入素材，或不传 `contact_sheet`。 |
+| `error` 里 HTTP 401/403 | 后端需要账号。 | 设置 `CASSETTE_AUTH_TOKEN` 或邮箱密码，或用 `AGENT_AUTH_ENABLED=false` 启动栈。 |
+| Connection refused | `CASSETTE_API_URL` 上没有服务。 | 启动栈；检查宿主配置里的 URL。 |
 
-```bash
-RUN_CASSETTE_E2E=1 .venv/bin/python -m pytest -q -m e2e
-```
+服务端日志输出到 stderr（`OH_MY_CASSETTE_LOG=DEBUG`），宿主会在 MCP 日志视图里显示。
 
 ## 公共仓库安全
 
-请不要提交：
-
-- `.env` 或 `.env.e2e`；
-- 真实网关令牌、账号 ID、聊天 ID 或原始 `wxid`；
-- Cassette 凭据；
-- Jamendo 凭据；
-- 下载的媒体、导出文件、任务状态、浏览器追踪记录或本地运行时缓存。
-
-Hermes 运行时状态应保存在 `~/.hermes/cassette`；Codex 与 Claude 的状态应保存在操作系统标准的 Oh My Cassette 数据目录。它们都不应写进这个仓库。
+不要提交 `.env`、token 或密码、非本地默认值的后端 URL、`tests/fixtures/` 之外的媒体、导出文件，以及 `~/.oh-my-cassette` 里的任何东西。

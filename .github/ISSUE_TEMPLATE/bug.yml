@@ -32,7 +32,7 @@ body:
       placeholder: |
         1. Ran `claude plugin install oh-my-cassette@cassette-editor`
         2. Asked the agent to edit ./footage
-        3. Expected the ingest to start; got `source_path_not_allowed` instead
+        3. Expected the import to start; got `file_not_found` instead
     validations:
       required: true
 
@@ -80,9 +80,9 @@ body:
     attributes:
       label: Plugin version
       description: >-
-        From `claude plugin details oh-my-cassette@cassette-editor`, or the
-        contents of `version.txt` in a checkout.
-      placeholder: "0.4.2"
+        Output of `uvx oh-my-cassette==<pinned version> --version`, or the pin
+        in your host config.
+      placeholder: "0.5.0"
     validations:
       required: true
 
@@ -97,20 +97,12 @@ body:
   - type: textarea
     id: diagnose
     attributes:
-      label: Diagnostic output
+      label: Tool result and server log
       description: >-
-        Run the diagnostic for your host and paste the whole output. It reports
-        bootstrap, config, transport, and media-root state, and it does not print
-        credentials.
-
-
-        - Claude Code / Codex / OpenCode: `python3 scripts/diagnose_local_mcp.py`
-
-        - Hermes: `python3 scripts/diagnose_install.py`
-
-
-        Installed through a plugin marketplace and don't have the scripts? Say so
-        here and paste whatever error text you have instead.
+        Paste the full JSON the tool returned (every tool returns a typed
+        `status`; failures carry `error.code`). If the server itself misbehaves,
+        add its stderr with `OH_MY_CASSETTE_LOG=DEBUG` set in the host's server
+        environment. Neither contains credentials.
       render: text
     validations:
       required: true
