@@ -60,11 +60,6 @@ This serves the web editor on `:8080`, the API on `:8787` and the worker on `:87
 plugin work without an account. Under this bypass the plugin creates anonymous demo projects
 (`try-session-<uuid>`); the editor link is `http://127.0.0.1:8080/try?projectSessionId=<uuid>`.
 
-Video import against the stock backend returns `video_import_requires_backend_update` because the
-upload registration only accepts the browser's media processor; the change needed is described in
-[v2/backend-changes.md](./v2/backend-changes.md). Audio and image import, runs, history and export
-work today.
-
 ## Development
 
 ```bash
@@ -107,7 +102,6 @@ dict with a typed `status`, wrap it with `@guarded`, add a fake route and a test
 |---|---|---|
 | `error.code = no_project` | No project is bound to this directory and none was used before. | `cassette_project` (`create` or `open <id>`). |
 | `cassette_import` item `file_not_found` / `unsupported_type` | Path does not exist, or the extension is not video/audio/image. | Use an absolute path; convert the file. |
-| item `video_import_requires_backend_update` | The backend rejected the ffmpeg preparation profile. | Land the P0 change in [v2/backend-changes.md](./v2/backend-changes.md). |
 | item `failed` with `readiness` | The backend's processing failed or timed out (`CASSETTE_IMPORT_READY_TIMEOUT_SEC`). | Check the worker log; re-import. |
 | `cassette_run` → `needs_input` | The agent asked a question. | Show `question` to the user, then `cassette_answer`. |
 | `cassette_run` → `timeout` | The turn outlived `CASSETTE_RUN_TIMEOUT_SEC` or the host's tool timeout. | `cassette_status` re-attaches; raise the host timeout to an hour. |

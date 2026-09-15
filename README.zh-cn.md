@@ -69,8 +69,6 @@ OpenCode 与其它 MCP 宿主见下文[安装](#安装)。然后启动 Cassette 
 
 支持的导入格式：视频 `mp4`、`mov`；音频 `mp3`、`wav`、`m4a`、`aac`、`ogg`、`oga`、`opus`、`flac`；图片 `jpg`、`jpeg`、`png`、`gif`、`webp`、`bmp`、`avif`。
 
-> 对未改动的 `main` 后端，视频导入目前会返回 `video_import_requires_backend_update`，需要先落地 [docs/v2/backend-changes.md](./docs/v2/backend-changes.md) 里的一处小改动。音频、图片、剪辑、历史、导出已经可用。
-
 ## 配置
 
 全部通过环境变量，四个宿主的配置方式完全一致。
@@ -182,7 +180,7 @@ RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q    # 对本地 Cassette-Editor �
 uv run oh-my-cassette                              # server 本体（stdio）
 ```
 
-架构见 [docs/development.md](./docs/development.md)，0.5 设计见 [docs/v2/design.md](./docs/v2/design.md)，后端待改项见 [docs/v2/backend-changes.md](./docs/v2/backend-changes.md)，PyPI 发布流程见 [RELEASING.md](./RELEASING.md)。
+架构见 [docs/development.md](./docs/development.md)，PyPI 发布流程见 [RELEASING.md](./RELEASING.md)。
 
 ## 许可证
 

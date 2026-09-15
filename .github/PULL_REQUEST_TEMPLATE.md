@@ -38,6 +38,4 @@ you ran and what came back.
 
 The editing engine — shot selection, pacing, rendering — lives in the Cassette backend, not this
 repository. Changes to *how the AI edits* can't be merged here; this repo covers the client, its
-tools and host integrations. Backend changes the client needs are tracked in
-[docs/v2/backend-changes.md](../blob/main/docs/v2/backend-changes.md). See
-[SUPPORT.md](../blob/main/SUPPORT.md).
+tools and host integrations. See [SUPPORT.md](../blob/main/SUPPORT.md).

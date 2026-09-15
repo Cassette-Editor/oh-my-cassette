@@ -215,7 +215,7 @@ class MediaClient:
                     raise CassetteError(
                         "video_import_requires_backend_update",
                         "this Cassette backend only accepts browser-prepared video (mediabunny). "
-                        "Audio and images import fine; video needs the backend change described in docs/v2/backend-changes.md.",
+                        "Audio and images import fine; this backend does not accept video prepared outside the browser yet.",
                         details=exc.details,
                     ) from exc
                 raise

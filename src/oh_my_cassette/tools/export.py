@@ -50,7 +50,7 @@ def register(server: MCPServer, app: App) -> None:
         )
         if final.status != "done" and _transient_storage_failure(final):
             # The backend occasionally refuses its own object reservation on a fresh project
-            # (docs/v2/backend-changes.md, P2); a second job goes through.
+            # (seen on fresh projects); a second job goes through.
             await progress("storage reservation refused; creating the export job again")
             job = await app.export.create_job(manifest)
             final = await app.export.wait(

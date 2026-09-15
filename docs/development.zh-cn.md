@@ -49,8 +49,6 @@ AGENT_AUTH_ENABLED=false bun run dev:lambda
 
 web 编辑器在 `:8080`，API 在 `:8787`，worker 在 `:8788`，插件无需账号即可工作。绕过登录时插件创建匿名 demo 项目（`try-session-<uuid>`），编辑器链接是 `http://127.0.0.1:8080/try?projectSessionId=<uuid>`。
 
-对未改动的后端，视频导入会返回 `video_import_requires_backend_update`：上传注册只接受浏览器端的媒体处理器，需要的改动见 [v2/backend-changes.md](./v2/backend-changes.md)。音频/图片导入、run、历史、导出现在都可用。
-
 ## 开发
 
 ```bash
@@ -85,7 +83,6 @@ claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -e OH_MY_CASSETTE_HOME=/
 |---|---|---|
 | `error.code = no_project` | 当前目录没有绑定项目，之前也没用过。 | `cassette_project`（`create` 或 `open <id>`）。 |
 | `cassette_import` 条目 `file_not_found` / `unsupported_type` | 路径不存在，或扩展名不是视频/音频/图片。 | 用绝对路径；转换文件。 |
-| 条目 `video_import_requires_backend_update` | 后端拒绝了 ffmpeg 的准备档案。 | 先落地 [v2/backend-changes.md](./v2/backend-changes.md) 的 P0 改动。 |
 | 条目 `failed` 且带 `readiness` | 后端处理失败或超时（`CASSETTE_IMPORT_READY_TIMEOUT_SEC`）。 | 看 worker 日志；重新导入。 |
 | `cassette_run` → `needs_input` | agent 提了问题。 | 把 `question` 给用户看，再 `cassette_answer`。 |
 | `cassette_run` → `timeout` | turn 超过了 `CASSETTE_RUN_TIMEOUT_SEC` 或宿主的工具超时。 | `cassette_status` 接回；把宿主超时调到一小时。 |

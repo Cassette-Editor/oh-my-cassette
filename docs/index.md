@@ -41,7 +41,6 @@ Requires [uv](https://docs.astral.sh/uv/), `ffmpeg`, and a reachable Cassette ba
 
 - [Showcase](showcase.md) — six real case videos with the exact prompt, inputs, and processing time for each
 - [Development and troubleshooting](development.md) — architecture, configuration reference, tests, common errors
-- [Backend changes](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/v2/backend-changes.md) — what the Cassette backend still needs for video import
 - [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md) — release history
 - [Support and scope](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SUPPORT.md) — what this plugin covers versus the Cassette service
 - [Contributing](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CONTRIBUTING.md) — development setup and guidelines

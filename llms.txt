@@ -10,6 +10,5 @@ Hosts start it with `uvx oh-my-cassette==0.5.0`. It talks to a Cassette-Editor b
 - [Install guide for agents](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/llms-install.md)
 - [Skill](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/skills/cassette-video-edit/SKILL.md): how a host should drive the nine tools
 - [Development](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/development.md): architecture, tests, live stack
-- [Backend changes](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/v2/backend-changes.md): what Cassette-Editor still needs for video import
 - [Showcase](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/showcase.md)
 - [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md)

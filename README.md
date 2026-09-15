@@ -71,8 +71,6 @@ Six real cases edited end to end through Oh My Cassette, each with the exact pro
 
 Supported imports: video `mp4`, `mov`; audio `mp3`, `wav`, `m4a`, `aac`, `ogg`, `oga`, `opus`, `flac`; image `jpg`, `jpeg`, `png`, `gif`, `webp`, `bmp`, `avif`.
 
-> Video import against the stock `main` backend currently fails with `video_import_requires_backend_update` until the small backend change in [docs/v2/backend-changes.md](./docs/v2/backend-changes.md) lands. Audio, images, editing, history and export already work.
-
 ## Configuration
 
 Everything is an environment variable, so all four hosts configure the server the same way.
@@ -184,7 +182,7 @@ RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q    # against a local Cassette-Ed
 uv run oh-my-cassette                              # the server itself (stdio)
 ```
 
-See [docs/development.md](./docs/development.md) for the architecture, [docs/v2/design.md](./docs/v2/design.md) for the 0.5 design, [docs/v2/backend-changes.md](./docs/v2/backend-changes.md) for what the backend still needs, and [RELEASING.md](./RELEASING.md) for the PyPI release flow.
+See [docs/development.md](./docs/development.md) for the architecture and [RELEASING.md](./RELEASING.md) for the PyPI release flow.
 
 ## License
 
