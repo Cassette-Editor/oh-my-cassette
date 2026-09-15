@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Cassette-Editor/oh-my-cassette",
   "title": "Oh My Cassette",
-  "description": "Video editing through the Cassette agent: import media, edit by chat turn, read the timeline, export.",
+  "description": "Video editing through the Cassette agent: import media, edit by chat turn, read the timeline, export",
   "version": "0.5.0",
   "websiteUrl": "https://cassette-editor.github.io/oh-my-cassette/",
   "icons": [
