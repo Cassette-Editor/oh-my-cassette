@@ -54,6 +54,7 @@ include = ["src/oh_my_cassette", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q"
 markers = [
   "live: runs against a local Cassette-Editor stack; skipped unless RUN_CASSETTE_LIVE=1",
