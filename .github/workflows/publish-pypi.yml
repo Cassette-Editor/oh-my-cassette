@@ -5,6 +5,8 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  # Manual runs are rehearsals: they upload to TestPyPI (environment `testpypi`), never
+  # to PyPI. Only a published release reaches PyPI.
   workflow_dispatch:
 
 permissions:
@@ -35,7 +37,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: pypi
+    environment: ${{ github.event_name == 'release' && 'pypi' || 'testpypi' }}
     permissions:
       id-token: write
     steps:
@@ -44,6 +46,9 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
+        with:
+          repository-url: ${{ github.event_name == 'release' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
+          skip-existing: ${{ github.event_name != 'release' }}
 
   # The registry serves whatever version was last pushed to it, so a release that skips
   # this leaves io.github.Cassette-Editor/oh-my-cassette advertising the old one. It
