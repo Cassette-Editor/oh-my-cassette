@@ -29,22 +29,21 @@
       },
       "environmentVariables": [
         {
-          "name": "CASSETTE_API_URL",
-          "description": "Cassette-Editor backend base URL",
+          "name": "CASSETTE_MCP_URL",
+          "description": "Cassette MCP service endpoint",
           "isRequired": false,
-          "default": "http://127.0.0.1:8787"
-        },
-        {
-          "name": "CASSETTE_WEB_URL",
-          "description": "Cassette web editor base URL",
-          "isRequired": false,
-          "default": "http://127.0.0.1:8080"
+          "default": "http://127.0.0.1:8790/mcp"
         },
         {
           "name": "CASSETTE_AUTH_TOKEN",
-          "description": "Bearer token for a deployed backend",
-          "isRequired": false,
+          "description": "Bearer token for the Cassette MCP service",
+          "isRequired": true,
           "isSecret": true
+        },
+        {
+          "name": "CASSETTE_FFMPEG",
+          "description": "Path to ffmpeg, used to prepare local video before upload (default: from PATH)",
+          "isRequired": false
         }
       ]
     }

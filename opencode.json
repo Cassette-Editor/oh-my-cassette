@@ -5,10 +5,10 @@
       "type": "local",
       "command": ["uvx", "oh-my-cassette==0.5.0"],
       "environment": {
-        "CASSETTE_API_URL": "http://127.0.0.1:8787",
-        "CASSETTE_WEB_URL": "http://127.0.0.1:8080"
+        "CASSETTE_MCP_URL": "http://127.0.0.1:8790/mcp",
+        "CASSETTE_AUTH_TOKEN": "{env:CASSETTE_AUTH_TOKEN}"
       },
-      "timeout": 3600000,
+      "timeout": 600000,
       "enabled": true
     }
   }

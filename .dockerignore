@@ -5,9 +5,7 @@ __pycache__
 **/__pycache__
 *.pyc
 dist
-exports
+cassette-exports
 assets
 docs
 tests
-contracts
-.gitnexus

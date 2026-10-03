@@ -24,9 +24,8 @@ classifiers = [
   "Topic :: Multimedia :: Video",
 ]
 dependencies = [
-  "mcp>=2.2,<3",
+  "mcp>=2.3,<3",
   "httpx>=0.28,<1",
-  "pydantic>=2.11,<3",
 ]
 
 [project.urls]
@@ -35,12 +34,13 @@ Repository = "https://github.com/Cassette-Editor/oh-my-cassette"
 Changelog = "https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md"
 
 [project.scripts]
-oh-my-cassette = "oh_my_cassette.server:main"
+oh-my-cassette = "oh_my_cassette.cli:main"
 
 [dependency-groups]
 dev = [
   "pytest>=8.3",
   "anyio>=4.9",
+  "pydantic>=2.11,<3",
   "starlette>=0.46",
   "uvicorn>=0.30",
   "ruff>=0.11",
@@ -57,7 +57,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
 markers = [
-  "live: runs against a local Cassette-Editor stack; skipped unless RUN_CASSETTE_LIVE=1",
+  "live: runs against a running Cassette MCP service (CASSETTE_MCP_URL); skipped unless RUN_CASSETTE_LIVE=1",
 ]
 
 [tool.ruff]

@@ -10,92 +10,88 @@
 ## 整体结构
 
 ```text
-宿主 (Claude Code / Codex / OpenCode / Hermes)
-  └─ stdio ─ uvx oh-my-cassette            src/oh_my_cassette/server.py   9 个工具 + instructions
-               ├─ tools/                     project · media · run · timeline · export
-               ├─ app.py                     组装：settings、state、HTTP、各 client
-               ├─ cassette/                  HTTP + SSE 客户端，后端契约的 pydantic 镜像
-               │    projects · agent · media · export · prepare (ffmpeg) · auth
-               ├─ render/                    时间线摘要 / delta，本地 contact sheet
-               └─ state.py                   ~/.oh-my-cassette/state.json
-                        │ HTTP + SSE
+宿主（Claude Code / Codex / OpenCode / Hermes）
+  └─ stdio ─ uvx oh-my-cassette              src/oh_my_cassette/cli.py
+               bridge/server.py                工具、instructions、调用与进度、cassette_bridge_status
+               bridge/upstream.py              上游的一个 MCP 客户端会话；重连；401 / 连不上
+               bridge/files.py                 本地文件策略与上传握手
+               bridge/prepare.py               ffmpeg：视频产物、音频/图片转换、预处理报告
+               bridge/jobs.py                  后台的本地阶段、`preparing`、接上同一任务
+               bridge/downloads.py             声明的下载，存到 cassette-exports/
+               contract.py                     契约里的标注和 `prepare` 词汇表
+               conformance.py                  `oh-my-cassette check`
+                        │ Streamable HTTP（MCP 2026-07-28）+ bearer token
                         ▼
-              Cassette-Editor 后端           /api/projects · /api/agent · /api/media · /api/export
+              Cassette MCP 服务                 在 Cassette-Editor 里（`mcp/`），默认 http://127.0.0.1:8790/mcp
+                        │ 公开 HTTP API，带调用者自己的令牌
+                        ▼
+              Cassette-Editor 后端
 ```
 
-一次剪辑 turn（`cassette_run`）：
+bridge 从不写死后端工具的名字。哪些参数是本地路径、怎样预处理、哪些结果带下载，全部来自
+[v3/contract.md](./v3/contract.md) 规定的 `_meta` 标注；设计见 [v3/design.md](./v3/design.md)。
 
-1. 解析项目：显式 `project_id` → 当前目录的绑定 → 最近使用的项目（`app.resolve`）。
-2. `POST /api/agent/sessions/<chat>/commands` 发送 `start` 命令（幂等键由项目、会话、turn 序号和消息推导；`expectedRevision` 来自 `/state`，409 时重试一次）。
-3. 跟随 `GET /api/agent/sessions/<chat>/events?after=<cursor>`（SSE）。持久事件转成进度通知；`run_terminal` / `run_aborted` / `run_failed` 结束这个 turn。流断开后从最后的 sequence 重连；流提前结束则重读 run 记录。
-4. 重读项目快照，计算 `version_from→version_to`、delta 和摘要。
-5. 持久化事件游标和 run id，宿主超时后 `cassette_status` 可以接回。
+一次带本地文件的调用：
 
-run 在服务端是持久的，所以插件没有任务队列也没有 worker：关掉宿主不会丢 run。
+1. bridge 按本地策略检查每个路径（工作区或 `CASSETTE_ALLOWED_ROOTS`、媒体类型、大小），并用工具名、
+   `prepare` 摘要、参数和文件身份给这次调用定一个键。
+2. 后台任务预处理文件（ffmpeg）并走上传握手。这次调用最多等 `CASSETTE_LOCAL_WAIT_SEC`；任务还没完成时回答
+   `{"status": "preparing"}`，下一次同样的调用会接上同一个任务。
+3. 拿到 ref 后，bridge 转发原调用，`_meta` 里带 `elapsedSeconds`。服务同样只等一个有界窗口，工作超出窗口时回答
+   `running` / `processing`。
 
-## 配置
-
-全部是环境变量，见 [README 的配置表](../README.zh-cn.md#配置)。默认值指向本地 Cassette-Editor 开发栈（API `http://127.0.0.1:8787`，web `http://127.0.0.1:8080`），不带凭证。
-
-工具作用的项目按此优先级：`project_id` 参数 → `state.json` 里当前目录的绑定 → 最近使用的项目。`cassette_project` 的 `action=open` 把已有项目绑定到当前目录。
-
-## 运行本地 Cassette 栈
+## 运行本地栈
 
 在 Cassette-Editor 仓库里：
 
 ```bash
-AGENT_AUTH_ENABLED=false bun run dev:lambda
+bun run dev:lambda      # web 编辑器、:8787 上的 API、worker
+bun run dev:mcp         # 127.0.0.1:8790 上的 MCP 服务
 ```
 
-web 编辑器在 `:8080`，API 在 `:8787`，worker 在 `:8788`，插件无需账号即可工作。绕过登录时插件创建匿名 demo 项目（`try-session-<uuid>`），编辑器链接是 `http://127.0.0.1:8080/try?projectSessionId=<uuid>`。
+然后让 bridge 指向它：`CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp`（默认值），令牌放在 `CASSETTE_AUTH_TOKEN`。
 
 ## 开发
 
 ```bash
 uv sync --group dev
-uv run pytest -q                                   # 假后端（tests/fake_cassette），约 10 秒
-uv run ruff check src tests && uv run ruff format --check src tests
-RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q -rs                              # 本地栈
-RUN_CASSETTE_LIVE=1 RUN_CASSETTE_LIVE_EXPORT=1 uv run pytest tests/live -q -rs   # 再加一次真实渲染
+uv run pytest -q -rs                               # 参考服务跑在回环地址上；test_prepare 需要 ffmpeg
+uv run ruff check . && uv run ruff format --check .
+uv run oh-my-cassette check --url http://127.0.0.1:8790/mcp --token "$CASSETTE_AUTH_TOKEN" --upload
+RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q -rs          # 本地栈，包括一次真实导出
 uv build && uvx --from dist/*.whl oh-my-cassette --version
 ```
 
-在宿主里直接跑检出的代码：
+`tests/reference_remote.py` 是契约的可执行参考服务：要求 bearer token、声明 `prepare`、按内容去重、检查每次 PUT。
+`tests/test_prepare.py` 用真实 ffmpeg 处理生成的小样本（HEVC、10 位 PQ、旋转、奇数尺寸、VFR、时间码、图片、音频），
+并用 ffprobe 检查每个产物；没有 ffmpeg 时整个模块跳过。live 测试需要带 libx265 的 ffmpeg，导出走后端配置的渲染服务，
+可能产生费用。
+
+在宿主里运行当前仓库：
 
 ```bash
-claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -e OH_MY_CASSETTE_HOME=/tmp/omc-dev \
+claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -e CASSETTE_AUTH_TOKEN="$CASSETTE_AUTH_TOKEN" \
   -- uv run --directory "$PWD" oh-my-cassette
 ```
 
-`OH_MY_CASSETTE_HOME` 让开发用的状态文件与真实的分开。
-
-### 后端契约
-
-`contracts/` 是从真实后端抓取的 JSON（session state、chat session、snapshot、命令结果、run 事件、媒体状态、导入清单、时间线历史）。`tests/test_models.py` 用它们校验 `cassette/models.py` 里的 pydantic 镜像。响应用 `extra="allow"` 解析，后端新增字段不会弄坏插件；请求用 `extra="forbid"`，请求模型里的拼写错误会在测试里失败而不是打到后端。后端改了 payload 时按 `contracts/README.md` 重新抓取。
-
-### 新增工具
-
-在 `tools/` 实现，在 `server.py` 注册并加入 `TOOL_NAMES`，返回带类型化 `status` 的 dict，用 `@guarded` 包住，补假后端路由和测试，然后写进 `skills/cassette-video-edit/SKILL.md`（再复制到 `.agents/skills/cassette-video-edit/`）。工具没写进 skill 或两份 skill 不一致时 `tests/test_manifests.py` 会失败。
+skill 有两份（`skills/cassette-video-edit/SKILL.md` 和 `.agents/skills/cassette-video-edit/SKILL.md`）；两份不一致、
+skill 写了后端工具名、或漏了某个 `bridge.*` 错误码时，`tests/test_manifests.py` 会失败。
 
 ## 排障
 
-| 结果 | 含义 | 处理 |
+| 结果 | 含义 | 怎么办 |
 |---|---|---|
-| `error.code = no_project` | 当前目录没有绑定项目，之前也没用过。 | `cassette_project`（`create` 或 `open <id>`）。 |
-| `cassette_import` 条目 `file_not_found` / `unsupported_type` | 路径不存在，或扩展名不是视频/音频/图片。 | 用绝对路径；转换文件。 |
-| 条目 `failed` 且带 `readiness` | 后端处理失败或超时（`CASSETTE_IMPORT_READY_TIMEOUT_SEC`）。 | 看 worker 日志；重新导入。 |
-| `cassette_run` → `needs_input` | agent 提了问题。 | 把 `question` 给用户看，再 `cassette_answer`。 |
-| `cassette_run` → `timeout` | turn 超过了 `CASSETTE_RUN_TIMEOUT_SEC` 或宿主的工具超时。 | `cassette_status` 接回；把宿主超时调到一小时。 |
-| `cassette_run` → `running` 且带 `note` | 项目上已经有 run 在跑。 | 用 `cassette_status` 等待，或 `cassette_stop`。 |
-| `cassette_history` → `rejected`（`at_start`、`at_end`、`target_not_found`） | 没有可撤销/重做的内容，或 group id 未知。 | `cassette_history list`。 |
-| `error.code = project_timeline_locked` | run 进行中，历史只读。 | 等 run 结束再试。 |
-| 导出 `error.code = timeline_empty` | 活动序列没有 clip。 | 先剪辑。 |
-| `error.code = contact_sheet_unavailable` | 没有任何 clip 的原始素材在本机。 | 从本机导入素材，或不传 `contact_sheet`。 |
-| `error` 里 HTTP 401/403 | 后端需要账号。 | 设置 `CASSETTE_AUTH_TOKEN` 或邮箱密码，或用 `AGENT_AUTH_ENABLED=false` 启动栈。 |
-| Connection refused | `CASSETTE_API_URL` 上没有服务。 | 启动栈；检查宿主配置里的 URL。 |
+| 只列出 `cassette_bridge_status` | 服务连不上、不接受令牌，或要求更新的 bridge。 | 调用它：`error_code` 和 `error` 会说明是哪种。 |
+| `bridge.unauthorized` | 服务回答 HTTP 401。 | 设置有效的 `CASSETTE_AUTH_TOKEN` 并重启 server。 |
+| 调用中出现 `bridge.backend_unreachable` | 连接断开，或 60 秒没有任何数据。 | 用同样的参数再调用一次：服务的工作可能还在运行。 |
+| `{"status": "preparing"}` | 本地预处理或上传还没完成。 | 用同样的参数再调用一次，继续等待。 |
+| `bridge.ffmpeg_unavailable` | PATH 上没有 ffmpeg / ffprobe。 | 安装 ffmpeg，或设置 `CASSETTE_FFMPEG` 和 `CASSETTE_FFPROBE`。 |
+| `bridge.prepare_failed` | ffmpeg 读不了或转换不了某个文件；消息末尾是它的 stderr。 | 检查文件；必要时手动转换。 |
+| `bridge.contract_violation` | 服务的标注不合法（例如 `prepare`）。 | 对它运行 `oh-my-cassette check`。 |
+| Connection refused | `CASSETTE_MCP_URL` 上没有服务。 | 启动 MCP 服务；检查宿主配置里的 URL。 |
 
-服务端日志输出到 stderr（`OH_MY_CASSETTE_LOG=DEBUG`），宿主会在 MCP 日志视图里显示。
+bridge 的日志输出到 stderr（`OH_MY_CASSETTE_LOG=DEBUG`），宿主会在 MCP 日志视图里显示。
 
 ## 公共仓库安全
 
-不要提交 `.env`、token 或密码、非本地默认值的后端 URL、`tests/fixtures/` 之外的媒体、导出文件，以及 `~/.oh-my-cassette` 里的任何东西。
+不要提交 `.env`、token 或密码、非本地默认值的服务 URL、`tests/fixtures/` 之外的媒体，以及导出文件。

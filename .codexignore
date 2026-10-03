@@ -7,11 +7,10 @@ __pycache__/
 .venv/
 .env
 .env.*
-exports/
+cassette-exports/
 *.log
 src/
 tests/
-contracts/
 docs/
 .github/
 .serena/

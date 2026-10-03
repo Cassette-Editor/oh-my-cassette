@@ -6,7 +6,7 @@
 
 <p align="center">
   Video editing through the <a href="https://trycassette.online">Cassette</a> agent, from Claude Code, Codex, OpenCode and Hermes.<br />
-  <sub>An MCP server on PyPI. One project = one editor link = one running conversation with the editing agent.</sub>
+  <sub>A small MCP bridge on PyPI. The editing tools come from the Cassette MCP service, so they stay current without a plugin update.</sub>
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 
 ## Install in 30 seconds
 
-You need [uv](https://docs.astral.sh/uv/) (it fetches Python and the package on first start) and `ffmpeg` on PATH (video import and contact sheets).
+You need [uv](https://docs.astral.sh/uv/) (it fetches Python and the package on first start).
 
 ```bash
 # Claude Code
@@ -38,26 +38,35 @@ codex plugin add oh-my-cassette@cassette-editor
 hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
 ```
 
-OpenCode and any other MCP host: see [Install](#install) below. Then start the Cassette stack (or point the plugin at a deployed one), restart your agent, and say:
+OpenCode and any other MCP host: see [Install](#install) below. Then start the Cassette stack and its MCP service (or point the plugin at a deployed one), set your access token, restart your agent, and say:
 
 > *Import ./footage/*.mp4 and cut a 30-second travel vlog with a title at the start.*
 
 ## Overview
 
-Oh My Cassette turns an editing conversation in your coding agent into edits on a real Cassette project:
+Oh My Cassette connects your coding agent to the Cassette editing agent. It is a local stdio MCP server
+that relays to the Cassette MCP service (`CASSETTE_MCP_URL`), which in turn calls the Cassette backend:
 
-| You say | The agent calls | What happens |
-| --- | --- | --- |
-| "Start a new video project" | `cassette_project` | Creates a project, binds it to the current directory, returns an `editor_url` you can open in a browser to watch live. |
-| "Use clip1.mp4, clip2.mov and music.mp3" | `cassette_import` | Hashes, transcodes (video, locally with ffmpeg), uploads through presigned URLs and waits until the backend can use the media. |
-| "Cut a 30-second vlog with a title" | `cassette_run` | Sends your words verbatim to the Cassette editing agent as one turn; streams progress; returns the agent's answer, `vN→vM`, a bounded timeline digest. |
-| (the agent asks a question) | `cassette_answer` | Answers the pending question and continues the same run. |
-| "Undo that" | `cassette_history` | Moves the project's history cursor (undo / redo / restore before a commit). |
-| "What's on the timeline?" | `cassette_timeline` | Version, per-track digest, media library, optional local contact sheet. |
-| "Export it" | `cassette_export` | Renders on the backend and downloads the MP4 into `./exports`. |
-| (host timeout) | `cassette_status` / `cassette_stop` | Re-attaches to the running turn, or stops it (committed edits stay). |
+```text
+Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  ──HTTP──▶  Cassette MCP service  ──▶  Cassette backend
+```
 
-Every tool returns a typed `status` so the host routes on data, not prose. Nothing renders during an edit: the backend keeps the timeline as a versioned document, and the plugin reads it back after each turn.
+- **The tools are the service's.** Whatever it lists (projects, editing turns, questions, undo,
+  export) is what your agent sees, with the service's own descriptions and workflow instructions.
+  When Cassette changes, the tools change with it; the plugin does not need a release.
+- **The bridge adds only what needs your machine.** Local files named in a call are prepared and
+  uploaded first (only from the workspace, media types only): video is transcoded with ffmpeg into the
+  renditions the service declares, and audio or images it does not take as they are get converted.
+  Exported files are downloaded into `cassette-exports/`. The workspace identity travels with each
+  call so the service can remember a project per directory.
+- **Long work never times out the host.** Every call waits a bounded time; slow local preparation
+  answers `preparing` and keeps going in the background, and the next identical call picks it up.
+- **It survives deploys.** It reconnects on its own, reports `bridge.*` errors with a `retryable`
+  flag, and, while the service is unreachable or refuses the token, lists a single
+  `cassette_bridge_status` tool that says why.
+
+The rules between the plugin and the service are written down in [docs/v3/contract.md](./docs/v3/contract.md)
+(in Chinese); `oh-my-cassette check` verifies a service against them.
 
 ### Case videos
 
@@ -65,51 +74,56 @@ Six real cases edited end to end through Oh My Cassette, each with the exact pro
 
 ## Requirements
 
-- A Cassette-Editor backend on the current `main` line (the in-process agent runtime under `/api/agent/*`). Locally: `AGENT_AUTH_ENABLED=false bun run dev:lambda` in the Cassette-Editor checkout.
+- A Cassette MCP service that implements [contract v1](./docs/v3/contract.md), and an access token
+  for it. Check it with `uvx oh-my-cassette==0.5.0 check --url <endpoint> --token <token>`. While the
+  service is unreachable or refuses the token, only `cassette_bridge_status` is listed.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5 or newer. `uvx oh-my-cassette==0.5.0` resolves Python 3.11–3.13 by itself.
-- `ffmpeg` and `ffprobe` on PATH for video import and contact sheets (audio and image import work without them).
+- [ffmpeg](https://ffmpeg.org/download.html) (with ffprobe) to import video: `brew install ffmpeg`,
+  `sudo apt install ffmpeg` or `winget install ffmpeg`. Video is transcoded on your machine before it
+  uploads. A build with `zscale` also tone-maps HDR footage properly.
 
-Supported imports: video `mp4`, `mov`; audio `mp3`, `wav`, `m4a`, `aac`, `ogg`, `oga`, `opus`, `flac`; image `jpg`, `jpeg`, `png`, `gif`, `webp`, `bmp`, `avif`.
+Which formats a tool accepts, and how files are prepared before upload, is declared by the service
+(video, audio and image types at most).
 
 ## Configuration
 
-Everything is an environment variable, so all four hosts configure the server the same way.
+Everything is an environment variable, so all four hosts configure the bridge the same way.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `CASSETTE_API_URL` | `http://127.0.0.1:8787` | Backend (render server) base URL. |
-| `CASSETTE_WEB_URL` | `http://127.0.0.1:8080` (or the API URL when it is not local) | Web editor base URL used for `editor_url`. |
-| `CASSETTE_AUTH_TOKEN` | unset | Bearer token for a deployed backend. Unset = unauthenticated (local `AGENT_AUTH_ENABLED=false` stack). |
-| `CASSETTE_EMAIL` / `CASSETTE_PASSWORD` | unset | Alternative to a token: exchanged once through `/api/agent-auth/verify`, cached in `credentials.json` (0600). |
-| `OH_MY_CASSETTE_HOME` | `~/.oh-my-cassette` | Local state: project bindings, media map, event cursors, contact sheets. |
-| `CASSETTE_MODEL` / `CASSETTE_REASONING_EFFORT` | backend defaults | Default model (`luna`, `terra`, `sol`) and effort (`none`…`max`) for runs. |
-| `CASSETTE_RUN_TIMEOUT_SEC` | `3300` | How long one `cassette_run` call follows a run before returning `timeout` (re-attach with `cassette_status`). |
-| `CASSETTE_IMPORT_READY_TIMEOUT_SEC` / `CASSETTE_EXPORT_TIMEOUT_SEC` | `900` / `1800` | Readiness and render wait limits. |
-| `CASSETTE_FFMPEG` / `CASSETTE_FFPROBE` | `ffmpeg` / `ffprobe` | Binaries to use. |
+| `CASSETTE_MCP_URL` | `http://127.0.0.1:8790/mcp` | The Cassette MCP service endpoint. |
+| `CASSETTE_AUTH_TOKEN` | unset | Bearer token; the service requires one. Sent to the service, and to upload and download URLs only when they have the same origin. |
+| `CASSETTE_WORKSPACE` | the directory the host starts the server in | Where relative paths resolve, and the directory the service may remember a project for. |
+| `CASSETTE_ALLOWED_ROOTS` | unset | Extra directories local files may come from (`:`-separated; `;` on Windows). |
+| `CASSETTE_DOWNLOAD_DIR` | `<workspace>/cassette-exports` | Where exported files are saved. |
+| `CASSETTE_MAX_UPLOAD_MB` / `CASSETTE_MAX_DOWNLOAD_MB` | `4096` / `16384` | Size limits per file. |
+| `CASSETTE_UPLOAD_ANY_TYPE` | off | Allow non-media uploads when a tool accepts them. |
+| `CASSETTE_LOCAL_WAIT_SEC` | `240` | How long one call waits for local preparation and upload before it answers `preparing`. |
+| `CASSETTE_FFMPEG` / `CASSETTE_FFPROBE` | from `PATH` | The ffmpeg and ffprobe programs used to prepare local media. |
+| `CASSETTE_TEMP_DIR` | `<system temp>/oh-my-cassette` | Where prepared files are written until they are uploaded. |
+| `CASSETTE_CONNECT_TIMEOUT_SEC` | `10` | How long to wait for the service when connecting. |
 | `OH_MY_CASSETTE_LOG` | `WARNING` | Log level on stderr. |
-
-Without credentials the plugin creates **anonymous projects** (`try-session-<uuid>`, editor link `/try?projectSessionId=…`). With a token or email/password it creates **owned projects** (`/editor/p/<uuid>`).
 
 ## Install
 
 ### Claude Code
 
-Plugin (recommended): the two commands at the top. Claude asks for `api_url`, `web_url` and an optional `auth_token` on install (`userConfig`), and starts `uvx oh-my-cassette==0.5.0` with a 60-minute tool timeout.
+Plugin (recommended): the two commands at the top. Claude asks for `mcp_url` and `auth_token` on install (`userConfig`), and starts `uvx oh-my-cassette==0.5.0` with a 10-minute tool timeout.
 
 Project scope without the plugin: copy [`.mcp.json`](./.mcp.json) into your project and replace the `${user_config.*}` values, or run:
 
 ```bash
-claude mcp add --transport stdio cassette -e CASSETTE_API_URL=http://127.0.0.1:8787 -- uvx oh-my-cassette==0.5.0
+claude mcp add --transport stdio cassette -e CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp -e CASSETTE_AUTH_TOKEN=<token> -- uvx oh-my-cassette==0.5.0
 ```
 
 The skill lives in [`skills/cassette-video-edit/SKILL.md`](./skills/cassette-video-edit/SKILL.md) and ships with the plugin.
 
 ### Codex
 
-Plugin: the two commands at the top ([`.codex-plugin/plugin.json`](./.codex-plugin/plugin.json) declares the server inline with `tool_timeout_sec: 3600` and passes the `CASSETTE_*` variables through from your shell). Or add the server directly:
+Plugin: the two commands at the top ([`.codex-plugin/plugin.json`](./.codex-plugin/plugin.json) declares the server inline with `tool_timeout_sec: 600` and passes the `CASSETTE_*` variables through from your shell). Or add the server directly:
 
 ```bash
-codex mcp add cassette --env CASSETTE_API_URL=http://127.0.0.1:8787 -- uvx oh-my-cassette==0.5.0
+codex mcp add cassette --env CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp --env CASSETTE_AUTH_TOKEN=<token> -- uvx oh-my-cassette==0.5.0
 ```
 
 ### OpenCode
@@ -122,8 +136,11 @@ Add to `opencode.json` (project or `~/.config/opencode/opencode.json`):
     "cassette": {
       "type": "local",
       "command": ["uvx", "oh-my-cassette==0.5.0"],
-      "environment": { "CASSETTE_API_URL": "http://127.0.0.1:8787", "CASSETTE_WEB_URL": "http://127.0.0.1:8080" },
-      "timeout": 3600000
+      "environment": {
+        "CASSETTE_MCP_URL": "http://127.0.0.1:8790/mcp",
+        "CASSETTE_AUTH_TOKEN": "{env:CASSETTE_AUTH_TOKEN}"
+      },
+      "timeout": 600000
     }
   }
 }
@@ -137,36 +154,52 @@ curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main
   -o ~/.config/opencode/skills/cassette-video-edit/SKILL.md
 ```
 
-OpenCode has no MCP elicitation, which is fine: questions come back as `status=needs_input` and are answered with `cassette_answer`.
+OpenCode has no MCP elicitation, which is fine: the editing agent's questions come back as ordinary tool results, and the service's tools say how to answer them.
 
 ### Hermes
 
 ```bash
-hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0 --env CASSETTE_API_URL=http://127.0.0.1:8787
+hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0 \
+  --env CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp --env CASSETTE_AUTH_TOKEN=<token>
 mkdir -p ~/.hermes/skills/cassette-video-edit
 curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/skills/cassette-video-edit/SKILL.md \
   -o ~/.hermes/skills/cassette-video-edit/SKILL.md
 ```
 
-Set `mcp_servers.cassette.timeout: 3600` in `~/.hermes/config.yaml` so long edits are not cut off. Hermes is a plain MCP host here: the 0.4 gateway/plugin layer is gone.
+Set `mcp_servers.cassette.timeout: 600` in `~/.hermes/config.yaml` so a call's bounded waits fit. Hermes is a plain MCP host here: the 0.4 gateway/plugin layer is gone.
 
 ### Any other MCP host
 
-Command `uvx`, args `["oh-my-cassette==0.5.0"]`, stdio transport, a tool timeout of at least an hour, and the environment variables above. No `pipx`? `pipx run oh-my-cassette==0.5.0` works too.
+Command `uvx`, args `["oh-my-cassette==0.5.0"]`, stdio transport, a tool timeout of 10 minutes, and the environment variables above. No `pipx`? `pipx run oh-my-cassette==0.5.0` works too.
 
 ## How a turn looks
 
 ```text
 you:    Import intro.mp4 and beach.mov, then make a 20-second cut with the title "Kota Kinabalu".
-agent:  cassette_project → editor_url http://127.0.0.1:8080/try?projectSessionId=…
-        cassette_import  → 2 ready
-        cassette_run     → status completed, v0→v3: added 4 clips; tracks added Title Overlay …
-        "Done. Added a 20 s cut from both clips with the title at the start (v0→v3). Open it: <editor_url>"
-you:    Make the title last 2 seconds longer.
-agent:  cassette_run     → status completed, v3→v4: changed clip_title
+agent:  (calls the service's import tool with ["intro.mp4", "beach.mov"])
+        bridge: transcodes both videos, uploads them, passes the service media references
+        (calls the service's editing tool with your sentence, verbatim; progress streams while it runs)
+        "Done. Added a 20 s cut from both clips with the title at the start (v0→v3). Open it: <editor link>"
+you:    Export it.
+agent:  (calls the service's export tool)
+        bridge: downloads the MP4 to cassette-exports/kota-kinabalu.mp4
 ```
 
-Open `editor_url` in a browser at any time: it subscribes to the same chat session, so you see the run as it happens and can take over by hand.
+The editor link comes from the service: open it in a browser to watch the run live and take over by hand.
+
+## Check a service
+
+```bash
+uvx oh-my-cassette==0.5.0 check --url http://127.0.0.1:8790/mcp --token <token> --upload \
+  --arguments '{"project_id": "<a test project>"}'
+```
+
+Prints one line per check (transport and token, contract declaration, instructions, tool schemas,
+local-file and `prepare` declarations, and with `--upload` a real upload round trip; `--arguments`
+are the file tool's other arguments for it) and exits 1 on any failure. `--json` gives
+machine-readable output for the service's CI. The service must speak MCP 2026-07-28; one that only
+answers the handshake-era `initialize` fails the transport check, and the bridge refuses it with
+`bridge.protocol_unsupported`.
 
 ## Update
 
@@ -177,12 +210,14 @@ Bump the pin in your host config (`oh-my-cassette==<new version>`) or reinstall 
 ```bash
 git clone https://github.com/Cassette-Editor/oh-my-cassette && cd oh-my-cassette
 uv sync --group dev
-uv run pytest -q                                   # fake backend, no network
-RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q    # against a local Cassette-Editor stack
-uv run oh-my-cassette                              # the server itself (stdio)
+uv run pytest -q                                   # reference service on loopback, no network; needs ffmpeg
+uv run oh-my-cassette                              # the bridge itself (stdio)
+uv run oh-my-cassette check --url <endpoint>       # conformance check
 ```
 
-See [docs/development.md](./docs/development.md) for the architecture and [RELEASING.md](./RELEASING.md) for the PyPI release flow.
+The bridge design is in [docs/v3/design.md](./docs/v3/design.md); `tests/reference_remote.py` is an
+executable reference service for the contract. [docs/development.md](./docs/development.md) covers the
+local stack and the live tests; [RELEASING.md](./RELEASING.md) has the PyPI release flow.
 
 ## License
 

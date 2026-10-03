@@ -10,11 +10,6 @@ WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir .
 
-# State lives under $HOME/.oh-my-cassette; keep it writable for any UID the
-# sandbox may use.
-RUN mkdir -p /data && chmod 1777 /data
-ENV HOME=/data
-
-# The server starts and lists its tools without a backend; CASSETTE_API_URL is
-# only contacted when a tool is called.
+# The bridge starts without a reachable service and lists cassette_bridge_status,
+# which reports why it is not connected. ffmpeg prepares local video before upload.
 CMD ["oh-my-cassette"]

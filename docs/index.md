@@ -33,14 +33,15 @@ uvx oh-my-cassette==0.5.0
 Restart your agent, then say:
 *"Import the clips in ./footage and cut a 30-second travel vlog with a title at the start."*
 
-Requires [uv](https://docs.astral.sh/uv/), `ffmpeg`, and a reachable Cassette backend
-(`CASSETTE_API_URL`; the local development stack by default). Per-host setup is in the
+Requires [uv](https://docs.astral.sh/uv/), `ffmpeg`, a reachable Cassette MCP service
+(`CASSETTE_MCP_URL`; the local development stack by default) and an access token for it
+(`CASSETTE_AUTH_TOKEN`). Per-host setup is in the
 [README](https://github.com/Cassette-Editor/oh-my-cassette#install).
 
 ## Documentation
 
 - [Showcase](showcase.md) — six real case videos with the exact prompt, inputs, and processing time for each
-- [Development and troubleshooting](development.md) — architecture, configuration reference, tests, common errors
+- [Development and troubleshooting](development.md) — architecture, local stack, tests, common errors
 - [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md) — release history
 - [Support and scope](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SUPPORT.md) — what this plugin covers versus the Cassette service
 - [Contributing](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CONTRIBUTING.md) — development setup and guidelines

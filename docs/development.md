@@ -11,111 +11,93 @@
 
 ```text
 host (Claude Code / Codex / OpenCode / Hermes)
-  └─ stdio ─ uvx oh-my-cassette            src/oh_my_cassette/server.py   9 tools + instructions
-               ├─ tools/                     project · media · run · timeline · export
-               ├─ app.py                     composition: settings, state, HTTP, clients
-               ├─ cassette/                  HTTP + SSE client, pydantic mirrors of the backend contract
-               │    projects · agent · media · export · prepare (ffmpeg) · auth
-               ├─ render/                    timeline digest / delta, local contact sheet
-               └─ state.py                   ~/.oh-my-cassette/state.json
-                        │ HTTP + SSE
+  └─ stdio ─ uvx oh-my-cassette              src/oh_my_cassette/cli.py
+               bridge/server.py                tools, instructions, calls and progress, cassette_bridge_status
+               bridge/upstream.py              one MCP client session upstream, reconnects, 401 / unreachable
+               bridge/files.py                 local-file policy and the upload handshake
+               bridge/prepare.py               ffmpeg: video renditions, audio/image conversion, the report
+               bridge/jobs.py                  the local phase in the background, `preparing`, attaching
+               bridge/downloads.py             declared downloads into cassette-exports/
+               contract.py                     the contract's markers and the `prepare` vocabulary
+               conformance.py                  `oh-my-cassette check`
+                        │ Streamable HTTP (MCP 2026-07-28) + bearer token
                         ▼
-              Cassette-Editor backend        /api/projects · /api/agent · /api/media · /api/export
+              Cassette MCP service             in Cassette-Editor (`mcp/`), default http://127.0.0.1:8790/mcp
+                        │ public HTTP API with the caller's token
+                        ▼
+              Cassette-Editor backend
 ```
 
-One editing turn (`cassette_run`):
+The bridge never names a backend tool. It learns which arguments are local paths, how to prepare
+them and which results carry downloads from the `_meta` markers in [v3/contract.md](./v3/contract.md);
+the design is in [v3/design.md](./v3/design.md).
 
-1. Resolve the project: explicit `project_id`, else the binding for the working directory, else the
-   most recently used project (`app.resolve`).
-2. `POST /api/agent/sessions/<chat>/commands` with a `start` command (idempotency key derived from
-   project, session, turn number and message; `expectedRevision` from `/state`, one retry on 409).
-3. Follow `GET /api/agent/sessions/<chat>/events?after=<cursor>` (SSE). Durable events become
-   progress notifications; `run_terminal` / `run_aborted` / `run_failed` end the turn. A dropped
-   stream reconnects from the last sequence; the run row is re-read if the stream ends early.
-4. Re-read the project snapshot and compute `version_from→version_to`, the delta and the digest.
-5. Persist the event cursor and run id so `cassette_status` can re-attach after a host timeout.
+A call with local files:
 
-Runs are durable on the server, so the plugin keeps no job queue and no worker: closing the host
-never loses a run.
+1. The bridge checks every path against the local policy (workspace or `CASSETTE_ALLOWED_ROOTS`,
+   media types, size) and keys the call by tool, `prepare` digest, arguments and file identities.
+2. A background task prepares the files (ffmpeg) and runs the upload handshake. The call waits at
+   most `CASSETTE_LOCAL_WAIT_SEC`; if the task is still going it answers `{"status": "preparing"}`
+   and the next identical call attaches to the same task.
+3. With the refs in hand, the bridge forwards the call with `elapsedSeconds` in its `_meta`. The
+   service waits a bounded time too and answers `running` / `processing` when its work outlives it.
 
-## Configuration
-
-All settings are environment variables; see the table in the [README](../README.md#configuration).
-Defaults target the local Cassette-Editor development stack (API `http://127.0.0.1:8787`, web
-`http://127.0.0.1:8080`) without credentials.
-
-Precedence for the project a tool acts on: `project_id` argument → the binding of the working
-directory in `state.json` → the most recently used project. `cassette_project` with `action=open`
-binds an existing project to the current directory.
-
-## Running the local Cassette stack
+## Running the local stack
 
 In a Cassette-Editor checkout:
 
 ```bash
-AGENT_AUTH_ENABLED=false bun run dev:lambda
+bun run dev:lambda      # web editor, API on :8787, worker
+bun run dev:mcp         # the MCP service on 127.0.0.1:8790
 ```
 
-This serves the web editor on `:8080`, the API on `:8787` and the worker on `:8788`, and lets the
-plugin work without an account. Under this bypass the plugin creates anonymous demo projects
-(`try-session-<uuid>`); the editor link is `http://127.0.0.1:8080/try?projectSessionId=<uuid>`.
+Then point the bridge at it with `CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp` (the default) and a
+token in `CASSETTE_AUTH_TOKEN`.
 
 ## Development
 
 ```bash
 uv sync --group dev
-uv run pytest -q                                   # fake backend (tests/fake_cassette), ~10 s
-uv run ruff check src tests && uv run ruff format --check src tests
-RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q -rs                              # local stack
-RUN_CASSETTE_LIVE=1 RUN_CASSETTE_LIVE_EXPORT=1 uv run pytest tests/live -q -rs   # + a real render
+uv run pytest -q -rs                               # reference service on loopback; needs ffmpeg for test_prepare
+uv run ruff check . && uv run ruff format --check .
+uv run oh-my-cassette check --url http://127.0.0.1:8790/mcp --token "$CASSETTE_AUTH_TOKEN" --upload
+RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q -rs          # the local stack, including a real export
 uv build && uvx --from dist/*.whl oh-my-cassette --version
 ```
+
+`tests/reference_remote.py` is an executable reference service for the contract: it requires a
+bearer token, declares `prepare`, deduplicates by content and checks every PUT. `tests/test_prepare.py`
+runs the real ffmpeg on small generated samples (HEVC, 10-bit PQ, rotation, odd sizes, VFR, timecode,
+images, audio) and checks every rendition with ffprobe; it skips itself without ffmpeg. The live test
+needs ffmpeg with libx265 and renders through the backend's configured provider, which may cost money.
 
 Run the checkout inside a host:
 
 ```bash
-claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -e OH_MY_CASSETTE_HOME=/tmp/omc-dev \
+claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -e CASSETTE_AUTH_TOKEN="$CASSETTE_AUTH_TOKEN" \
   -- uv run --directory "$PWD" oh-my-cassette
 ```
 
-`OH_MY_CASSETTE_HOME` keeps a development state file apart from your real one.
-
-### Backend contract
-
-`contracts/` holds JSON captured from the live backend (session state, chat session, snapshot,
-command results, run events, media status, import manifest, timeline history). `tests/test_models.py`
-validates the pydantic mirrors in `cassette/models.py` against them. Responses are parsed with
-`extra="allow"`, so new backend fields never break the plugin; requests are `extra="forbid"`, so a
-typo in a request model fails a test instead of the backend. When the backend changes a payload,
-recapture the file as described in `contracts/README.md`.
-
-### Adding a tool
-
-Implement it in `tools/`, register it in `server.py` and add the name to `TOOL_NAMES`, return a
-dict with a typed `status`, wrap it with `@guarded`, add a fake route and a test, and document it in
-`skills/cassette-video-edit/SKILL.md` (then copy the file to `.agents/skills/cassette-video-edit/`).
-`tests/test_manifests.py` fails if a tool is undocumented or the two skill copies differ.
+The skill ships twice (`skills/cassette-video-edit/SKILL.md` and `.agents/skills/cassette-video-edit/SKILL.md`);
+`tests/test_manifests.py` fails if the copies differ, if the skill names a backend tool, or if it
+misses a `bridge.*` error code.
 
 ## Troubleshooting
 
 | Result | Meaning | What to do |
 |---|---|---|
-| `error.code = no_project` | No project is bound to this directory and none was used before. | `cassette_project` (`create` or `open <id>`). |
-| `cassette_import` item `file_not_found` / `unsupported_type` | Path does not exist, or the extension is not video/audio/image. | Use an absolute path; convert the file. |
-| item `failed` with `readiness` | The backend's processing failed or timed out (`CASSETTE_IMPORT_READY_TIMEOUT_SEC`). | Check the worker log; re-import. |
-| `cassette_run` → `needs_input` | The agent asked a question. | Show `question` to the user, then `cassette_answer`. |
-| `cassette_run` → `timeout` | The turn outlived `CASSETTE_RUN_TIMEOUT_SEC` or the host's tool timeout. | `cassette_status` re-attaches; raise the host timeout to an hour. |
-| `cassette_run` → `running` with `note` | A run was already active on the project. | Wait via `cassette_status`, or `cassette_stop`. |
-| `cassette_history` → `rejected` (`at_start`, `at_end`, `target_not_found`) | Nothing to undo/redo, or the group id is unknown. | `cassette_history list`. |
-| `error.code = project_timeline_locked` | A run is active; history is read-only meanwhile. | Wait for the run, then retry. |
-| `error.code = timeline_empty` on export | The active sequence has no clips. | Edit first. |
-| `error.code = contact_sheet_unavailable` | No clip's source media has a local original on this machine. | Import the media from this machine, or skip `contact_sheet`. |
-| HTTP 401/403 in `error` | The backend requires an account. | Set `CASSETTE_AUTH_TOKEN` or email/password, or start the stack with `AGENT_AUTH_ENABLED=false`. |
-| Connection refused | Nothing listens on `CASSETTE_API_URL`. | Start the stack; check the URL in the host config. |
+| Only `cassette_bridge_status` is listed | The service is unreachable, refused the token, or needs a newer bridge. | Call it: `error_code` and `error` say which. |
+| `bridge.unauthorized` | The service answered HTTP 401. | Set a valid `CASSETTE_AUTH_TOKEN` and restart the server. |
+| `bridge.backend_unreachable` during a call | The connection broke or went silent for 60 s. | Call again with the same arguments: the service's work may still be running. |
+| `{"status": "preparing"}` | Local preparation or upload is still going. | Call again with the same arguments to keep waiting. |
+| `bridge.ffmpeg_unavailable` | No ffmpeg / ffprobe on PATH. | Install ffmpeg, or set `CASSETTE_FFMPEG` and `CASSETTE_FFPROBE`. |
+| `bridge.prepare_failed` | ffmpeg could not read or convert a file; the message ends with its stderr. | Check the file; convert it by hand if needed. |
+| `bridge.contract_violation` | The service's markers are malformed (for example `prepare`). | Run `oh-my-cassette check` against it. |
+| Connection refused | Nothing listens on `CASSETTE_MCP_URL`. | Start the MCP service; check the URL in the host config. |
 
-Server-side logs go to stderr (`OH_MY_CASSETTE_LOG=DEBUG`); hosts show them in their MCP log view.
+Bridge logs go to stderr (`OH_MY_CASSETTE_LOG=DEBUG`); hosts show them in their MCP log view.
 
 ## Public repository safety
 
-Do not commit `.env` files, tokens or passwords, backend URLs other than the local defaults, media
-beyond `tests/fixtures/`, exports, or anything from `~/.oh-my-cassette`.
+Do not commit `.env` files, tokens or passwords, service URLs other than the local defaults, media
+beyond `tests/fixtures/`, or exports.

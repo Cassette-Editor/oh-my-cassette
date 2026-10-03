@@ -2,13 +2,14 @@
 
 > Oh My Cassette is an open-source MCP server (PyPI: `oh-my-cassette`) that lets Claude Code, Codex, OpenCode and Hermes drive the Cassette video editor: import local media, send the user's editing requests to the Cassette agent one turn at a time, read the versioned timeline back, undo/redo, and export.
 
-Hosts start it with `uvx oh-my-cassette==0.5.0`. It talks to a Cassette-Editor backend (`/api/agent/*` runtime) over HTTP and SSE; nothing renders during an edit. Each turn returns a typed `status`, the agent's answer, `version_from→version_to`, a bounded timeline digest and an `editor_url` the user can open to watch live. MIT licensed.
+Hosts start it with `uvx oh-my-cassette==0.5.0`. It is a generic bridge to the Cassette MCP service (`CASSETTE_MCP_URL`, Streamable HTTP, bearer token): the editing tools, their descriptions and the workflow instructions come from that service. The bridge adds only what needs the user's machine: it transcodes local video with ffmpeg and uploads local files before a call, downloads exported files after one, and answers a typed `preparing` status while local work continues in the background. MIT licensed.
 
 ## Docs
 
 - [README](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.md): overview, install per host, configuration
 - [Install guide for agents](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/llms-install.md)
-- [Skill](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/skills/cassette-video-edit/SKILL.md): how a host should drive the nine tools
-- [Development](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/development.md): architecture, tests, live stack
+- [Skill](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/skills/cassette-video-edit/SKILL.md): the backend-independent rules a host follows
+- [Bridge contract](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/v3/contract.md) (Chinese): what the bridge and the service agree on
+- [Development](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/development.md): tests, live stack
 - [Showcase](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/showcase.md)
 - [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md)

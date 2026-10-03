@@ -17,7 +17,7 @@ you ran and what came back.
 -->
 
 - **Hosts tested:** <!-- Claude Code / Codex / OpenCode / Hermes -->
-- **Backend:** <!-- local stack (AGENT_AUTH_ENABLED=false) / deployed / fake only -->
+- **Service:** <!-- local stack + MCP service / deployed / reference service only -->
 
 ```
 # commands run + relevant output
@@ -26,11 +26,11 @@ you ran and what came back.
 ## Checklist
 
 - [ ] PR title is a conventional commit line
-- [ ] `uv run ruff check src tests` and `uv run ruff format --check src tests` pass
-- [ ] `uv run pytest -q` passes locally
+- [ ] `uv run ruff check .` and `uv run ruff format --check .` pass
+- [ ] `uv run pytest -q -rs` passes locally (with ffmpeg installed)
 - [ ] CI stays deterministic and credential-free — no real backend calls, no secrets in fixtures or the PR body
-- [ ] `contracts/` recaptured if a backend payload changed
-- [ ] Both skill copies updated together (`skills/` and `.agents/skills/`) if a tool changed
+- [ ] `docs/v3/contract.md`, `contract.py` and `tests/reference_remote.py` changed together if the contract changed
+- [ ] Both skill copies updated together (`skills/` and `.agents/skills/`) if the skill changed
 - [ ] `README.md` and `README.zh-cn.md` kept as matching counterparts, if docs changed
 - [ ] No runtime state, media, exports, or `.env` committed
 

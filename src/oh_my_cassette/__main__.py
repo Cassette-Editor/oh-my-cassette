@@ -1,3 +1,3 @@
-from oh_my_cassette.server import main
+from oh_my_cassette.cli import main
 
 main()

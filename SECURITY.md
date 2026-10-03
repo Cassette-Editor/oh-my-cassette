@@ -9,19 +9,24 @@ Report vulnerabilities privately through [GitHub security advisories](https://gi
 Everything this repository ships runs on the user's machine and opens no port: every host (Claude
 Code, Codex, OpenCode, Hermes) launches `uvx oh-my-cassette` as a local stdio child process.
 
-The Cassette backend configured with `CASSETTE_API_URL` is a separate service that receives
-credentials (if configured), media, editing requests, project state and render requests. Do not
-treat the local process and the backend as the same service — a report about rendering, storage,
-or account handling belongs to Cassette, not here.
+The Cassette MCP service configured with `CASSETTE_MCP_URL` (and the backend behind it) is a
+separate service that receives the access token, media, editing requests, project state and render
+requests. Do not treat the local process and the service as the same thing — a report about
+rendering, storage, or account handling belongs to Cassette, not here.
+
+The service decides which tools exist, but not what the bridge may read: local files come only from
+the workspace or `CASSETTE_ALLOWED_ROOTS`, only media types unless the user sets
+`CASSETTE_UPLOAD_ANY_TYPE`, and a tool can narrow that set but never widen it. Downloads are written
+only into the download directory, under sanitized names that never overwrite a file.
 
 ## Credentials and local state
 
-- No credential is required against a local stack started with `AGENT_AUTH_ENABLED=false`.
-- `CASSETTE_AUTH_TOKEN` is used as a bearer token as-is. `CASSETTE_EMAIL`/`CASSETTE_PASSWORD` are
-  exchanged once at `/api/agent-auth/verify`; the token is cached in
-  `~/.oh-my-cassette/credentials.json` (mode 0600) and the password is never written to disk.
-- `~/.oh-my-cassette/state.json` (mode 0600) holds project bindings and media maps only.
-- Uploads go to presigned URLs issued by the backend; no other network destination exists in the code.
+- `CASSETTE_AUTH_TOKEN` is sent as a bearer token to the MCP service, and to upload and download URLs
+  only when they have the same origin as the service; presigned URLs on other origins get no
+  credential. The service answers HTTP 401 without a valid token, reported as `bridge.unauthorized`.
+- The bridge writes no credential and no state file. Prepared media lives in `CASSETTE_TEMP_DIR`
+  (default: the system temporary directory) only until it is uploaded.
+- ffmpeg and ffprobe run as local subprocesses with argument lists, never through a shell.
 
 ## Supported versions
 

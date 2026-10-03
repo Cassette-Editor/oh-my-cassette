@@ -3,7 +3,7 @@
 
 [scanner]
 ignore_paths = [
-  # Test fixtures and fake-backend credentials, not real secrets.
+  # Test fixtures and the reference service's test token, not real secrets.
   "tests/*",
 ]
 

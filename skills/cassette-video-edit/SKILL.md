@@ -1,70 +1,82 @@
 ---
 name: cassette-video-edit
-description: Edit, trim, cut, caption, retime, combine, or export video, audio, and image files through Cassette. Use this skill whenever the user asks to change, preview, or render media in the project, even if they never say "Cassette" or name a tool, for example "trim the intro off demo.mp4", "add subtitles to this clip", "make a 30-second cut", "put a title on it", "export the video". Drives the oh-my-cassette MCP tools (cassette_project, cassette_import, cassette_run, cassette_answer, cassette_status, cassette_stop, cassette_timeline, cassette_history, cassette_export) as one running conversation with the Cassette editing agent.
+description: Edit, trim, cut, caption, retime, combine, or export video, audio, and image files through Cassette. Use this skill whenever the user asks to change, preview, or render media in the project, even if they never say "Cassette" or name a tool, for example "trim the intro off demo.mp4", "add subtitles to this clip", "make a 30-second cut", "put a title on it", "export the video". Drives the tools of the `cassette` MCP server (oh-my-cassette), which relays a running conversation with the Cassette editing agent.
 ---
 
 # Oh My Cassette
 
-You relay a conversation between the user and the Cassette editing agent. The agent is the editor;
-you are the courier. Every tool returns a typed `status` field: route on it, never on prose.
+The `cassette` MCP server is a local bridge to the Cassette video editor. Its editing tools come
+from the Cassette MCP service and change as Cassette evolves, so this skill deliberately names none
+of them. **The server's instructions and each tool's description are the source of truth**: read
+them, and when they disagree with anything you remember, they win.
 
-## The four rules
+## Rules that hold for every version
 
-1. **Verbatim.** Pass the user's editing words to `cassette_run` as `message` exactly as written.
-   Never rewrite, summarize, translate, or expand them. The agent reads the project media itself.
-2. **Route on `status`.** `completed` → relay `final_text` and the change; `needs_input` → ask the
-   user the `question` and call `cassette_answer`; `not_done` → show `final_text`, ask how to
-   proceed; `failed` → report `error.message` (retry only if `error.retryable`); `timeout` or
-   `running` → call `cassette_status` once, never in a loop.
-3. **Export only on request.** Editing turns never render. Call `cassette_export` only when the
-   user explicitly asks to export, render, download, or finish.
-4. **Ground in the timeline.** Every statement about the project comes from a tool result
-   (`timeline`, `timeline_delta`, `version_from→version_to`), not from memory. Quote the version
-   change and the `editor_url` in each reply so the user can open the editor and see it live.
+1. **Follow the server.** Which tool to call, in what order, and how to route on a result are in the
+   server instructions and the tool descriptions. Route on typed fields such as `status`, never on
+   prose.
+2. **Relay the user's words.** When a tool takes the user's editing request, pass it exactly as the
+   user wrote it: no rewriting, summarizing, translating, or expanding. The Cassette agent reads the
+   project media itself.
+3. **Ground every claim in a tool result.** What is on the timeline, which version it is, and where
+   the editor link points come from the latest result, not from memory.
+4. **Render only when asked.** Export or render only when the user asks to export, render, download,
+   or finish.
 
-## One turn, end to end
+## Local files
 
-1. `cassette_project` (once per workspace). Default `action=open` reuses the project bound to this
-   directory; `action=create` starts a fresh one. Show `editor_url` to the user.
-2. `cassette_import` with the local files the user mentions (absolute paths or relative to the
-   workspace). Wait for it: it returns when the backend can use the media. Audio and images import
-   as-is; video is transcoded locally with ffmpeg. `status=partial` lists what failed and why.
-3. `cassette_run` with the user's request. Progress streams while it runs; a typical edit takes
-   one to several minutes. The result carries `final_text`, `timeline_delta`, a bounded `timeline`
-   digest, `committed_versions`, and `next` (what to do now).
-4. Reply to the user: the agent's `final_text`, the delta in one line, `vN→vM`, the editor link.
-   Then wait for the next request and go back to step 3.
+- Pass file paths as the user gave them, absolute or relative to the workspace. The bridge prepares
+  and uploads them and hands Cassette references in their place.
+- Only files the user named or that sit in the workspace. Never search the filesystem for media.
+- Files outside the workspace are refused unless the user adds their directory to
+  `CASSETTE_ALLOWED_ROOTS`. Only video, audio, and image files upload.
+- Video is transcoded on this machine with ffmpeg before it uploads, and audio or images Cassette
+  does not take as they are get converted. Long footage can take minutes.
+- Exported files are downloaded into `cassette-exports/` in the workspace. Use the local path the
+  result gives you; never invent one.
 
-## Questions from the agent
+## Long waits
 
-`status=needs_input` means the agent paused on a question (`question.question`, `question.reason`,
-`question.choices[]`, `question.allows_free_text`). Ask the user, then call `cassette_answer` with
-`choice_id` (one of the offered ids) or `free_text` (only if allowed). `decline=true` lets the agent
-continue on its own judgment. Do not start a new `cassette_run` while a question is pending; the
-tool will hand the same question back.
+Long work never fails just for taking long. A tool waits a bounded time and then returns a normal,
+non-error result that says the work is still going:
 
-## Recovery, not polling
+- **`status: "preparing"`** comes from the bridge: the local files are still being prepared or
+  uploaded, and that work continues in the background. Tell the user the progress it reports, then
+  call the same tool again with exactly the same arguments to keep waiting; it picks up the same
+  work instead of starting over. Never keep calling for longer than the user is willing to wait:
+  ask before you continue a long wait.
+- **`running`, `processing` and similar statuses** come from Cassette. How to continue (usually the
+  same tool with the id the result returns) is in the server instructions and the tool description.
+- Cancelling a call only stops waiting; the work goes on. Stop the work itself only when the user
+  asks, with the tool the server provides for that.
 
-If a host timeout cuts a call, the run keeps going on the server. Call `cassette_status` once: it
-re-attaches to the active run and returns the same envelope as `cassette_run`; with `wait_sec=0`
-it only reports state. `cassette_stop` aborts the active run; edits it already committed stay.
+## When the bridge itself reports a problem
 
-## Undo, redo, inspect
+Errors whose code starts with `bridge.` come from the local bridge, not from Cassette. Any other
+error code is Cassette's own: follow its message and the tool description.
 
-- `cassette_timeline` returns the current version, the per-track digest, and the media library;
-  `contact_sheet=true` adds a locally built JPEG of the main track (path in `contact_sheet.path`).
-- `cassette_history` with `action=list|undo|redo|restore_before` moves the project's history
-  cursor. It is refused while an agent run holds the timeline.
+| Code | What to do |
+| --- | --- |
+| `bridge.backend_unreachable` | If the message says the connection broke during the call, the work may still be running: call the same tool again with the same arguments to pick it up. Otherwise call `cassette_bridge_status` once, tell the user the service is not reachable and at which URL, and retry only after it reports connected. |
+| `bridge.unauthorized` | The service refused the token. Tell the user to set a valid `CASSETTE_AUTH_TOKEN` (the plugin's access token setting) and restart the MCP server. Do not retry. |
+| `bridge.upgrade_required` | Tell the user to update the plugin (`uvx oh-my-cassette@latest`, or reinstall it). Do not retry. |
+| `bridge.protocol_unsupported` | The service at that URL is too old for this plugin (it does not speak MCP 2026-07-28). Tell the user the Cassette service must be updated. Do not retry. |
+| `bridge.file_not_found` | Ask the user for the correct path. |
+| `bridge.file_outside_workspace` | Ask the user to copy the file into the workspace, or to add its directory to `CASSETTE_ALLOWED_ROOTS`. |
+| `bridge.file_type_rejected` | Tell the user which types this tool accepts (the message lists them). |
+| `bridge.file_too_large` | Tell the user about the size limit (`CASSETTE_MAX_UPLOAD_MB`). |
+| `bridge.ffmpeg_unavailable` | Video needs ffmpeg on this machine. Relay the install hint from the message, or ask the user to set `CASSETTE_FFMPEG` and `CASSETTE_FFPROBE`. Do not retry until it is installed. |
+| `bridge.prepare_failed` | ffmpeg could not read or convert the file. Tell the user which file failed and what the message says; do not retry the same file unchanged. |
+| `bridge.upload_failed` | Retry once, then report it. |
+| `bridge.invalid_argument` | Fix the arguments: file parameters take a path or a list of paths. |
+| `bridge.contract_violation` | A Cassette service bug. Report it to the user as is; do not retry. |
 
-## Model and effort
+A failed export download (`bridge.download_failed`) does not fail the call: the result says so and
+keeps the original URL, which you can give the user.
 
-Defaults match the web editor. Only pass `model` (`luna`, `terra`, `sol`) or `effort` (`none`,
-`low`, `medium`, `high`, `xhigh`, `max`) to `cassette_run` when the user asks for a different one.
-`unattended=true` forbids questions for that run (the agent decides alone).
+## When only `cassette_bridge_status` is listed
 
-## Safety
-
-- Only import files the user named or that sit in the workspace. Never hunt the filesystem.
-- Use only paths returned by tools (`file`, `contact_sheet.path`); never invent an export path.
-- One project per workspace by default. Switch with `cassette_project project_id=...` only when the
-  user asks for a specific project.
+The service is offline, refused the token, or needs a newer plugin. Call `cassette_bridge_status`
+once and tell the user what it reports (URL, `error_code` and reason). Do not poll it. When the
+service comes back, its tools appear by themselves; if this host does not refresh tool lists, ask
+the user to restart the MCP server.

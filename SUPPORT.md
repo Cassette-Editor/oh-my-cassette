@@ -36,14 +36,13 @@ uvx oh-my-cassette==0.5.0 --version
 ```
 
 - the host (Claude Code, Codex, OpenCode, Hermes) and its version;
-- the tool call and the full JSON result it returned (every tool returns a typed `status` and, on
-  failure, an `error.code`);
+- the tool call and the full JSON result it returned (on failure, its `error.code`);
 - if the server itself misbehaves, its stderr with `OH_MY_CASSETTE_LOG=DEBUG` set in the host's
   server environment.
 
-Several results are self-explaining: `no_project` means no project is bound to the working directory
-(call `cassette_project`), and `project_timeline_locked` means a run is still active
-(`cassette_status`, then retry).
+Error codes starting with `bridge.` come from this plugin and are explained in
+[docs/development.md](./docs/development.md#troubleshooting); any other code comes from the Cassette
+service.
 
 ## Why the backend is separate
 

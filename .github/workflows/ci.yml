@@ -29,7 +29,6 @@ jobs:
             code:
               - 'src/**'
               - 'tests/**'
-              - 'contracts/**'
               - 'skills/**'
               - '.agents/skills/**'
               - 'pyproject.toml'
@@ -71,7 +70,7 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python }}
-      - name: Install ffmpeg (video preparation and contact-sheet tests)
+      - name: Install ffmpeg (the local media preparation tests run it)
         run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg
       - run: uv sync --frozen --group dev
       - run: uv run pytest -q -rs
