@@ -38,7 +38,7 @@ codex plugin add oh-my-cassette@cassette-editor
 hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
 ```
 
-OpenCode 与其它 MCP 宿主见下文[安装](#安装)。然后启动 Cassette 本地栈和它的 MCP 服务（或指向已部署的服务），设置访问令牌，重启你的 agent，直接说：
+OpenCode 与其它 MCP 宿主见下文[安装](#安装)。运行 `uvx oh-my-cassette==0.5.0 login`，在浏览器中用邮箱验证码登录并授权。如果宿主不支持刷新工具列表，重启 agent 后直接说：
 
 > *把 ./footage 里的 mp4 导入，剪一个 30 秒的旅行 vlog，开头加标题。*
 
@@ -70,8 +70,8 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 
 ## 环境要求
 
-- 实现[约定 v1](./docs/v3/contract.md) 的 Cassette MCP 服务，以及它的访问令牌。可以用
-  `uvx oh-my-cassette==0.5.0 check --url <端点> --token <令牌>` 检查。服务连不上或不接受令牌时，
+- 实现[约定 v1](./docs/v3/contract.md) 的 Cassette MCP 服务，以及获准使用 Cassette 的账号。可以用
+  `uvx oh-my-cassette==0.5.0 check --url <端点>` 检查。服务连不上或不接受令牌时，
   工具列表里只有 `cassette_bridge_status`。
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5+。`uvx oh-my-cassette==0.5.0` 会自行解析 Python 3.11–3.13。
 - 导入视频需要 [ffmpeg](https://ffmpeg.org/download.html)（含 ffprobe）：`brew install ffmpeg`、
@@ -82,12 +82,12 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 
 ## 配置
 
-全部通过环境变量，四个宿主的配置方式完全一致。
+先运行 `oh-my-cassette login --target web`。连接已登录的 Desktop 时，显式使用 `--target desktop`；失败不会切换到 Web。凭证保存在系统钥匙串，无需复制 token。详见[登录说明](./docs/oauth.md)。下面是可选覆盖配置。
 
 | 变量 | 默认值 | 含义 |
 | --- | --- | --- |
-| `CASSETTE_MCP_URL` | `http://127.0.0.1:8790/mcp` | Cassette MCP 服务的端点。 |
-| `CASSETTE_AUTH_TOKEN` | 未设置 | bearer token，服务要求必须有。发给服务；上传和下载地址只有同源时才带。 |
+| `CASSETTE_MCP_URL` | 已保存目标，否则 Cassette Web | 显式覆盖 MCP 端点。 |
+| `CASSETTE_AUTH_TOKEN` | 未设置 | 高级兼容入口；默认使用 `login` 和系统钥匙串。仍受账号、scope 和 resource 校验。不要写入共享配置。 |
 | `CASSETTE_WORKSPACE` | 宿主启动 server 时的目录 | 相对路径从这里解析，服务也可以据此记住这个目录对应的项目。 |
 | `CASSETTE_ALLOWED_ROOTS` | 未设置 | 额外允许读取本地文件的目录（用 `:` 分隔，Windows 上用 `;`）。 |
 | `CASSETTE_DOWNLOAD_DIR` | `<工作区>/cassette-exports` | 导出文件保存的位置。 |
@@ -103,12 +103,12 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 
 ### Claude Code
 
-推荐用顶部两条插件命令。安装时 Claude 会询问 `mcp_url` 和 `auth_token`（`userConfig`），并以 10 分钟工具超时启动 `uvx oh-my-cassette==0.5.0`。
+推荐用顶部两条插件命令。先运行 `oh-my-cassette login` 完成浏览器登录，插件沿用已保存的目标，并以 10 分钟工具超时启动 `uvx oh-my-cassette==0.5.0`。
 
 不用插件、只在项目范围接入：把 [`.mcp.json`](./.mcp.json) 复制到你的项目并替换 `${user_config.*}`，或者：
 
 ```bash
-claude mcp add --transport stdio cassette -e CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp -e CASSETTE_AUTH_TOKEN=<令牌> -- uvx oh-my-cassette==0.5.0
+claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.5.0
 ```
 
 skill 在 [`skills/cassette-video-edit/SKILL.md`](./skills/cassette-video-edit/SKILL.md)，随插件一起安装。
@@ -118,7 +118,7 @@ skill 在 [`skills/cassette-video-edit/SKILL.md`](./skills/cassette-video-edit/S
 顶部两条插件命令（[`.codex-plugin/plugin.json`](./.codex-plugin/plugin.json) 内联声明了 server，`tool_timeout_sec: 600`，并从你的 shell 透传 `CASSETTE_*` 变量）。或者直接加 server：
 
 ```bash
-codex mcp add cassette --env CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp --env CASSETTE_AUTH_TOKEN=<令牌> -- uvx oh-my-cassette==0.5.0
+codex mcp add cassette -- uvx oh-my-cassette==0.5.0
 ```
 
 ### OpenCode
@@ -131,10 +131,6 @@ codex mcp add cassette --env CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp --env CA
     "cassette": {
       "type": "local",
       "command": ["uvx", "oh-my-cassette==0.5.0"],
-      "environment": {
-        "CASSETTE_MCP_URL": "http://127.0.0.1:8790/mcp",
-        "CASSETTE_AUTH_TOKEN": "{env:CASSETTE_AUTH_TOKEN}"
-      },
       "timeout": 600000
     }
   }
@@ -155,7 +151,7 @@ OpenCode 没有 MCP elicitation，没关系：剪辑 agent 的提问会作为普
 
 ```bash
 hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0 \
-  --env CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp --env CASSETTE_AUTH_TOKEN=<令牌>
+
 mkdir -p ~/.hermes/skills/cassette-video-edit
 curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/skills/cassette-video-edit/SKILL.md \
   -o ~/.hermes/skills/cassette-video-edit/SKILL.md
@@ -185,7 +181,7 @@ agent： （调用服务的导出工具）
 ## 检查服务
 
 ```bash
-uvx oh-my-cassette==0.5.0 check --url http://127.0.0.1:8790/mcp --token <令牌> --upload \
+uvx oh-my-cassette==0.5.0 check --url http://127.0.0.1:8790/mcp --upload \
   --arguments '{"project_id": "<一个测试项目>"}'
 ```
 

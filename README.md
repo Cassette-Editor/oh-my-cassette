@@ -38,7 +38,7 @@ codex plugin add oh-my-cassette@cassette-editor
 hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
 ```
 
-OpenCode and any other MCP host: see [Install](#install) below. Then start the Cassette stack and its MCP service (or point the plugin at a deployed one), set your access token, restart your agent, and say:
+OpenCode and any other MCP host: see [Install](#install) below. Run `uvx oh-my-cassette==0.5.0 login` and complete the email-code sign-in in your browser. Then restart your agent if it cannot refresh its tool list, and say:
 
 > *Import ./footage/*.mp4 and cut a 30-second travel vlog with a title at the start.*
 
@@ -74,8 +74,7 @@ Six real cases edited end to end through Oh My Cassette, each with the exact pro
 
 ## Requirements
 
-- A Cassette MCP service that implements [contract v1](./docs/v3/contract.md), and an access token
-  for it. Check it with `uvx oh-my-cassette==0.5.0 check --url <endpoint> --token <token>`. While the
+- An invited Cassette account and a Cassette MCP service that implements [contract v1](./docs/v3/contract.md). Check it with `uvx oh-my-cassette==0.5.0 check --url <endpoint>`. While the
   service is unreachable or refuses the token, only `cassette_bridge_status` is listed.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5 or newer. `uvx oh-my-cassette==0.5.0` resolves Python 3.11–3.13 by itself.
 - [ffmpeg](https://ffmpeg.org/download.html) (with ffprobe) to import video: `brew install ffmpeg`,
@@ -87,12 +86,12 @@ Which formats a tool accepts, and how files are prepared before upload, is decla
 
 ## Configuration
 
-Everything is an environment variable, so all four hosts configure the bridge the same way.
+Sign in once with `oh-my-cassette login --target web`. To connect to the open Desktop account, use `--target desktop` explicitly. [Login, status and logout](./docs/oauth.md) use your operating-system keyring; no token needs to be copied. Environment variables below are optional overrides.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `CASSETTE_MCP_URL` | `http://127.0.0.1:8790/mcp` | The Cassette MCP service endpoint. |
-| `CASSETTE_AUTH_TOKEN` | unset | Bearer token; the service requires one. Sent to the service, and to upload and download URLs only when they have the same origin. |
+| `CASSETTE_MCP_URL` | saved target, otherwise Cassette Web | Explicit MCP endpoint override. |
+| `CASSETTE_AUTH_TOKEN` | unset | Advanced bearer-token override. Normally use `login`; the same account, scope and resource checks apply. Never place it in shared configuration. |
 | `CASSETTE_WORKSPACE` | the directory the host starts the server in | Where relative paths resolve, and the directory the service may remember a project for. |
 | `CASSETTE_ALLOWED_ROOTS` | unset | Extra directories local files may come from (`:`-separated; `;` on Windows). |
 | `CASSETTE_DOWNLOAD_DIR` | `<workspace>/cassette-exports` | Where exported files are saved. |
@@ -108,12 +107,12 @@ Everything is an environment variable, so all four hosts configure the bridge th
 
 ### Claude Code
 
-Plugin (recommended): the two commands at the top. Claude asks for `mcp_url` and `auth_token` on install (`userConfig`), and starts `uvx oh-my-cassette==0.5.0` with a 10-minute tool timeout.
+Plugin (recommended): the two commands at the top. The plugin uses the connection saved by `oh-my-cassette login` and starts `uvx oh-my-cassette==0.5.0` with a 10-minute tool timeout.
 
-Project scope without the plugin: copy [`.mcp.json`](./.mcp.json) into your project and replace the `${user_config.*}` values, or run:
+Project scope without the plugin: copy [`.mcp.json`](./.mcp.json) into your project, or run:
 
 ```bash
-claude mcp add --transport stdio cassette -e CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp -e CASSETTE_AUTH_TOKEN=<token> -- uvx oh-my-cassette==0.5.0
+claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.5.0
 ```
 
 The skill lives in [`skills/cassette-video-edit/SKILL.md`](./skills/cassette-video-edit/SKILL.md) and ships with the plugin.
@@ -123,7 +122,7 @@ The skill lives in [`skills/cassette-video-edit/SKILL.md`](./skills/cassette-vid
 Plugin: the two commands at the top ([`.codex-plugin/plugin.json`](./.codex-plugin/plugin.json) declares the server inline with `tool_timeout_sec: 600` and passes the `CASSETTE_*` variables through from your shell). Or add the server directly:
 
 ```bash
-codex mcp add cassette --env CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp --env CASSETTE_AUTH_TOKEN=<token> -- uvx oh-my-cassette==0.5.0
+codex mcp add cassette -- uvx oh-my-cassette==0.5.0
 ```
 
 ### OpenCode
@@ -136,10 +135,6 @@ Add to `opencode.json` (project or `~/.config/opencode/opencode.json`):
     "cassette": {
       "type": "local",
       "command": ["uvx", "oh-my-cassette==0.5.0"],
-      "environment": {
-        "CASSETTE_MCP_URL": "http://127.0.0.1:8790/mcp",
-        "CASSETTE_AUTH_TOKEN": "{env:CASSETTE_AUTH_TOKEN}"
-      },
       "timeout": 600000
     }
   }
@@ -160,7 +155,7 @@ OpenCode has no MCP elicitation, which is fine: the editing agent's questions co
 
 ```bash
 hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0 \
-  --env CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp --env CASSETTE_AUTH_TOKEN=<token>
+
 mkdir -p ~/.hermes/skills/cassette-video-edit
 curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/skills/cassette-video-edit/SKILL.md \
   -o ~/.hermes/skills/cassette-video-edit/SKILL.md
@@ -190,7 +185,7 @@ The editor link comes from the service: open it in a browser to watch the run li
 ## Check a service
 
 ```bash
-uvx oh-my-cassette==0.5.0 check --url http://127.0.0.1:8790/mcp --token <token> --upload \
+uvx oh-my-cassette==0.5.0 check --url http://127.0.0.1:8790/mcp --upload \
   --arguments '{"project_id": "<a test project>"}'
 ```
 

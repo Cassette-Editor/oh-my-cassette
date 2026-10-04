@@ -30,14 +30,13 @@
       "environmentVariables": [
         {
           "name": "CASSETTE_MCP_URL",
-          "description": "Cassette MCP service endpoint",
-          "isRequired": false,
-          "default": "http://127.0.0.1:8790/mcp"
+          "description": "Optional explicit target override; normally use the target saved by oh-my-cassette login.",
+          "isRequired": false
         },
         {
           "name": "CASSETTE_AUTH_TOKEN",
-          "description": "Bearer token for the Cassette MCP service",
-          "isRequired": true,
+          "description": "Advanced compatibility override. Normally use oh-my-cassette login and the operating-system keyring.",
+          "isRequired": false,
           "isSecret": true
         },
         {

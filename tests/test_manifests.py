@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 
 import oh_my_cassette
-from oh_my_cassette.bridge.settings import DEFAULT_MCP_URL
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src/oh_my_cassette"
@@ -48,15 +47,11 @@ def test_claude_plugin_manifest():
     plugin = load(".claude-plugin/plugin.json")
     assert plugin["name"] == "oh-my-cassette" and plugin["version"] == VERSION
     assert plugin["mcpServers"] == "./.mcp.json"
-    assert plugin["userConfig"]["auth_token"]["sensitive"] is True
-    assert plugin["userConfig"]["mcp_url"]["default"] == DEFAULT_MCP_URL
+    assert not plugin.get("userConfig")
     mcp = load(".mcp.json")["mcpServers"]["cassette"]
     assert mcp["command"] == "uvx" and mcp["args"] == [f"oh-my-cassette=={VERSION}"]
     assert mcp["timeout"] == HOST_TIMEOUT_SEC * 1000
-    assert mcp["env"] == {
-        "CASSETTE_MCP_URL": "${user_config.mcp_url}",
-        "CASSETTE_AUTH_TOKEN": "${user_config.auth_token}",
-    }
+    assert not mcp.get("env"), "Plugin must preserve the saved OAuth target"
     marketplace = load(".claude-plugin/marketplace.json")
     assert marketplace["plugins"][0]["version"] == VERSION
     assert marketplace["plugins"][0]["source"]["ref"] == "release"
@@ -77,14 +72,15 @@ def test_opencode_and_registry_manifests():
     opencode = load("opencode.json")["mcp"]["cassette"]
     assert opencode["type"] == "local" and opencode["command"] == ["uvx", f"oh-my-cassette=={VERSION}"]
     assert opencode["timeout"] == HOST_TIMEOUT_SEC * 1000
-    assert opencode["environment"]["CASSETTE_MCP_URL"] == DEFAULT_MCP_URL
+    assert not opencode.get("environment"), "Plugin must preserve the saved OAuth target"
     server = load("server.json")
     assert server["version"] == VERSION
     package = server["packages"][0]
     assert package["registryType"] == "pypi" and package["identifier"] == "oh-my-cassette"
     assert package["version"] == VERSION
     variables = {v["name"]: v for v in package["environmentVariables"]}
-    assert variables["CASSETTE_MCP_URL"]["default"] == DEFAULT_MCP_URL
+    assert not variables["CASSETTE_MCP_URL"].get("default")
+    assert not variables["CASSETTE_AUTH_TOKEN"].get("isRequired")
 
 
 def test_no_manifest_or_guide_points_at_the_retired_settings():

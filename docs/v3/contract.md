@@ -26,7 +26,7 @@ Cassette 后端
 3. 后端 MUST 提供 `tools` 能力。v1 的 bridge 只转发 tools、`instructions` 和进度通知；resources、prompts、sampling、elicitation、roots 不转发，后端 MUST NOT 依赖它们。需要问用户的地方，用工具结果里的类型化状态表达（例如 `needs_input`）。
 4. `structuredContent` MUST 是 JSON 对象。2025 年代的宿主只接受对象。
 5. 后端 SHOULD NOT 把业务状态绑定在 MCP 会话上。后端每次部署、网络中断，bridge 都会重新建立会话，新会话必须能看到同一批项目。
-6. 鉴权：后端要求令牌，没有匿名模式。bridge 在每个请求上带 `Authorization: Bearer <CASSETTE_AUTH_TOKEN>`。端点回答 HTTP 401 时，bridge 报 `bridge.unauthorized`（不可重试）：连接阶段体现在 `cassette_bridge_status` 的结果和离线时的 `instructions` 里，调用阶段体现在那次调用的结果里。没有配置令牌时 bridge 照样连接，由端点决定是否回答 401（本地开发栈的登录旁路模式可以不要令牌）。MCP 标准的 OAuth 授权流程留到后续版本。
+6. 鉴权：`oh-my-cassette login --target web|desktop` 通过浏览器邮箱验证码、PKCE S256 和 loopback 回调取得独立 OAuth grant。access/refresh token 放入系统钥匙串，跨进程锁协调刷新；上游、上传、下载每次发送请求都向同一凭证管理器取 token。MCP 仅获 Agent scope，resource 绑定 Web 或某一台 Desktop。未登录的 stdio 立即启动并提供连接状态，登录后通知工具列表更新；不支持更新的宿主需要重启。`CASSETTE_AUTH_TOKEN` 仅保留为高级兼容覆盖，仍接受相同校验。
 7. `instructions`：后端的 `instructions` 原样转发给宿主，bridge 不追加内容。工作流原则、路由规则写在这里；宿主侧的 SKILL.md 只保留不随后端变化的原则。
 8. 保活：后端 SHOULD 在每个 SSE 响应流上至少每 15 秒发一行 SSE 注释。bridge 的 HTTP 读空闲上限是 60 秒，超过就当作连接已断（§7）；单次调用本身没有总时限。单个 SSE 事件最大 32 MiB。
 
@@ -336,6 +336,8 @@ bridge 在每个 `tools/call` 的 `params._meta` 里加上：
 | code | 含义 | retryable |
 |---|---|---|
 | `bridge.backend_unreachable` | 连不上后端，或连接在调用中断开（后端的工作可能还在继续，见 §7） | 是 |
+| `bridge.forbidden` | HTTP 403：当前账号、授权或目标不允许访问 | 否 |
+| `bridge.auth_unavailable` | 身份服务或系统钥匙串暂不可用，保留凭证后重试 | 是 |
 | `bridge.unauthorized` | 后端回答 HTTP 401：没有令牌，或令牌不被接受 | 否 |
 | `bridge.upgrade_required` | 后端要求更高的 bridge 版本或契约版本 | 否 |
 | `bridge.protocol_unsupported` | 后端只支持握手时代的协议，不支持 MCP 2026-07-28（§1） | 否 |

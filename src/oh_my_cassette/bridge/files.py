@@ -455,8 +455,8 @@ class LocalFiles:
         url, given = target
         # The presigned URL is bound to the headers it was signed with, Content-Type included.
         headers = {**given, "Content-Length": str(artifact.size)}
-        if self._settings.auth_token and same_origin(url, self._settings.mcp_url):
-            headers.setdefault("Authorization", f"Bearer {self._settings.auth_token}")
+        if same_origin(url, self._settings.mcp_url):
+            headers.update(await self._upstream.credentials.headers(url))
 
         async def body():
             async with await anyio.open_file(artifact.path, "rb") as handle:

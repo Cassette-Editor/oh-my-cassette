@@ -33,6 +33,7 @@ from mcp.shared.exceptions import MCPError
 from mcp_types.version import LATEST_MODERN_VERSION, MODERN_PROTOCOL_VERSIONS
 
 from oh_my_cassette import __version__
+from oh_my_cassette.auth import AuthenticationError, Credentials
 from oh_my_cassette.bridge.settings import BridgeSettings
 from oh_my_cassette.contract import ServerContract, bridge_role, server_contract
 
@@ -91,14 +92,24 @@ def describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
 
+def authentication_failure(error: BaseException) -> AuthenticationError | None:
+    if isinstance(error, AuthenticationError):
+        return error
+    if isinstance(error, BaseExceptionGroup):
+        return next(filter(None, (authentication_failure(item) for item in error.exceptions)), None)
+    return None
+
+
 class Upstream:
     def __init__(
         self,
         settings: BridgeSettings,
         *,
+        credentials: Credentials | None = None,
         on_tools_changed: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.settings = settings
+        self.credentials = credentials or Credentials(settings.mcp_url, explicit_token=settings.auth_token)
         self._on_tools_changed = on_tools_changed
         self._client: Client | None = None
         self._broken = anyio.Event()
@@ -114,6 +125,7 @@ class Upstream:
         self.protocol_version: str | None = None
         self.last_error: str | None = None
         self.unauthorized = False
+        self.forbidden = False
         self.protocol_unsupported = False
         # Counts of HTTP answers the MCP transport turns into generic errors; compared around a call.
         self._rejections = 0
@@ -123,16 +135,19 @@ class Upstream:
 
     def _http_client(self) -> httpx2.AsyncClient:
         headers = {"User-Agent": f"oh-my-cassette/{__version__}"}
-        if self.settings.auth_token:
-            headers["Authorization"] = f"Bearer {self.settings.auth_token}"
         timeout = httpx2.Timeout(self.settings.read_timeout_sec, connect=self.settings.connect_timeout_sec)
         http = create_mcp_http_client(headers=headers, timeout=timeout)
-        http.event_hooks = {"response": [self._on_response]}
+        http.event_hooks = {"request": [self._authorize_request], "response": [self._on_response]}
         return http
+
+    async def _authorize_request(self, request: httpx2.Request) -> None:
+        request.headers.update(await self.credentials.headers(str(request.url)))
 
     async def _on_response(self, response: httpx2.Response) -> None:
         if response.status_code == 401:
             self._rejections += 1
+        elif response.status_code == 403:
+            raise AuthenticationError("This account or grant cannot access the selected target", 403)
         elif response.status_code in GATEWAY_STATUSES:
             self._gateway_errors += 1
 
@@ -142,7 +157,11 @@ class Upstream:
         `task_status.started()` fires after the first attempt either way, so the bridge can decide
         its instructions before it starts serving the host.
         """
-        started = False
+        started = not self.credentials.configured
+        if started:
+            self.unauthorized = True
+            self.last_error = "Not signed in"
+            task_status.started()
         delay = 1.0
         while True:
             self._wake = anyio.Event()
@@ -178,11 +197,15 @@ class Upstream:
                         await self._broken.wait()
                         tg.cancel_scope.cancel()
             except Exception as exc:
-                self.unauthorized = self._rejections > rejections
+                auth_error = authentication_failure(exc)
+                self.unauthorized = self._rejections > rejections or (
+                    auth_error is not None and auth_error.status == 401
+                )
+                self.forbidden = auth_error is not None and auth_error.status == 403
                 refusal = protocol_refusal(exc)
                 self.protocol_unsupported = refusal is not None
                 if self.unauthorized:
-                    self.last_error = "HTTP 401 Unauthorized"
+                    self.last_error = str(auth_error) if auth_error else "HTTP 401 Unauthorized"
                 else:
                     self.last_error = str(refusal) if refusal else describe(exc)
                 log.warning(
@@ -216,6 +239,7 @@ class Upstream:
         self._tools = await self._fetch_tools(client)
         self.last_error = None
         self.unauthorized = False
+        self.forbidden = False
         self.protocol_unsupported = False
         self._client = client
         self._end_attempt()
@@ -289,6 +313,8 @@ class Upstream:
 
     async def client(self) -> Client:
         if not await self.wait_connected(self.settings.connect_timeout_sec):
+            if self.forbidden:
+                raise AuthenticationError("This account or grant cannot access the selected target", 403)
             if self.unauthorized:
                 raise Unauthorized(self.last_error or "HTTP 401 Unauthorized")
             if self.protocol_unsupported and self.last_error:
@@ -336,3 +362,6 @@ class Upstream:
         except TRANSPORT_ERRORS as exc:
             self.mark_broken()
             raise BackendUnavailable(describe(exc), during_call=True) from exc
+        except AuthenticationError:
+            self.mark_broken()
+            raise

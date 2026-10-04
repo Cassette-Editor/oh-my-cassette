@@ -9,21 +9,11 @@
   "homepage": "https://github.com/Cassette-Editor/oh-my-cassette",
   "repository": "https://github.com/Cassette-Editor/oh-my-cassette",
   "license": "MIT",
-  "keywords": ["cassette", "video-editing", "media", "mcp"],
-  "mcpServers": "./.mcp.json",
-  "userConfig": {
-    "mcp_url": {
-      "type": "string",
-      "title": "Cassette MCP URL",
-      "description": "The Cassette MCP service endpoint.",
-      "default": "http://127.0.0.1:8790/mcp"
-    },
-    "auth_token": {
-      "type": "string",
-      "title": "Cassette access token",
-      "description": "Bearer token for the Cassette MCP service.",
-      "sensitive": true,
-      "required": true
-    }
-  }
+  "keywords": [
+    "cassette",
+    "video-editing",
+    "media",
+    "mcp"
+  ],
+  "mcpServers": "./.mcp.json"
 }

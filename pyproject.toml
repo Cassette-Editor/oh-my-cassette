@@ -26,6 +26,8 @@ classifiers = [
 dependencies = [
   "mcp>=2.3,<3",
   "httpx>=0.28,<1",
+  "keyring>=25,<27",
+  "filelock>=3.20,<4",
 ]
 
 [project.urls]

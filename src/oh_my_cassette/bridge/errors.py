@@ -25,10 +25,11 @@ class BridgeError(Exception):
 def unauthorized(url: str, *, has_token: bool) -> BridgeError:
     if has_token:
         message = (
-            f"{url} rejected CASSETTE_AUTH_TOKEN (HTTP 401); set a valid token and restart this MCP server"
+            f"{url} rejected the credential (HTTP 401); remove any stale CASSETTE_AUTH_TOKEN override, "
+            "run oh-my-cassette login, and restart the MCP host if its tool list does not update"
         )
     else:
-        message = f"{url} requires a token (HTTP 401); set CASSETTE_AUTH_TOKEN and restart this MCP server"
+        message = f"{url} requires sign-in (HTTP 401); run oh-my-cassette login and restart the MCP host if its tool list does not update"
     return BridgeError("bridge.unauthorized", message)
 
 

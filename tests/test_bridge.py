@@ -53,7 +53,7 @@ async def test_forwards_progress_and_context(remote, bridge_settings, mode):
     meta = remote.calls[-1]["meta"]
     workspace = settings.workspace
     assert meta[META_WORKSPACE] == {
-        "id": hashlib.sha256(str(workspace).encode()).hexdigest()[:32],
+        "id": hashlib.sha256(f"explicit\n{settings.mcp_url}\n{workspace}".encode()).hexdigest()[:32],
         "name": workspace.name,
     }
     assert meta[META_HOST]["name"]  # the host's clientInfo wins over CASSETTE_MCP_HOST
@@ -73,7 +73,7 @@ async def test_a_refused_token_is_reported_as_unauthorized(remote, bridge_settin
         assert "bridge.unauthorized" in host.instructions
         status = await host.call_tool(STATUS_TOOL, {})
         assert status.structured_content["error_code"] == "bridge.unauthorized"
-        assert "CASSETTE_AUTH_TOKEN" in status.structured_content["error"]
+        assert "oh-my-cassette login" in status.structured_content["error"]
         refused = await host.call_tool("slow_turn", {"steps": 1})
         assert refused.structured_content["error"]["code"] == "bridge.unauthorized"
         assert refused.structured_content["error"]["retryable"] is False

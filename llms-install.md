@@ -10,7 +10,7 @@ service at `CASSETTE_MCP_URL`, so the editing tools come from that service.
 - `ffmpeg` and `ffprobe` on PATH to import video (`brew install ffmpeg`, `sudo apt install ffmpeg`,
   `winget install ffmpeg`), or `CASSETTE_FFMPEG` / `CASSETTE_FFPROBE` set to them.
 - A reachable Cassette MCP service (contract v1) and an access token for it. Check it with
-  `uvx oh-my-cassette==0.5.0 check --url http://127.0.0.1:8790/mcp --token <token>`: every line should be PASS.
+  `uvx oh-my-cassette==0.5.0 check`: every line should be PASS.
 
 ## Claude Code
 
@@ -20,7 +20,7 @@ claude plugin install oh-my-cassette@cassette-editor
 ```
 
 The plugin asks for `mcp_url` and `auth_token`. Or project scope:
-`claude mcp add --transport stdio cassette -e CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp -e CASSETTE_AUTH_TOKEN=<token> -- uvx oh-my-cassette==0.5.0`.
+`claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.5.0`.
 Health check: `claude mcp list` shows `cassette: … - ✓ Connected`.
 
 ## Codex
@@ -31,7 +31,7 @@ codex plugin add oh-my-cassette@cassette-editor
 ```
 
 The plugin passes `CASSETTE_*` variables through from the shell. Or:
-`codex mcp add cassette --env CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp --env CASSETTE_AUTH_TOKEN=<token> -- uvx oh-my-cassette==0.5.0`.
+`codex mcp add cassette -- uvx oh-my-cassette==0.5.0`.
 
 ## OpenCode
 
@@ -42,7 +42,7 @@ then copy `skills/cassette-video-edit/SKILL.md` to `~/.config/opencode/skills/ca
 
 ```bash
 hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0 \
-  --env CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp --env CASSETTE_AUTH_TOKEN=<token>
+
 ```
 
 Copy `skills/cassette-video-edit/SKILL.md` to `~/.hermes/skills/cassette-video-edit/SKILL.md` and set
@@ -57,8 +57,7 @@ on the next call.
 
 ## Environment variables
 
-`CASSETTE_MCP_URL` (default `http://127.0.0.1:8790/mcp`), `CASSETTE_AUTH_TOKEN` (required by the
-service), `CASSETTE_WORKSPACE` (default: the server's working directory), `CASSETTE_ALLOWED_ROOTS`,
+`CASSETTE_MCP_URL` (optional target override), `CASSETTE_AUTH_TOKEN` (advanced credential override), `CASSETTE_WORKSPACE` (default: the server's working directory), `CASSETTE_ALLOWED_ROOTS`,
 `CASSETTE_DOWNLOAD_DIR`, `CASSETTE_MAX_UPLOAD_MB`, `CASSETTE_MAX_DOWNLOAD_MB`, `CASSETTE_UPLOAD_ANY_TYPE`,
 `CASSETTE_LOCAL_WAIT_SEC`, `CASSETTE_FFMPEG`, `CASSETTE_FFPROBE`, `CASSETTE_TEMP_DIR`,
 `CASSETTE_CONNECT_TIMEOUT_SEC`, `OH_MY_CASSETTE_LOG`. See README.md for defaults.

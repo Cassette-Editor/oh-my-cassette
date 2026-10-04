@@ -7,7 +7,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_MCP_URL = "http://127.0.0.1:8790/mcp"
+from oh_my_cassette.auth import DEFAULT_WEB_RESOURCE, saved_connection
+
+DEFAULT_MCP_URL = DEFAULT_WEB_RESOURCE
 MB = 1024 * 1024
 
 
@@ -74,8 +76,9 @@ class BridgeSettings:
             for item in (_env("CASSETTE_ALLOWED_ROOTS") or "").split(os.pathsep)
             if item
         )
+        saved = saved_connection() if not _env("CASSETTE_MCP_URL") else None
         return cls(
-            mcp_url=_env("CASSETTE_MCP_URL") or DEFAULT_MCP_URL,
+            mcp_url=_env("CASSETTE_MCP_URL") or (saved.resource if saved else DEFAULT_MCP_URL),
             workspace=workspace,
             auth_token=_env("CASSETTE_AUTH_TOKEN"),
             allowed_roots=roots,

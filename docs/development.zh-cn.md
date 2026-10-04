@@ -49,7 +49,7 @@ bun run dev:lambda      # web 编辑器、:8787 上的 API、worker
 bun run dev:mcp         # 127.0.0.1:8790 上的 MCP 服务
 ```
 
-然后让 bridge 指向它：`CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp`（默认值），令牌放在 `CASSETTE_AUTH_TOKEN`。
+使用 `CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp uv run oh-my-cassette login --target web` 登录本地服务。服务必须提供 OAuth resource metadata，凭证保存在系统钥匙串中，详见 [OAuth](oauth.md)。
 
 ## 开发
 
@@ -57,7 +57,7 @@ bun run dev:mcp         # 127.0.0.1:8790 上的 MCP 服务
 uv sync --group dev
 uv run pytest -q -rs                               # 参考服务跑在回环地址上；test_prepare 需要 ffmpeg
 uv run ruff check . && uv run ruff format --check .
-uv run oh-my-cassette check --url http://127.0.0.1:8790/mcp --token "$CASSETTE_AUTH_TOKEN" --upload
+uv run oh-my-cassette check --url http://127.0.0.1:8790/mcp --upload
 RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q -rs          # 本地栈，包括一次真实导出
 uv build && uvx --from dist/*.whl oh-my-cassette --version
 ```
@@ -70,7 +70,7 @@ uv build && uvx --from dist/*.whl oh-my-cassette --version
 在宿主里运行当前仓库：
 
 ```bash
-claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -e CASSETTE_AUTH_TOKEN="$CASSETTE_AUTH_TOKEN" \
+claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG \
   -- uv run --directory "$PWD" oh-my-cassette
 ```
 
@@ -82,7 +82,7 @@ skill 写了后端工具名、或漏了某个 `bridge.*` 错误码时，`tests/t
 | 结果 | 含义 | 怎么办 |
 |---|---|---|
 | 只列出 `cassette_bridge_status` | 服务连不上、不接受令牌，或要求更新的 bridge。 | 调用它：`error_code` 和 `error` 会说明是哪种。 |
-| `bridge.unauthorized` | 服务回答 HTTP 401。 | 设置有效的 `CASSETTE_AUTH_TOKEN` 并重启 server。 |
+| `bridge.unauthorized` | 服务回答 HTTP 401。 | 运行 `oh-my-cassette login`，并移除过期的手动 token 覆盖。 |
 | 调用中出现 `bridge.backend_unreachable` | 连接断开，或 60 秒没有任何数据。 | 用同样的参数再调用一次：服务的工作可能还在运行。 |
 | `{"status": "preparing"}` | 本地预处理或上传还没完成。 | 用同样的参数再调用一次，继续等待。 |
 | `bridge.ffmpeg_unavailable` | PATH 上没有 ffmpeg / ffprobe。 | 安装 ffmpeg，或设置 `CASSETTE_FFMPEG` 和 `CASSETTE_FFPROBE`。 |

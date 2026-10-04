@@ -2,11 +2,9 @@
   "mcpServers": {
     "cassette": {
       "command": "uvx",
-      "args": ["oh-my-cassette==0.5.0"],
-      "env": {
-        "CASSETTE_MCP_URL": "${user_config.mcp_url}",
-        "CASSETTE_AUTH_TOKEN": "${user_config.auth_token}"
-      },
+      "args": [
+        "oh-my-cassette==0.5.0"
+      ],
       "timeout": 600000
     }
   }

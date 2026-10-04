@@ -102,6 +102,8 @@ async def test_cli_exit_codes(remote):
     assert ok.returncode == 0, ok.stderr
     assert {entry["status"] for entry in json.loads(ok.stdout)} == {"pass"}
 
-    down = await anyio.to_thread.run_sync(_cli, "check", "--url", f"http://127.0.0.1:{free_port()}/mcp")
+    down = await anyio.to_thread.run_sync(
+        _cli, "check", "--url", f"http://127.0.0.1:{free_port()}/mcp", "--token", REFERENCE_TOKEN
+    )
     assert down.returncode == 1
     assert down.stdout.startswith("FAIL") and "0 passed, 0 warnings, 1 failed" in down.stdout

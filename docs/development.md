@@ -51,8 +51,7 @@ bun run dev:lambda      # web editor, API on :8787, worker
 bun run dev:mcp         # the MCP service on 127.0.0.1:8790
 ```
 
-Then point the bridge at it with `CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp` (the default) and a
-token in `CASSETTE_AUTH_TOKEN`.
+Sign in to the local service with `CASSETTE_MCP_URL=http://127.0.0.1:8790/mcp uv run oh-my-cassette login --target web`. It must expose OAuth resource metadata; see [OAuth setup](oauth.md). Credentials go to the system keyring.
 
 ## Development
 
@@ -60,7 +59,7 @@ token in `CASSETTE_AUTH_TOKEN`.
 uv sync --group dev
 uv run pytest -q -rs                               # reference service on loopback; needs ffmpeg for test_prepare
 uv run ruff check . && uv run ruff format --check .
-uv run oh-my-cassette check --url http://127.0.0.1:8790/mcp --token "$CASSETTE_AUTH_TOKEN" --upload
+uv run oh-my-cassette check --url http://127.0.0.1:8790/mcp --upload
 RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q -rs          # the local stack, including a real export
 uv build && uvx --from dist/*.whl oh-my-cassette --version
 ```
@@ -74,7 +73,7 @@ needs ffmpeg with libx265 and renders through the backend's configured provider,
 Run the checkout inside a host:
 
 ```bash
-claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -e CASSETTE_AUTH_TOKEN="$CASSETTE_AUTH_TOKEN" \
+claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG \
   -- uv run --directory "$PWD" oh-my-cassette
 ```
 
@@ -87,7 +86,7 @@ misses a `bridge.*` error code.
 | Result | Meaning | What to do |
 |---|---|---|
 | Only `cassette_bridge_status` is listed | The service is unreachable, refused the token, or needs a newer bridge. | Call it: `error_code` and `error` say which. |
-| `bridge.unauthorized` | The service answered HTTP 401. | Set a valid `CASSETTE_AUTH_TOKEN` and restart the server. |
+| `bridge.unauthorized` | The service answered HTTP 401. | Run `oh-my-cassette login`; remove any stale explicit token override. |
 | `bridge.backend_unreachable` during a call | The connection broke or went silent for 60 s. | Call again with the same arguments: the service's work may still be running. |
 | `{"status": "preparing"}` | Local preparation or upload is still going. | Call again with the same arguments to keep waiting. |
 | `bridge.ffmpeg_unavailable` | No ffmpeg / ffprobe on PATH. | Install ffmpeg, or set `CASSETTE_FFMPEG` and `CASSETTE_FFPROBE`. |

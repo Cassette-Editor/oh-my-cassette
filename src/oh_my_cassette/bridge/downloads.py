@@ -11,6 +11,7 @@ import anyio
 import httpx
 import mcp_types as types
 
+from oh_my_cassette.auth import Credentials
 from oh_my_cassette.bridge.errors import BridgeError
 from oh_my_cassette.bridge.files import CHUNK, same_origin
 from oh_my_cassette.bridge.settings import BridgeSettings
@@ -38,8 +39,11 @@ def _note(text: str) -> types.TextContent:
 
 
 class Downloads:
-    def __init__(self, settings: BridgeSettings, http: httpx.AsyncClient) -> None:
+    def __init__(
+        self, settings: BridgeSettings, http: httpx.AsyncClient, *, credentials: Credentials | None = None
+    ) -> None:
         self._settings = settings
+        self._credentials = credentials or Credentials(settings.mcp_url, explicit_token=settings.auth_token)
         self._http = http
 
     async def apply(self, result: types.CallToolResult) -> types.CallToolResult:
@@ -74,8 +78,8 @@ class Downloads:
         name = safe_file_name(spec.file_name)
         part = directory / f".{name}.{id(spec):x}.part"
         headers: dict[str, str] = {}
-        if self._settings.auth_token and same_origin(spec.url, self._settings.mcp_url):
-            headers["Authorization"] = f"Bearer {self._settings.auth_token}"
+        if same_origin(spec.url, self._settings.mcp_url):
+            headers.update(await self._credentials.headers(spec.url))
         digest = hashlib.sha256()
         total = 0
         try:

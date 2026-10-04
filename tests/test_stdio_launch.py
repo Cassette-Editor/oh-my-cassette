@@ -62,7 +62,8 @@ async def test_bridge_over_stdio_without_a_backend(tmp_path):
         status = await host.call_tool(STATUS_TOOL, {})
         assert status.structured_content["connected"] is False
         assert status.structured_content["mcp_url"] == url
-        assert status.structured_content["error_code"] == "bridge.backend_unreachable"
+        assert status.structured_content["error_code"] == "bridge.unauthorized"
+        assert "oh-my-cassette login" in status.structured_content["error"]
 
 
 async def test_bridge_over_stdio_with_a_refused_token(remote, tmp_path):

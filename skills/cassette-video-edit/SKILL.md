@@ -58,7 +58,9 @@ error code is Cassette's own: follow its message and the tool description.
 | Code | What to do |
 | --- | --- |
 | `bridge.backend_unreachable` | If the message says the connection broke during the call, the work may still be running: call the same tool again with the same arguments to pick it up. Otherwise call `cassette_bridge_status` once, tell the user the service is not reachable and at which URL, and retry only after it reports connected. |
-| `bridge.unauthorized` | The service refused the token. Tell the user to set a valid `CASSETTE_AUTH_TOKEN` (the plugin's access token setting) and restart the MCP server. Do not retry. |
+| `bridge.forbidden` | This account or grant cannot access the target. Ask the user to check access or use the account currently open in Desktop. Do not repeatedly trigger login. |
+| `bridge.auth_unavailable` | Online authentication or secure credential storage is unavailable. Tell the user to restore the connection or unlock the system keyring, then retry. |
+| `bridge.unauthorized` | The service refused the token. Tell the user to run `oh-my-cassette login --target web` or explicitly choose `--target desktop`. The browser handles email verification and consent. Restart the MCP host only if it cannot refresh tools. Do not repeatedly trigger login. |
 | `bridge.upgrade_required` | Tell the user to update the plugin (`uvx oh-my-cassette@latest`, or reinstall it). Do not retry. |
 | `bridge.protocol_unsupported` | The service at that URL is too old for this plugin (it does not speak MCP 2026-07-28). Tell the user the Cassette service must be updated. Do not retry. |
 | `bridge.file_not_found` | Ask the user for the correct path. |

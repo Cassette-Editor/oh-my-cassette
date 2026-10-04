@@ -7,7 +7,6 @@ declared artifacts after, and reports its own failures with `bridge.*` codes.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from functools import partial
 from typing import Any
@@ -25,6 +24,7 @@ from mcp.shared.exceptions import MCPError
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 from oh_my_cassette import __version__
+from oh_my_cassette.auth import AuthenticationError, Credentials
 from oh_my_cassette.bridge.downloads import Downloads
 from oh_my_cassette.bridge.errors import BridgeError, protocol_unsupported, unauthorized, unreachable
 from oh_my_cassette.bridge.files import LocalFiles
@@ -88,16 +88,15 @@ class Bridge:
         self, settings: BridgeSettings, http: httpx.AsyncClient, *, preparer: Preparer | None = None
     ) -> None:
         self.settings = settings
-        self.upstream = Upstream(settings, on_tools_changed=self.notify_tools_changed)
+        self.credentials = Credentials(settings.mcp_url, explicit_token=settings.auth_token)
+        self.upstream = Upstream(
+            settings, credentials=self.credentials, on_tools_changed=self.notify_tools_changed
+        )
         self.files = LocalFiles(settings, self.upstream, http, preparer or FFmpegPreparer(settings))
         self.jobs = LocalJobs()
-        self.downloads = Downloads(settings, http)
+        self.downloads = Downloads(settings, http, credentials=self.credentials)
         self._bus = InMemorySubscriptionBus()
         self._legacy_host_session: Any = None
-        self._workspace_meta = {
-            "id": hashlib.sha256(str(settings.workspace).encode()).hexdigest()[:32],
-            "name": settings.workspace.name,
-        }
         self._host_meta: dict[str, Any] | None = {"name": settings.host_name} if settings.host_name else None
 
     async def run(self, *, task_status: TaskStatus[None] = anyio.TASK_STATUS_IGNORED) -> None:
@@ -121,7 +120,14 @@ class Bridge:
         return self.upstream.connected and self.incompatibility() is None
 
     def _unauthorized(self) -> BridgeError:
-        return unauthorized(self.settings.mcp_url, has_token=bool(self.settings.auth_token))
+        return (
+            unauthorized(self.settings.mcp_url, has_token=bool(self.settings.auth_token))
+            if self.settings.auth_token
+            else BridgeError(
+                "bridge.unauthorized",
+                "Sign in with oh-my-cassette login --target web (or desktop). Tools refresh after login; restart the MCP host if it cannot refresh its tool list.",
+            )
+        )
 
     def offline_reason(self) -> tuple[str, str]:
         """(bridge error code, reason) while the backend's tools are not being mirrored."""
@@ -129,6 +135,8 @@ class Bridge:
             return "bridge.upgrade_required", reason
         if self.upstream.unauthorized:
             return "bridge.unauthorized", self._unauthorized().message
+        if self.upstream.forbidden:
+            return "bridge.forbidden", "This account or grant cannot access the selected target (HTTP 403)."
         if self.upstream.protocol_unsupported:
             return "bridge.protocol_unsupported", protocol_unsupported(self.upstream.last_error or "").message
         return "bridge.backend_unreachable", self.upstream.last_error or "not connected yet"
@@ -214,7 +222,10 @@ class Bridge:
                     return preparing_result(name, job)
                 arguments = call.with_refs(self.jobs.settle(call.key, job))
             meta: dict[str, Any] = {
-                META_WORKSPACE: self._workspace_meta,
+                META_WORKSPACE: {
+                    "id": self.credentials.workspace_id(self.settings.workspace),
+                    "name": self.settings.workspace.name,
+                },
                 META_ELAPSED: round(anyio.current_time() - started, 3),
             }
             if self._host_meta:
@@ -223,6 +234,14 @@ class Bridge:
             return await self.downloads.apply(result)
         except BridgeError as exc:
             return exc.result()
+        except AuthenticationError as exc:
+            if exc.status == 401:
+                return self._unauthorized().result()
+            return BridgeError(
+                "bridge.forbidden" if exc.status == 403 else "bridge.auth_unavailable",
+                str(exc),
+                retryable=exc.status == 503,
+            ).result()
         except Unauthorized:
             return self._unauthorized().result()
         except ProtocolUnsupported as exc:
