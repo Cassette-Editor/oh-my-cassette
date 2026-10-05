@@ -17,17 +17,19 @@ can select its published resource with `CASSETTE_MCP_URL` before running `login`
 The server must publish OAuth Protected Resource Metadata and its authorization service.
 This branch requires the matching Cassette authorization-service deployment before public use.
 
-To use local projects, open and sign in to Cassette Desktop, then run:
+To use local projects, open a local profile in Cassette Desktop, then run:
 
 ```sh
 oh-my-cassette login --target desktop
 oh-my-cassette status --target desktop
 ```
 
-The browser account must match the account open in Desktop. Desktop publishes its device ID,
-resource and current account in `mcp.json` in its application-data directory. Tests and alternate
-installations can set `CASSETTE_DESKTOP_DISCOVERY` to that file. A missing Desktop or a changed
-endpoint requires an explicit new login; it never silently falls back to Web.
+Desktop opens its local authorization page. Allow or deny the connection; no email code, cloud
+account or Internet connection is needed. The grant binds the selected local profile, client and
+device resource. Desktop publishes these identities and its loopback issuer in `mcp.json` in its
+application-data directory. Tests and alternate installations can set `CASSETTE_DESKTOP_DISCOVERY`
+to that file. A missing Desktop, a different profile or an old cloud grant requires an explicit new
+authorization. Reopen the original profile to use its saved grant again.
 
 Every grant allows Agent operations on all projects owned by that account at the selected target,
 including creating, listing and switching projects. A full-access account still gives MCP only
@@ -41,8 +43,8 @@ The refresh token never appears in MCP configuration, logs or stdout.
 
 The stdio server can start before login and exposes `cassette_bridge_status`. After login it retries
 the connection and announces an updated tool list. Restart a host that does not support tool-list
-updates. `logout --target web|desktop` revokes that grant online, then removes its local credential;
-if the service is unreachable, retry logout when connected.
+updates. `logout --target web|desktop` revokes the grant at its issuer, then removes its local credential;
+for Desktop this is a local request. If the service is unreachable, reopen it and retry logout.
 
 `CASSETTE_AUTH_TOKEN` remains an advanced override for compatible credentials. It does not bypass
 resource, current account permission or project ownership checks. Remove stale overrides before

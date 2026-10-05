@@ -26,7 +26,7 @@ Cassette 后端
 3. 后端 MUST 提供 `tools` 能力。v1 的 bridge 只转发 tools、`instructions` 和进度通知；resources、prompts、sampling、elicitation、roots 不转发，后端 MUST NOT 依赖它们。需要问用户的地方，用工具结果里的类型化状态表达（例如 `needs_input`）。
 4. `structuredContent` MUST 是 JSON 对象。2025 年代的宿主只接受对象。
 5. 后端 SHOULD NOT 把业务状态绑定在 MCP 会话上。后端每次部署、网络中断，bridge 都会重新建立会话，新会话必须能看到同一批项目。
-6. 鉴权：`oh-my-cassette login --target web|desktop` 通过浏览器邮箱验证码、PKCE S256 和 loopback 回调取得独立 OAuth grant。access/refresh token 放入系统钥匙串，跨进程锁协调刷新；上游、上传、下载每次发送请求都向同一凭证管理器取 token。MCP 仅获 Agent scope，resource 绑定 Web 或某一台 Desktop。未登录的 stdio 立即启动并提供连接状态，登录后通知工具列表更新；不支持更新的宿主需要重启。`CASSETTE_AUTH_TOKEN` 仅保留为高级兼容覆盖，仍接受相同校验。
+6. 鉴权：`oh-my-cassette login --target web|desktop` 使用 PKCE S256 和 loopback 回调取得独立 OAuth grant。Web 通过邮箱验证码登录；Desktop 在本机授权页允许或拒绝连接，无需云账号，可离线配对，授权绑定本地 profile、客户端及设备 resource。access/refresh token 放入系统钥匙串，跨进程锁协调刷新；上游、上传、下载每次发送请求都向同一凭证管理器取 token。MCP 仅获 Agent scope。未登录的 stdio 立即启动并提供连接状态，登录后通知工具列表更新；不支持更新的宿主需要重启。旧桌面云授权需要重新完成本地授权。`CASSETTE_AUTH_TOKEN` 仅保留为高级兼容覆盖，仍接受相同校验。
 7. `instructions`：后端的 `instructions` 原样转发给宿主，bridge 不追加内容。工作流原则、路由规则写在这里；宿主侧的 SKILL.md 只保留不随后端变化的原则。
 8. 保活：后端 SHOULD 在每个 SSE 响应流上至少每 15 秒发一行 SSE 注释。bridge 的 HTTP 读空闲上限是 60 秒，超过就当作连接已断（§7）；单次调用本身没有总时限。单个 SSE 事件最大 32 MiB。
 

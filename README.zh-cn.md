@@ -82,7 +82,7 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 
 ## 配置
 
-先运行 `oh-my-cassette login --target web`。连接已登录的 Desktop 时，显式使用 `--target desktop`；失败不会切换到 Web。凭证保存在系统钥匙串，无需复制 token。详见[登录说明](./docs/oauth.md)。下面是可选覆盖配置。
+连接 Web 时先运行 `oh-my-cassette login --target web`。连接已打开的 Desktop 本地 profile 时，显式使用 `--target desktop`，并在本地授权页允许连接。Desktop 无需云端登录，离线也能配对；失败不会切换到 Web。凭证保存在系统钥匙串，无需复制 token。详见[登录说明](./docs/oauth.md)。下面是可选覆盖配置。
 
 | 变量 | 默认值 | 含义 |
 | --- | --- | --- |

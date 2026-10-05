@@ -86,7 +86,7 @@ Which formats a tool accepts, and how files are prepared before upload, is decla
 
 ## Configuration
 
-Sign in once with `oh-my-cassette login --target web`. To connect to the open Desktop account, use `--target desktop` explicitly. [Login, status and logout](./docs/oauth.md) use your operating-system keyring; no token needs to be copied. Environment variables below are optional overrides.
+Sign in once with `oh-my-cassette login --target web`. To connect to the open Desktop profile, use `--target desktop` and allow the connection on its local authorization page. Desktop needs no cloud login and can pair offline. [Login, status and logout](./docs/oauth.md) use your operating-system keyring; no token needs to be copied. Environment variables below are optional overrides.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
