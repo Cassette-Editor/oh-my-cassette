@@ -1,10 +1,12 @@
 import hashlib
+import json
 import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from urllib.parse import parse_qs, urlencode, urlsplit
+from uuid import uuid4
 
 import anyio
 import httpx
@@ -238,6 +240,111 @@ def test_discovery_rejects_resource_and_issuer_confusion(environment, monkeypatc
     mock_http(monkeypatch, lambda request: httpx.Response(200, json={"resource": "https://evil.test/mcp"}))
     with pytest.raises(auth.AuthenticationError, match="does not match"):
         auth.discover("https://cassette.test/mcp")
+
+
+def local_discovery(root, monkeypatch):
+    device = {
+        "authentication": "local",
+        "issuer": "http://127.0.0.1:55436",
+        "deviceId": str(uuid4()),
+        "subject": str(uuid4()),
+        "profileId": str(uuid4()),
+        "profileName": "本地 QA",
+    }
+    device["resource"] = f"http://127.0.0.1:55439/devices/{device['deviceId']}/mcp"
+    file = root / "mcp.json"
+    file.write_text(json.dumps(device))
+    monkeypatch.setenv("CASSETTE_DESKTOP_DISCOVERY", str(file))
+    return device, file
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("authentication", "oauth"),
+        ("issuer", "https://cloud.test"),
+        ("subject", "account-a"),
+        ("profileId", "profile-a"),
+        ("resource", "http://127.0.0.1:55439/devices/invalid/mcp"),
+    ],
+)
+def test_desktop_discovery_requires_local_profile_and_exact_device_resource(
+    environment, monkeypatch, field, value
+):
+    root, _ = environment
+    device, file = local_discovery(root, monkeypatch)
+    assert auth.target_resource("desktop") == (device["resource"], device["subject"])
+    device[field] = value
+    file.write_text(json.dumps(device))
+    with pytest.raises(auth.AuthenticationError, match="local profile"):
+        auth.target_resource("desktop")
+
+
+def test_local_discovery_rejects_cloud_issuer_before_contacting_it(environment, monkeypatch):
+    root, _ = environment
+    device, _ = local_discovery(root, monkeypatch)
+    contacted = []
+
+    def handler(request):
+        contacted.append(str(request.url))
+        return httpx.Response(
+            200, json={"resource": device["resource"], "authorization_servers": ["https://cloud.test"]}
+        )
+
+    mock_http(monkeypatch, handler)
+    with pytest.raises(auth.AuthenticationError, match="issuer"):
+        auth.login("desktop")
+    assert len(contacted) == 1
+    assert contacted[0].startswith("http://127.0.0.1:55439/")
+
+
+def test_desktop_grants_require_current_profile_and_old_cloud_grants_need_local_authorization(
+    environment, monkeypatch
+):
+    root, store = environment
+    device, file = local_discovery(root, monkeypatch)
+    selected = auth.Connection(
+        "desktop",
+        device["resource"],
+        device["issuer"],
+        device["subject"],
+        device["profileName"],
+        device["issuer"] + "/auth",
+        device["issuer"] + "/token",
+        device["issuer"] + "/token/revocation",
+        device["profileId"],
+    )
+    store.set_password(
+        auth.SERVICE,
+        selected.key,
+        auth.Grant(
+            access_token="local-token",
+            refresh_token="local-refresh",
+            subject=selected.subject,
+            expires_at=time.time() + 3600,
+        ).model_dump_json(),
+    )
+    credentials = auth.Credentials(selected.resource, connection=selected)
+    assert anyio.run(credentials.token) == "local-token"
+    device["profileId"] = str(uuid4())
+    file.write_text(json.dumps(device))
+    with pytest.raises(auth.AuthenticationError, match="local profile"):
+        anyio.run(credentials.token)
+    old = auth.Connection(
+        "desktop",
+        selected.resource,
+        "https://old-cloud.test",
+        selected.subject,
+        "old@cassette.test",
+        "https://old-cloud.test/auth",
+        "https://old-cloud.test/token",
+        "https://old-cloud.test/revoke",
+    )
+    with pytest.raises(auth.AuthenticationError, match="local profile"):
+        anyio.run(auth.Credentials(old.resource, connection=old).token)
+    assert store.get_password(auth.SERVICE, selected.key), (
+        "Switching profiles preserves the original secure grant"
+    )
 
 
 def test_login_interruption_closes_callback_and_saves_no_grant(environment, monkeypatch):

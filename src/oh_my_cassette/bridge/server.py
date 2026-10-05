@@ -125,7 +125,7 @@ class Bridge:
             if self.settings.auth_token
             else BridgeError(
                 "bridge.unauthorized",
-                "Sign in with oh-my-cassette login --target web (or desktop). Tools refresh after login; restart the MCP host if it cannot refresh its tool list.",
+                "For Web, sign in with oh-my-cassette login --target web. For Desktop, open a local profile, run oh-my-cassette login --target desktop and allow the connection. Tools refresh after authorization; restart the MCP host if it cannot refresh its tool list.",
             )
         )
 
