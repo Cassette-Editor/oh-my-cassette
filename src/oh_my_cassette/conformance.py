@@ -29,6 +29,7 @@ from oh_my_cassette.contract import (
     META_LOCAL_FILES,
     ROLE_UPLOAD_BEGIN,
     ROLE_UPLOAD_COMPLETE,
+    ROLE_UPLOAD_PARTS,
     SUPPORTED_CONTRACT_VERSIONS,
     ContractError,
     PrepareSpec,
@@ -36,6 +37,7 @@ from oh_my_cassette.contract import (
     is_path_schema,
     local_files_spec,
     pointer_set,
+    request_id_pointer,
     schema_at_pointer,
     server_contract,
     version_tuple,
@@ -97,6 +99,22 @@ def _check_tools(report: _Report, tools: list[types.Tool]) -> tuple[list[types.T
     if bad_output:
         report.add("fail", "output schemas", f"structured output must be an object: {', '.join(bad_output)}")
 
+    named: list[str] = []
+    for tool in visible:
+        try:
+            pointer = request_id_pointer(tool.meta)
+        except ContractError as exc:
+            report.add("fail", "request ids", f"{tool.name}: {exc}")
+            continue
+        if pointer is None:
+            continue
+        if (schema_at_pointer(tool.input_schema, pointer) or {}).get("type") != "string":
+            report.add("fail", "request ids", f"{tool.name}: {pointer} is not a string parameter")
+        else:
+            named.append(f"{tool.name} {pointer}")
+    if named:
+        report.add("pass", "request ids", "resent with the same id: " + ", ".join(named))
+
     file_tools: list[types.Tool] = []
     for tool in visible:
         try:
@@ -123,7 +141,8 @@ def _check_tools(report: _Report, tools: list[types.Tool]) -> tuple[list[types.T
                 "fail", "upload tools", f"{names} take local files but {', '.join(missing)} is missing"
             )
         else:
-            report.add("pass", "local files", f"{names} declare local files; upload tools present")
+            parts = "; parts signed" if ROLE_UPLOAD_PARTS in roles else ""
+            report.add("pass", "local files", f"{names} declare local files; upload tools present{parts}")
     return file_tools, roles
 
 
@@ -133,7 +152,8 @@ def _describe_prepare(spec: PrepareSpec) -> str:
         parts.append("video → " + ", ".join(rendition.role for rendition in spec.renditions))
     for kind, rule in (("audio", spec.audio), ("image", spec.image)):
         if rule is not None:
-            parts.append(f"{kind} as is ({', '.join(rule.accept)}), else → {rule.convert.extension}")
+            intake = f", converted by the service ({', '.join(rule.intake)})" if rule.intake else ""
+            parts.append(f"{kind} as is ({', '.join(rule.accept)}){intake}, else → {rule.convert.extension}")
     return "; ".join(parts) or "declared, nothing to prepare"
 
 

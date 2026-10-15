@@ -7,5 +7,4 @@ __pycache__
 dist
 cassette-exports
 assets
-docs
 tests

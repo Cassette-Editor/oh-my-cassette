@@ -9,7 +9,5 @@ Hosts start it with `uvx oh-my-cassette==0.5.0`. It is a generic bridge to the C
 - [README](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.md): overview, install per host, configuration
 - [Install guide for agents](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/llms-install.md)
 - [Skill](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/skills/cassette-video-edit/SKILL.md): the backend-independent rules a host follows
-- [Bridge contract](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/v3/contract.md) (Chinese): what the bridge and the service agree on
-- [Development](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/development.md): tests, live stack
-- [Showcase](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/docs/showcase.md)
+- [Bridge contract](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/src/oh_my_cassette/contract.py): what the bridge and the service agree on
 - [Changelog](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md)

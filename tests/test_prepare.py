@@ -21,16 +21,25 @@ from tests.reference_remote import PREPARE
 
 from oh_my_cassette.bridge.errors import BridgeError
 from oh_my_cassette.bridge.files import guess_mime
-from oh_my_cassette.bridge.prepare import STDERR_TAIL, FFmpegPreparer, fit, jpeg_qscale, recording_clock
+from oh_my_cassette.bridge.prepare import (
+    STDERR_TAIL,
+    FFmpegPreparer,
+    fit,
+    frame_rates,
+    jpeg_qscale,
+    recording_clock,
+    video_stream,
+)
 from oh_my_cassette.bridge.settings import BridgeSettings
-from oh_my_cassette.contract import Convert, Transcode, preparation_for, prepare_spec
+from oh_my_cassette.contract import Convert, Transcode, preparation_for, prepare_spec, rendition_frame_rates
 
 pytestmark = pytest.mark.anyio
 
 SPEC = prepare_spec(PREPARE)
+PLAN = preparation_for(SPEC, "video/mp4", "clip.mp4")
 RENDITIONS = SPEC.renditions
 ROLES = [r.role for r in RENDITIONS]
-FRAME = 1 / 30
+FRAME = 1 / 24
 HDR_TRANSFERS = {"smpte2084", "arib-std-b67"}
 LAVFI_VIDEO = "testsrc2=size={size}:rate={rate}:duration={duration}"
 
@@ -89,6 +98,12 @@ def _make_silent(path: Path) -> None:
 
 def _make_vfr(path: Path) -> None:
     keep = r"select='lt(n\,20)+not(mod(n\,4))'"
+    _ffmpeg(*_video(duration="2"), "-vf", keep, "-fps_mode", "vfr", "-c:v", "libx264", str(path))
+
+
+def _make_vfr_25(path: Path) -> None:
+    """30 fps with every sixth frame dropped: variable timing that averages 25 fps."""
+    keep = r"select='not(eq(mod(n\,6)\,5))'"
     _ffmpeg(*_video(duration="2"), "-vf", keep, "-fps_mode", "vfr", "-c:v", "libx264", str(path))
 
 
@@ -153,6 +168,7 @@ def _check_report_shape(report: dict[str, Any]) -> None:
         "frameRate": (int, float, type(None)),
         "frameRateIsConstant": bool,
         "hdr": bool,
+        "fullRange": (bool, type(None)),
         "bitDepth": (int, type(None)),
         "pixelFormat": (str, type(None)),
         "hasAudio": bool,
@@ -190,9 +206,9 @@ def _check_report_shape(report: dict[str, Any]) -> None:
 
 
 def _check_rendition(
-    path: Path, role: str, source: dict[str, Any], profile: dict[str, Any]
+    path: Path, role: str, source: dict[str, Any], profile: dict[str, Any], rate: Fraction
 ) -> dict[str, Any]:
-    """One output against its declaration and its source; returns its video stream."""
+    """One output against its declaration, its source and the rate the rule gives it; returns its video stream."""
     declared = next(r for r in RENDITIONS if r.role == role).video
     data = _probe(path, count_frames=True)
     video = _stream(data, "video")
@@ -200,7 +216,9 @@ def _check_rendition(
     assert data["format"]["format_name"].startswith("mov,mp4")
     assert video["codec_name"] == "h264" and video["profile"] == "High"
     assert video["pix_fmt"] == "yuv420p" and video.get("bits_per_raw_sample", "8") == "8"
-    assert _close(_rate(video["r_frame_rate"]), 30, 0.02) and _close(_rate(video["avg_frame_rate"]), 30, 0.02)
+    assert rate <= declared.max_frame_rate
+    assert _close(_rate(video["r_frame_rate"]), float(rate), 0.02)
+    assert _close(_rate(video["avg_frame_rate"]), float(rate), 0.02)
     width, height = video["width"], video["height"]
     assert width % 2 == 0 and height % 2 == 0
     assert max(width, height) <= declared.max_long_edge and min(width, height) <= declared.max_short_edge
@@ -219,6 +237,7 @@ def _check_rendition(
     # the report describes this very file
     assert (profile["displayWidth"], profile["displayHeight"]) == (width, height)
     assert profile["codec"] == "h264" and profile["rotation"] == 0 and profile["hdr"] is False
+    assert profile["fullRange"] is False
     assert profile["bitDepth"] == 8 and profile["hasAudio"] == source["hasAudio"]
     assert profile["codecParameter"].startswith("avc1.64")
     return video
@@ -229,16 +248,43 @@ async def test_every_rendition_meets_its_declaration(name, preparer, tmp_path):
     source = tmp_path / name
     SAMPLES[name](source)
     seen: list[float] = []
-    artifacts, report = await preparer.transcode(source, RENDITIONS, tmp_path / "out", seen.append)
+    artifacts, report = await preparer.transcode(source, PLAN, tmp_path / "out", seen.append)
 
     _check_report_shape(report)
     assert [a.role for a in artifacts] == ROLES and all(a.mime_type == "video/mp4" for a in artifacts)
-    streams = [_check_rendition(a.path, a.role, report["source"], report[a.role]) for a in artifacts]
+    rates = rendition_frame_rates(PLAN, *frame_rates(video_stream(_probe(source))))
+    streams = [
+        _check_rendition(a.path, a.role, report["source"], report[a.role], rate)
+        for a, rate in zip(artifacts, rates, strict=True)
+    ]
     # one decode split into every rendition: the same frames, the same length
     assert len({int(s["nb_read_frames"]) for s in streams}) == 1
     durations = [float(s["duration"]) for s in streams]
     assert max(durations) - min(durations) <= FRAME
     assert seen and seen[-1] == 100.0 and all(0 <= value <= 100 for value in seen)
+
+
+@pytest.mark.parametrize(
+    "rate, make, expected",
+    [
+        ("60", None, [60, 30]),  # the canonical keeps every frame, the preview every second one
+        ("24", None, [24, 24]),  # within both: never sped up to a declared rate
+        ("30", _make_vfr_25, [25, 25]),  # variable: the declared rate nearest its 25 fps average
+    ],
+)
+async def test_each_rendition_plays_at_the_rate_the_rule_gives_it(rate, make, expected, preparer, tmp_path):
+    source = tmp_path / "source.mp4"
+    if make is None:
+        _ffmpeg(*_video(rate=rate), *_tone(), "-c:v", "libx264", "-c:a", "aac", "-shortest", str(source))
+    else:
+        make(source)
+    artifacts, report = await preparer.transcode(source, PLAN, tmp_path / "out", lambda _: None)
+    streams = [_stream(_probe(a.path, count_frames=True), "video") for a in artifacts]
+    assert [_rate(s["r_frame_rate"]) for s in streams] == expected
+    assert [round(report[role]["frameRate"], 3) for role in ROLES] == expected
+    seconds = float(report["source"]["durationSeconds"])
+    for stream, fps in zip(streams, expected, strict=True):
+        assert abs(int(stream["nb_read_frames"]) - seconds * fps) <= 1
 
 
 async def test_what_ffprobe_says_about_each_source(preparer, tmp_path):
@@ -264,7 +310,7 @@ async def test_what_ffprobe_says_about_each_source(preparer, tmp_path):
     for name, facts in expected.items():
         source = tmp_path / name
         SAMPLES[name](source)
-        _, report = await preparer.transcode(source, RENDITIONS, tmp_path / f"out-{name}", lambda _: None)
+        _, report = await preparer.transcode(source, PLAN, tmp_path / f"out-{name}", lambda _: None)
         assert {key: report["source"][key] for key in facts} == facts, name
         assert report["recordingClock"] is None
         if name in sizes:
@@ -276,7 +322,7 @@ async def test_what_ffprobe_says_about_each_source(preparer, tmp_path):
 async def test_an_embedded_timecode_becomes_the_recording_clock(preparer, tmp_path):
     source = tmp_path / "timecode.mov"
     _make_timecode(source)
-    _, report = await preparer.transcode(source, RENDITIONS, tmp_path / "out", lambda _: None)
+    _, report = await preparer.transcode(source, PLAN, tmp_path / "out", lambda _: None)
     assert report["recordingClock"] == {
         "origin": "embedded-timecode",
         "ticks": 107894,  # 01:00:00;02 in drop-frame labels at 30000/1001
@@ -320,8 +366,8 @@ def _make_png(path: Path) -> None:
     _ffmpeg(*_video(size="64x48"), "-frames:v", "1", str(path))
 
 
-@pytest.mark.parametrize("name", ["still.tiff", "still.heic"])
-async def test_images_the_backend_does_not_take_become_jpeg(name, preparer, tmp_path):
+@pytest.mark.parametrize("name", ["still.ppm", "still.tiff", "still.heic"])
+async def test_images_converted_here_become_jpeg(name, preparer, tmp_path):
     png = tmp_path / "still.png"
     _make_png(png)
     source = tmp_path / name
@@ -333,9 +379,12 @@ async def test_images_the_backend_does_not_take_become_jpeg(name, preparer, tmp_
     else:
         _ffmpeg("-i", str(png), str(source))
     plan = preparation_for(SPEC, guess_mime(source), source.name)
-    assert isinstance(plan, Convert) and plan.kind == "image"
+    if name == "still.ppm":
+        assert isinstance(plan, Convert) and plan.kind == "image"
+    else:
+        assert plan is None  # this service converts TIFF and HEIC itself; another may ask the bridge to
     seen: list[float] = []
-    output = await preparer.convert(source, plan.kind, plan.conversion, tmp_path / "out", seen.append)
+    output = await preparer.convert(source, "image", SPEC.image.convert, tmp_path / "out", seen.append)
     assert output.name == "still.jpg" and seen[-1] == 100.0
     data = _probe(output)
     image = _stream(data, "video")
@@ -369,7 +418,7 @@ async def test_a_missing_ffmpeg_says_how_to_install_it(tmp_path):
         BridgeSettings(mcp_url="http://unused", workspace=tmp_path, ffmpeg="/nowhere/ffmpeg")
     )
     with pytest.raises(BridgeError) as caught:
-        await missing.transcode(tmp_path / "a.mp4", RENDITIONS, tmp_path / "out", lambda _: None)
+        await missing.transcode(tmp_path / "a.mp4", PLAN, tmp_path / "out", lambda _: None)
     assert caught.value.code == "bridge.ffmpeg_unavailable"
     assert "CASSETTE_FFMPEG" in caught.value.message and "install ffmpeg" in caught.value.message
 
@@ -378,7 +427,7 @@ async def test_an_unreadable_file_fails_with_the_stderr_tail(preparer, tmp_path)
     broken = tmp_path / "broken.mp4"
     broken.write_bytes(b"not a video " * 1000)
     with pytest.raises(BridgeError) as caught:
-        await preparer.transcode(broken, RENDITIONS, tmp_path / "out", lambda _: None)
+        await preparer.transcode(broken, PLAN, tmp_path / "out", lambda _: None)
     assert caught.value.code == "bridge.prepare_failed" and caught.value.retryable is False
     assert "broken.mp4" in caught.value.message
     assert len(caught.value.message.partition(": ")[2]) <= STDERR_TAIL
@@ -390,9 +439,9 @@ async def test_the_bridge_prepares_real_files_before_the_handshake(remote, bridg
     media.mkdir()
     _make_odd(media / "clip.mkv")
     _make_png(media / "still.png")
-    _ffmpeg("-i", str(media / "still.png"), str(media / "scan.tiff"))
+    _ffmpeg("-i", str(media / "still.png"), str(media / "scan.ppm"))
     _ffmpeg(*_tone("0.5"), str(media / "tone.wav"))
-    paths = ["media/clip.mkv", "media/scan.tiff", "media/tone.wav", "media/still.png"]
+    paths = ["media/clip.mkv", "media/scan.ppm", "media/tone.wav", "media/still.png"]
     async with bridge_host(settings) as (_, host):
         result = await host.call_tool("import_media", {"paths": paths})
     assert not result.is_error, result
@@ -402,7 +451,7 @@ async def test_the_bridge_prepares_real_files_before_the_handshake(remote, bridg
     _check_report_shape(clip["preparation"])
     assert (scan["name"], scan["relativePath"], scan["mimeType"]) == (
         "scan.jpg",
-        "media/scan.tiff",
+        "media/scan.ppm",
         "image/jpeg",
     )
     assert [a["role"] for a in scan["artifacts"]] == ["original"] and scan["preparation"] is None

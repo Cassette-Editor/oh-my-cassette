@@ -3,8 +3,8 @@
 Thanks for helping. This repository is a single Python package (`src/oh_my_cassette`) that every host
 runs the same way, plus one skill that is copied to two places. The package is a generic bridge to
 the Cassette MCP service: it never names a backend tool, and everything the two sides agree on is in
-[docs/v3/contract.md](docs/v3/contract.md). Changes must keep that contract intact, or change the
-document, the code and `tests/reference_remote.py` together.
+`src/oh_my_cassette/contract.py`. Changes must keep that contract intact, or change `contract.py`,
+`tests/reference_remote.py` and the Cassette MCP service together.
 
 ## Conventional commits
 
@@ -59,11 +59,11 @@ and starts it once with `uvx`. Keep it credential-free and deterministic.
 
 ## Changing the contract
 
-1. Change [docs/v3/contract.md](docs/v3/contract.md) and `src/oh_my_cassette/contract.py` together;
-   v1 only grows by optional fields.
+1. Change `src/oh_my_cassette/contract.py` and the Cassette MCP service together; v1 only grows by
+   additions.
 2. Teach `tests/reference_remote.py` the change and test it through the bridge.
 3. Add a conformance check, with a broken variant, when a service could get it wrong.
-4. A new `bridge.*` error code goes into the contract's table and both skill copies
+4. A new `bridge.*` error code goes into both skill copies' error table
    (`skills/cassette-video-edit/SKILL.md` and `.agents/skills/cassette-video-edit/SKILL.md`).
 5. Update `README.md` and `README.zh-cn.md` together.
 

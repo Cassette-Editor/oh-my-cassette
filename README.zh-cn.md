@@ -58,19 +58,17 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
   `cassette-exports/`。每次调用附带工作区标识，服务可以据此记住一个目录对应的项目。
 - **长任务不会让宿主超时。** 每次调用只等一个有界窗口；本地预处理没做完时回答 `preparing`，工作在后台继续，
   用同样的参数再调用一次就能接上。
-- **重新部署也不怕。** bridge 会自动重连，自己的错误用 `bridge.*` 代码并带 `retryable` 标记；
-  服务连不上或不接受令牌时，工具列表里只有一个 `cassette_bridge_status`，调用它能看到原因。
+- **重新部署也不怕。** bridge 会自动重连；带请求标识的调用在连接断开或被服务拒绝时由 bridge 自己重发；
+  中断的下载会续传；自己的错误用 `bridge.*` 代码并带 `retryable` 标记（服务给出等待时间时还带
+  `retry_after_seconds`）；服务连不上或不接受令牌时，工具列表里只有一个 `cassette_bridge_status`，
+  调用它能看到原因。
 
-插件和服务之间的约定写在 [docs/v3/contract.md](./docs/v3/contract.md)，`oh-my-cassette check`
-可以按它检查一个服务。
-
-### 案例视频
-
-六个真实案例，每个都附完整提示词、输入素材和处理时长：[docs/showcase.zh-cn.md](./docs/showcase.zh-cn.md)。
+插件和服务之间的约定定义在 [`src/oh_my_cassette/contract.py`](./src/oh_my_cassette/contract.py)，
+`oh-my-cassette check` 可以按它检查一个服务。
 
 ## 环境要求
 
-- 实现[约定 v1](./docs/v3/contract.md) 的 Cassette MCP 服务，以及获准使用 Cassette 的账号。可以用
+- 实现约定 v1 的 Cassette MCP 服务，以及获准使用 Cassette 的账号。可以用
   `uvx oh-my-cassette==0.5.0 check --url <端点>` 检查。服务连不上或不接受令牌时，
   工具列表里只有 `cassette_bridge_status`。
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5+。`uvx oh-my-cassette==0.5.0` 会自行解析 Python 3.11–3.13。
@@ -82,7 +80,7 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 
 ## 配置
 
-先运行 `oh-my-cassette login --target web`。连接已登录的 Desktop 时，显式使用 `--target desktop`；失败不会切换到 Web。凭证保存在系统钥匙串，无需复制 token。详见[登录说明](./docs/oauth.md)。下面是可选覆盖配置。
+先运行 `oh-my-cassette login --target web`。连接已登录的 Desktop 时，显式使用 `--target desktop`；失败不会切换到 Web。凭证保存在系统钥匙串，无需复制 token。下面是可选覆盖配置。
 
 | 变量 | 默认值 | 含义 |
 | --- | --- | --- |
@@ -204,9 +202,7 @@ uv run oh-my-cassette                              # bridge 本体（stdio）
 uv run oh-my-cassette check --url <endpoint>       # 一致性检查
 ```
 
-bridge 的设计见 [docs/v3/design.md](./docs/v3/design.md)；`tests/reference_remote.py` 是一个可执行的
-参考服务。本地栈和 live 测试见 [docs/development.zh-cn.md](./docs/development.zh-cn.md)，PyPI 发布流程见
-[RELEASING.md](./RELEASING.md)。
+`tests/reference_remote.py` 是一个可执行的参考服务。PyPI 发布流程见 [RELEASING.md](./RELEASING.md)。
 
 ## 许可证
 

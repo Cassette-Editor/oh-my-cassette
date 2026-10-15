@@ -46,11 +46,12 @@ class FakePreparer:
             self.failures -= 1
             raise BridgeError("bridge.prepare_failed", "transcoding failed (ffmpeg exit 1): fake failure")
 
-    async def transcode(self, source: Path, renditions, workdir: Path, progress):
+    async def transcode(self, source: Path, plan, workdir: Path, progress):
         self.transcodes += 1
         await self._work(progress)
         workdir.mkdir(parents=True, exist_ok=True)
         artifacts = []
+        renditions = plan.renditions
         for rendition in renditions:
             path = workdir / f"{rendition.role}.mp4"
             path.write_bytes(f"{rendition.role}:{source.name}:".encode() * 64)

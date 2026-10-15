@@ -1,8 +1,9 @@
 """Local media preparation with ffmpeg: what a `prepare` declaration asks for, made on this machine.
 
-A video is always transcoded, in one ffmpeg run that splits the decoded frames into every declared
-rendition so their frame counts match. Audio and images the backend does not take as they are get
-converted. ffprobe describes the source and every output for the preparation report (contract §3).
+A video is always transcoded, in one ffmpeg run that decodes the source once and splits its frames into
+every declared rendition, each at the rate the contract's frame-rate rule gives it. Audio and images the
+backend does not take as they are get converted. ffprobe describes the source and every output for the
+preparation report.
 """
 
 from __future__ import annotations
@@ -23,7 +24,13 @@ import anyio
 
 from oh_my_cassette.bridge.errors import BridgeError
 from oh_my_cassette.bridge.settings import BridgeSettings
-from oh_my_cassette.contract import Conversion, Rendition
+from oh_my_cassette.contract import (
+    RATE_TOLERANCE,
+    Conversion,
+    Rendition,
+    Transcode,
+    rendition_frame_rates,
+)
 
 ProgressFn = Callable[[float], None]
 """Receives the percent (0–100) of the step in progress."""
@@ -37,6 +44,8 @@ INSTALL_HINT = (
 )
 # ffprobe prints these as `color_range`; zscale names them differently.
 ZSCALE_RANGES = {"tv": "limited", "pc": "full"}
+# Whether samples use the full 0–255 range, by ffprobe's `color_range`; any other value says nothing.
+FULL_RANGES = {"pc": True, "tv": False}
 TIMECODE = re.compile(r"^(\d{1,2}):(\d{2}):(\d{2})([:;])(\d{2,3})$")
 H264_PROFILE_IDC = {
     "baseline": (0x42, 0x00),
@@ -61,9 +70,9 @@ class Preparer(Protocol):
     """Makes the files a `prepare` declaration asks for. The bridge's default is `FFmpegPreparer`."""
 
     async def transcode(
-        self, source: Path, renditions: tuple[Rendition, ...], workdir: Path, progress: ProgressFn
+        self, source: Path, plan: Transcode, workdir: Path, progress: ProgressFn
     ) -> tuple[list[Artifact], dict[str, Any]]:
-        """Every rendition of a video, plus its preparation report."""
+        """Every rendition `plan` declares for a video, plus its preparation report."""
         ...
 
     async def convert(
@@ -171,7 +180,7 @@ def media_profile(data: Mapping[str, Any], container: str) -> dict[str, Any]:
     if width <= 0 or height <= 0 or duration is None:
         raise ValueError("no video dimensions or duration")
     audio = audio_stream(data)
-    real, average = _rate(video.get("r_frame_rate")), _rate(video.get("avg_frame_rate"))
+    real, average = frame_rates(video)
     frame_rate = average or real
     return {
         "container": container,
@@ -182,8 +191,9 @@ def media_profile(data: Mapping[str, Any], container: str) -> dict[str, Any]:
         "rotation": rotation(video),
         "durationSeconds": duration,
         "frameRate": round(float(frame_rate), 6) if frame_rate else None,
-        "frameRateIsConstant": bool(real and average and abs(float(real) - float(average)) <= 0.02),
+        "frameRateIsConstant": bool(real and average and abs(float(real) - float(average)) <= RATE_TOLERANCE),
         "hdr": str(video.get("color_transfer") or "").lower() in HDR_TRANSFERS,
+        "fullRange": FULL_RANGES.get(str(video.get("color_range") or "")),
         "bitDepth": _bit_depth(video),
         "pixelFormat": video.get("pix_fmt") or None,
         "hasAudio": audio is not None,
@@ -191,6 +201,11 @@ def media_profile(data: Mapping[str, Any], container: str) -> dict[str, Any]:
         "audioSampleRate": _whole(audio.get("sample_rate")) if audio else None,
         "audioChannels": _whole(audio.get("channels")) if audio else None,
     }
+
+
+def frame_rates(stream: Mapping[str, Any]) -> tuple[Fraction | None, Fraction | None]:
+    """A video stream's real (`r_frame_rate`) and average (`avg_frame_rate`) rates, None when unknown."""
+    return _rate(stream.get("r_frame_rate")), _rate(stream.get("avg_frame_rate"))
 
 
 def recording_clock(data: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -238,14 +253,14 @@ def fit(width: int, height: int, max_long: int, max_short: int) -> tuple[int, in
     return min(even(width * scale), w_limit // 2 * 2), min(even(height * scale), h_limit // 2 * 2)
 
 
-def rate_text(value: float) -> str:
-    return str(Fraction(value).limit_denominator(1001))
-
-
 def video_filtergraph(
-    source: Mapping[str, Any], renditions: tuple[Rendition, ...], sizes: list[tuple[int, int]], tonemap: bool
+    source: Mapping[str, Any],
+    renditions: tuple[Rendition, ...],
+    sizes: list[tuple[int, int]],
+    rates: list[Fraction],
+    tonemap: bool,
 ) -> str:
-    """Decode once, split, then per rendition: constant frame rate, size, 8-bit BT.709.
+    """Decode once, split, then per rendition: its constant frame rate, size, 8-bit BT.709.
 
     Frames arrive already rotated (ffmpeg's autorotate). An HDR source is tone-mapped to SDR with
     zscale when `tonemap` is set; otherwise the scale step still converts its matrix to BT.709.
@@ -264,9 +279,9 @@ def video_filtergraph(
         )
     head += f"split={len(renditions)}" + "".join(f"[s{i}]" for i in range(len(renditions)))
     chains = [head]
-    for index, (rendition, (width, height)) in enumerate(zip(renditions, sizes, strict=True)):
+    for index, (rendition, (width, height), rate) in enumerate(zip(renditions, sizes, rates, strict=True)):
         chains.append(
-            f"[s{index}]fps={rate_text(rendition.video.frame_rate)},"
+            f"[s{index}]fps={rate},"
             f"scale={width}:{height}:out_color_matrix=bt709:out_range=tv,"
             f"format={rendition.video.pixel_format},setsar=1,"
             f"setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709[v{index}]"
@@ -274,15 +289,17 @@ def video_filtergraph(
     return ";".join(chains)
 
 
-def rendition_args(index: int, rendition: Rendition, has_audio: bool, output: Path) -> list[str]:
+def rendition_args(
+    index: int, rendition: Rendition, rate: Fraction, has_audio: bool, output: Path
+) -> list[str]:
     video, audio = rendition.video, rendition.audio
-    rate = rate_text(video.frame_rate)
-    gop = str(max(1, round(video.frame_rate * video.keyframe_interval_seconds)))
+    # Halves round up, as the backend rounds them.
+    gop = str(max(1, math.floor(rate * Fraction(video.keyframe_interval_seconds) + Fraction(1, 2))))
     args = [
         "-map", f"[v{index}]",
         "-c:v", ENCODER, "-profile:v", video.profile, "-preset", video.preset, "-crf", str(video.crf),
         "-pix_fmt", video.pixel_format, "-g", gop, "-keyint_min", gop, "-sc_threshold", "0",
-        "-fps_mode", "cfr", "-r", rate,
+        "-fps_mode", "cfr", "-r", str(rate),
         "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
     ]  # fmt: skip
     if has_audio:
@@ -397,8 +414,9 @@ class FFmpegPreparer:
         return [ffmpeg, *quiet, "-i", str(source)]
 
     async def transcode(
-        self, source: Path, renditions: tuple[Rendition, ...], workdir: Path, progress: ProgressFn
+        self, source: Path, plan: Transcode, workdir: Path, progress: ProgressFn
     ) -> tuple[list[Artifact], dict[str, Any]]:
+        renditions = plan.renditions
         version, can_tonemap = await self.capabilities()
         data = await self.probe(source)
         try:
@@ -408,14 +426,17 @@ class FFmpegPreparer:
         stream = video_stream(data) or {}
         width, height = source_profile["displayWidth"], source_profile["displayHeight"]
         sizes = [fit(width, height, r.video.max_long_edge, r.video.max_short_edge) for r in renditions]
+        rates = rendition_frame_rates(plan, *frame_rates(stream))
         workdir.mkdir(parents=True, exist_ok=True)
         outputs = [
             workdir / f"{i}-{re.sub(r'[^A-Za-z0-9_.-]', '_', r.role)}.mp4" for i, r in enumerate(renditions)
         ]
-        graph = video_filtergraph(stream, renditions, sizes, tonemap=can_tonemap and source_profile["hdr"])
+        graph = video_filtergraph(
+            stream, renditions, sizes, rates, tonemap=can_tonemap and source_profile["hdr"]
+        )
         args = [*self._command(source), "-filter_complex", graph]
-        for index, (rendition, output) in enumerate(zip(renditions, outputs, strict=True)):
-            args += rendition_args(index, rendition, source_profile["hasAudio"], output)
+        for index, (rendition, rate, output) in enumerate(zip(renditions, rates, outputs, strict=True)):
+            args += rendition_args(index, rendition, rate, source_profile["hasAudio"], output)
         await self._run(f"transcoding {source.name}", args, source_profile["durationSeconds"], progress)
 
         report: dict[str, Any] = {"recordingClock": recording_clock(data), "source": source_profile}

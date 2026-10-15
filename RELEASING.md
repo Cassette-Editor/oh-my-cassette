@@ -54,7 +54,7 @@ through a *pending* trusted publisher, so no token ever exists:
 4. That is all. The first successful run of `publish-pypi.yml` claims the name and creates the
    project; the pending publisher becomes a normal trusted publisher. If the name is taken by then,
    PyPI refuses the registration and the workflow fails with a clear error — pick another name in
-   `pyproject.toml`, the manifests and the docs before releasing.
+   `pyproject.toml`, the manifests and the READMEs before releasing.
 
 The name is available as of 2026-09-15 (`https://pypi.org/project/oh-my-cassette/` returns 404).
 PyPI normalises names, so `oh_my_cassette` and `oh-my-cassette` are the same project.

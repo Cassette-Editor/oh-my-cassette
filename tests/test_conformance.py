@@ -33,6 +33,8 @@ async def test_reference_backend_passes_every_check(remote):
     assert names[0] == "transport" and "contract" in names and names[-1] == "upload round trip"
     assert "2026-07-28" in checks[0].detail
     assert "video → canonical, preview" in next(c.detail for c in checks if c.name == "prepare")
+    assert "run_turn /client_request_id" in next(c.detail for c in checks if c.name == "request ids")
+    assert "parts signed" in next(c.detail for c in checks if c.name == "local files")
     (begun,) = remote.begun
     assert begun["arguments"] == {"project_id": "p", "paths": ["probe"]}
     assert [a["role"] for a in begun["artifacts"]] == ["original"] and begun["preparation"] is None
@@ -53,6 +55,8 @@ async def test_undeclared_contract_is_a_warning():
     "options, name",
     [
         (RemoteOptions(bad_pointer=True), "local files"),
+        (RemoteOptions(request_id_pointer="/message_id"), "request ids"),
+        (RemoteOptions(request_id_pointer="client_request_id"), "request ids"),
         (RemoteOptions(bad_prepare=True), "prepare"),
         (RemoteOptions(upload_tools=False), "upload tools"),
         (RemoteOptions(begin_without_puts=True), "upload round trip"),

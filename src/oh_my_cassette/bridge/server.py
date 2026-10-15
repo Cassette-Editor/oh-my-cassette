@@ -2,12 +2,17 @@
 
 The bridge never names a backend tool. It lists what the backend lists (minus the bridge-only upload
 tools), forwards calls and progress, prepares and uploads declared local files first, downloads
-declared artifacts after, and reports its own failures with `bridge.*` codes.
+declared artifacts after, and reports its own failures with `bridge.*` codes. A tool that names its
+request in an argument is sent again by the bridge itself when the connection breaks or the service
+refuses it, since the backend answers a repeated request id as the first call.
 """
 
 from __future__ import annotations
 
+import copy
+import json
 import logging
+import uuid
 from functools import partial
 from typing import Any
 
@@ -20,31 +25,52 @@ from mcp.server.context import ServerRequestContext
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.server.models import InitializationOptions
 from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler, ToolsListChanged
+from mcp.shared.dispatcher import ProgressFnT
 from mcp.shared.exceptions import MCPError
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 from oh_my_cassette import __version__
 from oh_my_cassette.auth import AuthenticationError, Credentials
 from oh_my_cassette.bridge.downloads import Downloads
-from oh_my_cassette.bridge.errors import BridgeError, protocol_unsupported, unauthorized, unreachable
+from oh_my_cassette.bridge.errors import (
+    BridgeError,
+    backoff_seconds,
+    protocol_unsupported,
+    rate_limited,
+    unauthorized,
+    unreachable,
+)
 from oh_my_cassette.bridge.files import LocalFiles
 from oh_my_cassette.bridge.jobs import LocalJobs, preparing_result
 from oh_my_cassette.bridge.prepare import FFmpegPreparer, Preparer
 from oh_my_cassette.bridge.settings import BridgeSettings
-from oh_my_cassette.bridge.upstream import BackendUnavailable, ProtocolUnsupported, Unauthorized, Upstream
+from oh_my_cassette.bridge.upstream import (
+    BackendUnavailable,
+    ProtocolUnsupported,
+    RateLimited,
+    Unauthorized,
+    Upstream,
+)
 from oh_my_cassette.contract import (
     BRIDGE_ROLES,
     META_ELAPSED,
     META_HOST,
     META_LOCAL_FILES,
     META_WORKSPACE,
+    ContractError,
     bridge_role,
+    pointer_get,
+    pointer_set,
+    request_id_pointer,
 )
 
 log = logging.getLogger(__name__)
 
 STATUS_TOOL = "cassette_bridge_status"
 CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo"
+# Request ids the bridge chose for calls whose outcome it could not learn, kept so the host calling again
+# with the same arguments picks up that request instead of starting another.
+UNSETTLED_REQUESTS = 64
 
 CONNECTED_FALLBACK_INSTRUCTIONS = (
     "Oh My Cassette connects this host to the Cassette video editor. The tools below come from the "
@@ -98,6 +124,7 @@ class Bridge:
         self._bus = InMemorySubscriptionBus()
         self._legacy_host_session: Any = None
         self._host_meta: dict[str, Any] | None = {"name": settings.host_name} if settings.host_name else None
+        self._unsettled: dict[tuple[str, str], str] = {}
 
     async def run(self, *, task_status: TaskStatus[None] = anyio.TASK_STATUS_IGNORED) -> None:
         """Own the backend connection and the background local work until cancelled.
@@ -221,16 +248,13 @@ class Bridge:
                 if not await self.jobs.wait(job, window, progress):
                     return preparing_result(name, job)
                 arguments = call.with_refs(self.jobs.settle(call.key, job))
-            meta: dict[str, Any] = {
-                META_WORKSPACE: {
-                    "id": self.credentials.workspace_id(self.settings.workspace),
-                    "name": self.settings.workspace.name,
-                },
-                META_ELAPSED: round(anyio.current_time() - started, 3),
-            }
-            if self._host_meta:
-                meta[META_HOST] = self._host_meta
-            result = await self.upstream.call_tool(name, arguments, meta=meta, progress=progress)
+            pointer = _request_id_pointer(tool) if tool else None
+            if pointer is None:
+                result = await self.upstream.call_tool(
+                    name, arguments, meta=self._meta(started), progress=progress
+                )
+            else:
+                result = await self._call_named_request(name, pointer, arguments or {}, started, progress)
             return await self.downloads.apply(result)
         except BridgeError as exc:
             return exc.result()
@@ -246,8 +270,70 @@ class Bridge:
             return self._unauthorized().result()
         except ProtocolUnsupported as exc:
             return protocol_unsupported(str(exc)).result()
+        except RateLimited as exc:
+            return rate_limited(self.settings.mcp_url, exc.retry_after).result()
         except BackendUnavailable as exc:
-            return unreachable(self.settings.mcp_url, str(exc), during_call=exc.during_call).result()
+            return unreachable(
+                self.settings.mcp_url, str(exc), during_call=exc.during_call, retry_after=exc.retry_after
+            ).result()
+
+    def _meta(self, started: float) -> dict[str, Any]:
+        meta: dict[str, Any] = {
+            META_WORKSPACE: {
+                "id": self.credentials.workspace_id(self.settings.workspace),
+                "name": self.settings.workspace.name,
+            },
+            META_ELAPSED: round(anyio.current_time() - started, 3),
+        }
+        if self._host_meta:
+            meta[META_HOST] = self._host_meta
+        return meta
+
+    async def _call_named_request(
+        self, name: str, pointer: str, arguments: dict[str, Any], started: float, progress: ProgressFnT
+    ) -> types.CallToolResult:
+        """Send a call that names its request until it is answered or the host call's wait runs out.
+
+        The request id is the host's, or one the bridge chooses. A connection that breaks during the call or
+        a refusal (HTTP 429/503) is followed by a wait (the service's `Retry-After`, else 1, 2, 4… s), a
+        reconnect and the same call with the same id; the backend answers it as the first one.
+        """
+        found, value = pointer_get(arguments, pointer)
+        key: tuple[str, str] | None = None
+        if not found or value is None or value == "":
+            key = (name, json.dumps(arguments, sort_keys=True, default=str))
+            arguments = copy.deepcopy(arguments)
+            try:
+                pointer_set(arguments, pointer, self._unsettled.pop(key, None) or str(uuid.uuid4()))
+            except ContractError as exc:
+                raise BridgeError("bridge.contract_violation", f"tool {name}: {exc}") from exc
+        attempt, during_call = 0, False
+        while True:
+            try:
+                result = await self.upstream.call_tool(
+                    name, arguments, meta=self._meta(started), progress=progress
+                )
+            except (BackendUnavailable, RateLimited) as exc:
+                if isinstance(exc, BackendUnavailable):
+                    during_call = during_call or exc.during_call
+                    if attempt == 0 and not (exc.during_call or exc.refused):
+                        raise  # never connected: nothing was sent
+                wait = backoff_seconds(attempt, exc.retry_after)
+                if anyio.current_time() - started + wait >= self.settings.local_wait_sec:
+                    if key is not None:
+                        self._unsettled[key] = pointer_get(arguments, pointer)[1]
+                        while len(self._unsettled) > UNSETTLED_REQUESTS:
+                            del self._unsettled[next(iter(self._unsettled))]
+                    if isinstance(exc, BackendUnavailable) and during_call and not exc.during_call:
+                        raise BackendUnavailable(
+                            str(exc), during_call=True, retry_after=exc.retry_after
+                        ) from exc
+                    raise
+                log.info("sending %s again in %.0f s: %s", name, wait, exc)
+                await anyio.sleep(wait)
+                attempt += 1
+            else:
+                return result
 
     async def _status(self) -> types.CallToolResult:
         connected = await self.upstream.wait_connected(self.settings.connect_timeout_sec)
@@ -289,9 +375,16 @@ class Bridge:
         )
 
 
+def _request_id_pointer(tool: types.Tool) -> str | None:
+    try:
+        return request_id_pointer(tool.meta)
+    except ContractError as exc:
+        raise BridgeError("bridge.contract_violation", f"tool {tool.name}: {exc}") from exc
+
+
 def _host_view(tool: types.Tool) -> types.Tool:
     """A tool that takes local files may answer with the bridge's own `preparing` result, which its
-    output schema does not describe, so hosts get it without one (contract §3)."""
+    output schema does not describe, so hosts get it without one."""
     if tool.output_schema is not None and META_LOCAL_FILES in (tool.meta or {}):
         return tool.model_copy(update={"output_schema": None})
     return tool

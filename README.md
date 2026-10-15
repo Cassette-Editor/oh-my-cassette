@@ -61,20 +61,19 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
   call so the service can remember a project per directory.
 - **Long work never times out the host.** Every call waits a bounded time; slow local preparation
   answers `preparing` and keeps going in the background, and the next identical call picks it up.
-- **It survives deploys.** It reconnects on its own, reports `bridge.*` errors with a `retryable`
-  flag, and, while the service is unreachable or refuses the token, lists a single
-  `cassette_bridge_status` tool that says why.
+- **It survives deploys.** It reconnects on its own, sends a call that names its request again when
+  the connection drops or the service turns it away, resumes interrupted downloads, reports `bridge.*`
+  errors with a `retryable` flag (and `retry_after_seconds` when the service said when), and, while
+  the service is unreachable or refuses the token, lists a single `cassette_bridge_status` tool that
+  says why.
 
-The rules between the plugin and the service are written down in [docs/v3/contract.md](./docs/v3/contract.md)
-(in Chinese); `oh-my-cassette check` verifies a service against them.
-
-### Case videos
-
-Six real cases edited end to end through Oh My Cassette, each with the exact prompt, inputs and processing time: [docs/showcase.md](./docs/showcase.md).
+The rules between the plugin and the service are defined in
+[`src/oh_my_cassette/contract.py`](./src/oh_my_cassette/contract.py); `oh-my-cassette check` verifies a
+service against them.
 
 ## Requirements
 
-- An invited Cassette account and a Cassette MCP service that implements [contract v1](./docs/v3/contract.md). Check it with `uvx oh-my-cassette==0.5.0 check --url <endpoint>`. While the
+- An invited Cassette account and a Cassette MCP service that implements contract v1. Check it with `uvx oh-my-cassette==0.5.0 check --url <endpoint>`. While the
   service is unreachable or refuses the token, only `cassette_bridge_status` is listed.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5 or newer. `uvx oh-my-cassette==0.5.0` resolves Python 3.11–3.13 by itself.
 - [ffmpeg](https://ffmpeg.org/download.html) (with ffprobe) to import video: `brew install ffmpeg`,
@@ -86,7 +85,7 @@ Which formats a tool accepts, and how files are prepared before upload, is decla
 
 ## Configuration
 
-Sign in once with `oh-my-cassette login --target web`. To connect to the open Desktop profile, use `--target desktop` and allow the connection on its local authorization page. Desktop needs no cloud login and can pair offline. [Login, status and logout](./docs/oauth.md) use your operating-system keyring; no token needs to be copied. Environment variables below are optional overrides.
+Sign in once with `oh-my-cassette login --target web`. To connect to the open Desktop profile, use `--target desktop` and allow the connection on its local authorization page. Desktop needs no cloud login and can pair offline. Login, status and logout use your operating-system keyring; no token needs to be copied. Environment variables below are optional overrides.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -210,9 +209,8 @@ uv run oh-my-cassette                              # the bridge itself (stdio)
 uv run oh-my-cassette check --url <endpoint>       # conformance check
 ```
 
-The bridge design is in [docs/v3/design.md](./docs/v3/design.md); `tests/reference_remote.py` is an
-executable reference service for the contract. [docs/development.md](./docs/development.md) covers the
-local stack and the live tests; [RELEASING.md](./RELEASING.md) has the PyPI release flow.
+`tests/reference_remote.py` is an executable reference service for the contract;
+[RELEASING.md](./RELEASING.md) has the PyPI release flow.
 
 ## License
 

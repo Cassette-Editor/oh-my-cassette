@@ -29,7 +29,7 @@ you ran and what came back.
 - [ ] `uv run ruff check .` and `uv run ruff format --check .` pass
 - [ ] `uv run pytest -q -rs` passes locally (with ffmpeg installed)
 - [ ] CI stays deterministic and credential-free — no real backend calls, no secrets in fixtures or the PR body
-- [ ] `docs/v3/contract.md`, `contract.py` and `tests/reference_remote.py` changed together if the contract changed
+- [ ] `contract.py`, `tests/reference_remote.py` and the Cassette MCP service changed together if the contract changed
 - [ ] Both skill copies updated together (`skills/` and `.agents/skills/`) if the skill changed
 - [ ] `README.md` and `README.zh-cn.md` kept as matching counterparts, if docs changed
 - [ ] No runtime state, media, exports, or `.env` committed

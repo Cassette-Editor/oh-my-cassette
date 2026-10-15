@@ -1,7 +1,8 @@
-"""The bridge ↔ backend contract (docs/v3/contract.md): names, parsing and JSON Pointer helpers.
+"""The bridge ↔ backend contract: names, parsing and JSON Pointer helpers.
 
-Everything the bridge knows about the Cassette backend lives here. Tool names, parameters and
-behavior are the backend's; only these annotations are agreed in advance.
+Everything the bridge knows about the Cassette backend lives here; the Cassette MCP service (`mcp/` in
+Cassette-Editor) is its other half. Tool names, parameters and behavior are the backend's; only these
+annotations are agreed in advance, and v1 grows only by additions.
 """
 
 from __future__ import annotations
@@ -9,8 +10,10 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import PurePath
 from typing import Any
 
@@ -24,10 +27,14 @@ META_DOWNLOADS = f"{NAMESPACE}/downloads"
 META_WORKSPACE = f"{NAMESPACE}/workspace"
 META_HOST = f"{NAMESPACE}/host"
 META_ELAPSED = f"{NAMESPACE}/elapsedSeconds"
+# A tool's JSON Pointer to the string argument that names one request: a call sent again with the same
+# value is answered as the first one, never acted on twice.
+META_REQUEST_ID = f"{NAMESPACE}/requestId"
 
 ROLE_UPLOAD_BEGIN = "upload.begin"
 ROLE_UPLOAD_COMPLETE = "upload.complete"
-BRIDGE_ROLES: frozenset[str] = frozenset({ROLE_UPLOAD_BEGIN, ROLE_UPLOAD_COMPLETE})
+ROLE_UPLOAD_PARTS = "upload.parts"
+BRIDGE_ROLES: frozenset[str] = frozenset({ROLE_UPLOAD_BEGIN, ROLE_UPLOAD_COMPLETE, ROLE_UPLOAD_PARTS})
 
 ARTIFACT_ORIGINAL = "original"
 DEFAULT_LOCAL_ACCEPT: tuple[str, ...] = ("video/*", "audio/*", "image/*")
@@ -46,6 +53,9 @@ CONVERSION_CONTAINERS: Mapping[str, frozenset[str]] = {
     "audio": frozenset({"flac"}),
     "image": frozenset({"jpeg"}),
 }
+# How far two frame rates may differ and still be the same rate: a source whose real and average rates
+# are this close is constant, and a variable one this far below the slowest declared rate falls back.
+RATE_TOLERANCE = 0.02
 
 
 class ContractError(ValueError):
@@ -58,7 +68,7 @@ class VideoEncoding:
     profile: str
     pixel_format: str
     bit_depth: int
-    frame_rate: float
+    max_frame_rate: float
     max_long_edge: int
     max_short_edge: int
     keyframe_interval_seconds: float
@@ -93,10 +103,23 @@ class Conversion:
 
 @dataclass(frozen=True)
 class KindRule:
-    """Audio or image: extensions uploaded unchanged, and what anything else is converted to."""
+    """Audio or image: extensions uploaded unchanged, and what anything else is converted to.
+
+    `accept` is what the backend keeps as it is; `intake` is what it also takes unchanged but converts
+    itself (`convertOnIntake`), so the bridge never converts either.
+    """
 
     accept: tuple[str, ...]
     convert: Conversion
+    intake: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class VariableFrameRate:
+    """The rate a source whose rate is variable or unknown plays at: the nearest of `rates`, else `fallback`."""
+
+    rates: tuple[Fraction, ...]
+    fallback: Fraction
 
 
 @dataclass(frozen=True)
@@ -105,6 +128,7 @@ class PrepareSpec:
     audio: KindRule | None
     image: KindRule | None
     digest: str
+    variable_frame_rate: VariableFrameRate | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +136,7 @@ class Transcode:
     """A video becomes every declared rendition; the source itself is never uploaded."""
 
     renditions: tuple[Rendition, ...]
+    variable_frame_rate: VariableFrameRate
 
 
 @dataclass(frozen=True)
@@ -187,6 +212,17 @@ def bridge_role(tool_meta: Any) -> str | None:
     return role if isinstance(role, str) else None
 
 
+def request_id_pointer(tool_meta: Any) -> str | None:
+    """The JSON Pointer a tool declares for its request id argument, or None without one."""
+    raw = _meta_dict(tool_meta).get(META_REQUEST_ID)
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw:
+        raise ContractError(f"{META_REQUEST_ID} must be a JSON Pointer to a string argument")
+    pointer_tokens(raw)
+    return raw
+
+
 def local_files_spec(tool_meta: Any) -> LocalFilesSpec | None:
     raw = _meta_dict(tool_meta).get(META_LOCAL_FILES)
     if raw is None:
@@ -209,7 +245,7 @@ def local_files_spec(tool_meta: Any) -> LocalFilesSpec | None:
     )
 
 
-# ── prepare declarations (contract §3) ──
+# ── prepare declarations ──
 
 
 def _field(raw: Mapping[str, Any], key: str, where: str) -> Any:
@@ -280,7 +316,7 @@ def _rendition(raw: Any, where: str) -> Rendition:
             profile=_text(video, "profile", vw, VIDEO_PROFILES),
             pixel_format=_text(video, "pixelFormat", vw),
             bit_depth=_integer(video, "bitDepth", vw, 8, 8),
-            frame_rate=_positive(video, "frameRate", vw),
+            max_frame_rate=_positive(video, "maxFrameRate", vw),
             max_long_edge=long_edge,
             max_short_edge=short_edge,
             keyframe_interval_seconds=_positive(video, "keyframeIntervalSeconds", vw),
@@ -296,11 +332,18 @@ def _rendition(raw: Any, where: str) -> Rendition:
     )
 
 
+def _extensions(raw: Any, where: str) -> tuple[str, ...]:
+    if not isinstance(raw, list) or not all(isinstance(ext, str) and ext.strip(".") for ext in raw):
+        raise ContractError(f"{where} must be a list of file extensions")
+    return tuple(ext.strip().lstrip(".").lower() for ext in raw)
+
+
 def _kind_rule(raw: Any, kind: str, where: str) -> KindRule:
     rule = _object(raw, where)
-    accept = _field(rule, "accept", where)
-    if not isinstance(accept, list) or not all(isinstance(ext, str) and ext.strip(".") for ext in accept):
-        raise ContractError(f"{where}.accept must be a list of file extensions")
+    accept = _extensions(_field(rule, "accept", where), f"{where}.accept")
+    intake = (
+        _extensions(rule["convertOnIntake"], f"{where}.convertOnIntake") if "convertOnIntake" in rule else ()
+    )
     convert = _object(_field(rule, "convert", where), f"{where}.convert")
     cw = f"{where}.convert"
     extension = _text(convert, "extension", cw).lstrip(".")
@@ -308,7 +351,8 @@ def _kind_rule(raw: Any, kind: str, where: str) -> KindRule:
         raise ContractError(f"{cw}.extension must be a file extension")
     quality = _integer(convert, "quality", cw, 0, 100) if "quality" in convert else None
     return KindRule(
-        accept=tuple(ext.strip().lstrip(".").lower() for ext in accept),
+        accept=accept,
+        intake=intake,
         convert=Conversion(
             container=_text(convert, "container", cw, CONVERSION_CONTAINERS[kind]),
             mime_type=_mime(convert, "mimeType", cw),
@@ -318,13 +362,33 @@ def _kind_rule(raw: Any, kind: str, where: str) -> KindRule:
     )
 
 
+def _fraction(raw: Any, where: str) -> Fraction:
+    rate = _object(raw, where)
+    return Fraction(_integer(rate, "num", where, 1), _integer(rate, "den", where, 1))
+
+
+def _variable_frame_rate(raw: Any, where: str) -> VariableFrameRate:
+    rule = _object(raw, where)
+    rates = _field(rule, "rates", where)
+    if not isinstance(rates, list) or not rates:
+        raise ContractError(f"{where}.rates must be a non-empty list of {{num, den}} rates")
+    return VariableFrameRate(
+        rates=tuple(_fraction(rate, f"{where}.rates[{i}]") for i, rate in enumerate(rates)),
+        fallback=_fraction(_field(rule, "fallback", where), f"{where}.fallback"),
+    )
+
+
 def prepare_spec(raw: Any) -> PrepareSpec:
     """Parse a `prepare` declaration. Unknown keys are ignored so the vocabulary can grow."""
     where = f"{META_LOCAL_FILES}.prepare"
     spec = _object(raw, where)
     renditions: tuple[Rendition, ...] | None = None
+    variable: VariableFrameRate | None = None
     if spec.get("video") is not None:
         video = _object(spec["video"], f"{where}.video")
+        variable = _variable_frame_rate(
+            _field(video, "variableFrameRate", f"{where}.video"), f"{where}.video.variableFrameRate"
+        )
         items = _field(video, "renditions", f"{where}.video")
         if not isinstance(items, list) or not items:
             raise ContractError(f"{where}.video.renditions must be a non-empty list")
@@ -342,7 +406,49 @@ def prepare_spec(raw: Any) -> PrepareSpec:
         audio=audio,
         image=image,
         digest=hashlib.sha256(canonical.encode()).hexdigest(),
+        variable_frame_rate=variable,
     )
+
+
+def frame_rate_within(rate: Fraction, maximum: float) -> Fraction:
+    """`rate` kept to every k-th frame for the smallest whole k that brings it within `maximum`.
+
+    Every kept frame is one the rate already shows: 120 within 60 is 60, 100 within 30 is 25, 90 within 60
+    is 45, and 24 within 30 stays 24.
+    """
+    return rate / max(1, math.ceil(float(rate) / maximum - 1e-9))
+
+
+def source_frame_rate(
+    variable: VariableFrameRate, real: Fraction | None, average: Fraction | None
+) -> Fraction:
+    """The rate a source plays at before any rendition reduces it.
+
+    A constant source (its real and average rates agree within `RATE_TOLERANCE`) keeps its real rate
+    exactly. A variable or unknown one plays at the declared rate nearest its average (the first of equally
+    near ones), or at the fallback when there is no average or it is below the slowest declared rate.
+    """
+    if real is not None and average is not None and abs(float(real) - float(average)) <= RATE_TOLERANCE:
+        return real
+    measured = average if average is not None else real
+    if measured is None or float(measured) < float(min(variable.rates)) - RATE_TOLERANCE:
+        return variable.fallback
+    nearest = variable.rates[0]
+    for rate in variable.rates:
+        if abs(float(rate) - float(measured)) < abs(float(nearest) - float(measured)):
+            nearest = rate
+    return nearest
+
+
+def rendition_frame_rates(plan: Transcode, real: Fraction | None, average: Fraction | None) -> list[Fraction]:
+    """The rate each rendition plays at: the first reduces the source's rate, each later one the rate
+    of the rendition before it, each within its own `maxFrameRate`."""
+    rate = source_frame_rate(plan.variable_frame_rate, real, average)
+    rates: list[Fraction] = []
+    for rendition in plan.renditions:
+        rate = frame_rate_within(rate, rendition.video.max_frame_rate)
+        rates.append(rate)
+    return rates
 
 
 def media_kind(mime: str) -> str | None:
@@ -357,9 +463,13 @@ def preparation_for(spec: PrepareSpec | None, mime: str, file_name: str) -> Tran
     if spec is None or kind is None:
         return None
     if kind == "video":
-        return Transcode(spec.renditions) if spec.renditions else None
+        if not spec.renditions:
+            return None
+        assert spec.variable_frame_rate is not None  # `prepare_spec` requires it with renditions
+        return Transcode(spec.renditions, spec.variable_frame_rate)
     rule = spec.audio if kind == "audio" else spec.image
-    if rule is None or PurePath(file_name).suffix.lstrip(".").lower() in rule.accept:
+    extension = PurePath(file_name).suffix.lstrip(".").lower()
+    if rule is None or extension in rule.accept or extension in rule.intake:
         return None
     return Convert(kind, rule.convert)
 

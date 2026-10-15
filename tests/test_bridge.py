@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 
 import anyio
+import httpx
 import pytest
 from mcp.shared.exceptions import MCPError
 from tests.bridge_support import bridge_host
 from tests.reference_remote import ReferenceRemote, RemoteOptions, free_port, serve_remote
 
+from oh_my_cassette.bridge import downloads
+from oh_my_cassette.bridge.downloads import Downloads
+from oh_my_cassette.bridge.errors import BridgeError
 from oh_my_cassette.bridge.server import STATUS_TOOL
-from oh_my_cassette.contract import META_ELAPSED, META_HOST, META_WORKSPACE
+from oh_my_cassette.contract import META_ELAPSED, META_HOST, META_WORKSPACE, DownloadSpec
 
 pytestmark = pytest.mark.anyio
 
@@ -29,6 +34,7 @@ async def test_mirrors_backend_tools_and_instructions(remote, bridge_settings, m
             "silent_turn",
             "export_video",
             "add_late_tool",
+            "run_turn",
         ]
         assert host.instructions == remote.options.instructions
         # a tool taking local files may answer `preparing`, which its own output schema does not describe
@@ -36,6 +42,8 @@ async def test_mirrors_backend_tools_and_instructions(remote, bridge_settings, m
         assert tools["slow_turn"].output_schema is not None
         with pytest.raises(MCPError):  # bridge-only tools are hidden and refused
             await host.call_tool("cassette_upload_begin", {"files": []})
+        with pytest.raises(MCPError):
+            await host.call_tool("cassette_upload_parts", {"uploadId": "u", "role": "original"})
 
 
 @pytest.mark.parametrize("mode", HOST_MODES)
@@ -122,6 +130,139 @@ async def test_bad_download_keeps_the_url_and_leaves_no_file(remote, bridge_sett
     assert result.structured_content["file"].startswith("http://127.0.0.1")
     assert "sha256 mismatch" in result.content[-1].text
     assert list((settings.workspace / "cassette-exports").iterdir()) == []
+
+
+def _export(remote: ReferenceRemote) -> tuple[bytes, list[str]]:
+    data = b"FAKE-MP4-" * 4096
+    return data, [h.get("range", "") for h in remote.download_headers]
+
+
+async def test_a_download_cut_short_resumes_from_where_it_stopped(remote, bridge_settings):
+    settings = bridge_settings(remote.url)
+    remote.options.cut_downloads = 1
+    async with bridge_host(settings) as (_, host):
+        result = await host.call_tool("export_video", {"name": "final"})
+    data, ranges = _export(remote)
+    assert (settings.workspace / "cassette-exports/final.mp4").read_bytes() == data
+    assert ranges == ["", f"bytes={len(data) // 2}-"]
+    assert remote.download_headers[1]["if-range"].startswith('"')  # the ETag the cut answer carried
+    assert "Downloaded final.mp4" in result.content[-1].text
+    assert [p.name for p in (settings.workspace / "cassette-exports").iterdir()] == ["final.mp4"]
+
+
+async def test_a_download_the_server_will_not_resume_starts_over(remote, bridge_settings):
+    settings = bridge_settings(remote.url)
+    remote.options.cut_downloads, remote.options.ignore_ranges = 1, True
+    async with bridge_host(settings) as (_, host):
+        await host.call_tool("export_video", {"name": "final"})
+    data, ranges = _export(remote)
+    assert ranges == ["", f"bytes={len(data) // 2}-"]  # asked to resume, answered 200 with the whole file
+    assert (settings.workspace / "cassette-exports/final.mp4").read_bytes() == data
+
+
+async def test_a_download_that_keeps_failing_keeps_its_part_for_the_next_call(
+    remote, bridge_settings, monkeypatch
+):
+    monkeypatch.setattr(downloads, "DOWNLOAD_ATTEMPTS", 1)
+    settings = bridge_settings(remote.url)
+    data = b"0123456789" * 1000
+    remote.files["kept"] = data
+    spec = DownloadSpec(
+        url=f"{remote.base_url}/files/kept",
+        file_name="kept.bin",
+        size=len(data),
+        sha256=hashlib.sha256(data).hexdigest(),
+        pointer=None,
+    )
+    async with httpx.AsyncClient() as http:
+        fetcher = Downloads(settings, http)
+        remote.options.cut_downloads = 1
+        with pytest.raises(BridgeError) as caught:
+            await fetcher.fetch(spec)
+        assert caught.value.code == "bridge.download_failed" and caught.value.retryable
+        (part,) = settings.downloads.iterdir()
+        assert part.name.startswith(".kept.bin.") and part.read_bytes() == data[: len(data) // 2]
+        path = await Downloads(settings, http).fetch(spec)  # a fresh process: no ETag known
+    assert path.read_bytes() == data and [p.name for p in settings.downloads.iterdir()] == ["kept.bin"]
+    assert [h.get("range") for h in remote.download_headers] == [None, f"bytes={len(data) // 2}-"]
+    assert "if-range" not in remote.download_headers[1]
+
+
+async def test_a_call_that_names_its_request_is_sent_again_after_a_dropped_connection(
+    remote, bridge_settings
+):
+    remote.options.drop_turn_once = True
+    async with bridge_host(bridge_settings(remote.url)) as (_, host):
+        with anyio.fail_after(30):
+            result = await host.call_tool("run_turn", {"message": "brighter"})
+    assert not result.is_error, result
+    assert result.structured_content == {"status": "done", "message": "brighter", "turn": 1}
+    first, again = remote.calls
+    request_id = first["arguments"]["client_request_id"]
+    assert uuid.UUID(request_id) and again["arguments"] == first["arguments"]
+    assert remote.acted == [request_id]  # sent twice, acted on once
+    assert again["meta"][META_ELAPSED] > first["meta"][META_ELAPSED]
+
+
+async def test_a_refused_named_request_waits_as_told_and_is_sent_again(remote, bridge_settings):
+    remote.options.refusals = [(503, 0), (429, 1)]
+    async with bridge_host(bridge_settings(remote.url)) as (_, host):
+        with anyio.fail_after(30):
+            result = await host.call_tool("run_turn", {"message": "cut", "client_request_id": "host-chosen"})
+    assert not result.is_error, result
+    assert remote.refused == [503, 429]
+    assert [call["arguments"]["client_request_id"] for call in remote.calls] == ["host-chosen"]
+
+
+async def test_a_named_request_whose_wait_ran_out_is_picked_up_by_the_next_identical_call(
+    remote, bridge_settings
+):
+    remote.options.drop_turn_once = True
+    async with bridge_host(bridge_settings(remote.url, local_wait_sec=0.5)) as (_, host):
+        with anyio.fail_after(30):
+            dropped = await host.call_tool("run_turn", {"message": "warmer"})
+            error = dropped.structured_content["error"]
+            assert (
+                error["code"] == "bridge.backend_unreachable" and "may still be running" in error["message"]
+            )
+            while (again := await host.call_tool("run_turn", {"message": "warmer"})).is_error:
+                await anyio.sleep(0.2)
+            fresh = await host.call_tool("run_turn", {"message": "warmer"})
+    assert again.structured_content["turn"] == 1  # the first request's answer, not a second turn
+    assert fresh.structured_content["turn"] == 2  # once settled, the same words are a new request
+    ids = [call["arguments"]["client_request_id"] for call in remote.calls]
+    assert ids[0] == ids[-2] != ids[-1]
+
+
+async def test_a_rate_limited_call_reports_the_wait_and_keeps_the_connection(remote, bridge_settings):
+    remote.options.refusals = [(429, 7)]
+    async with bridge_host(bridge_settings(remote.url)) as (bridge, host):
+        attempts = bridge.upstream._attempts
+        refused = await host.call_tool("slow_turn", {"steps": 1})
+        assert refused.structured_content["error"] == {
+            "code": "bridge.rate_limited",
+            "message": refused.structured_content["error"]["message"],
+            "retryable": True,
+            "retry_after_seconds": 7,
+        }
+        assert "HTTP 429" in refused.structured_content["error"]["message"]
+        assert bridge.upstream.connected
+        assert not (await host.call_tool("slow_turn", {"steps": 1})).is_error
+        assert bridge.upstream._attempts == attempts  # no reconnect
+    assert remote.refused == [429] and len(remote.calls) == 1
+
+
+async def test_a_refused_call_says_cassette_did_not_take_it(remote, bridge_settings):
+    remote.options.refusals = [(503, 2)]
+    async with bridge_host(bridge_settings(remote.url)) as (_, host):
+        refused = await host.call_tool("slow_turn", {"steps": 1})
+        error = refused.structured_content["error"]
+        assert error["code"] == "bridge.backend_unreachable" and error["retry_after_seconds"] == 2
+        assert "did not take the call" in error["message"] and "during the call" not in error["message"]
+        with anyio.fail_after(15):
+            while (await host.call_tool("slow_turn", {"steps": 1})).is_error:
+                await anyio.sleep(0.2)
+    assert remote.calls[0]["tool"] == "slow_turn" and len(remote.calls) == 1
 
 
 async def test_backend_tool_list_changes_reach_a_legacy_host(remote, bridge_settings):

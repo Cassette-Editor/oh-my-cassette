@@ -4,7 +4,7 @@
   "title": "Oh My Cassette",
   "description": "Video editing through the Cassette agent: import media, edit by chat turn, read the timeline, export",
   "version": "0.5.0",
-  "websiteUrl": "https://cassette-editor.github.io/oh-my-cassette/",
+  "websiteUrl": "https://github.com/Cassette-Editor/oh-my-cassette",
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/assets/logo-400.png",

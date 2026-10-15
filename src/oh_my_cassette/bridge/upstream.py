@@ -9,9 +9,13 @@ picked up on the next call rather than after the longest backoff.
 Calls have no deadline of their own: the backend bounds its waits and keeps the response stream
 alive with SSE comments, so the HTTP client's idle read timeout is what detects a dead connection.
 
-The bridge speaks only the 2026-07-28 protocol towards the backend (contract §1): leaving a call
-closes its response stream, which is how the backend learns to stop waiting for it. An endpoint that
-answers only the handshake-era protocol is refused.
+The bridge speaks only the 2026-07-28 protocol towards the backend: leaving a call closes its response
+stream, which is how the backend learns to stop waiting for it. An endpoint that answers only the
+handshake-era protocol is refused.
+
+The service refuses a request it will not run with HTTP 429 (too many requests; the connection is
+fine) or 503 (it cannot take work now; reconnect), each with `Retry-After`. The tool never ran, so
+those refusals are reported apart from a connection that broke while a call was out.
 """
 
 from __future__ import annotations
@@ -34,13 +38,16 @@ from mcp_types.version import LATEST_MODERN_VERSION, MODERN_PROTOCOL_VERSIONS
 
 from oh_my_cassette import __version__
 from oh_my_cassette.auth import AuthenticationError, Credentials
+from oh_my_cassette.bridge.errors import retry_after_seconds
 from oh_my_cassette.bridge.settings import BridgeSettings
 from oh_my_cassette.contract import ServerContract, bridge_role, server_contract
 
 log = logging.getLogger(__name__)
 
 MAX_SSE_EVENT_SIZE = 32 * 1024 * 1024
-GATEWAY_STATUSES = frozenset({502, 503, 504})
+GATEWAY_STATUSES = frozenset({502, 504})
+RATE_LIMITED = 429
+REFUSED = 503
 
 TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
     httpx2.HTTPError,
@@ -52,11 +59,28 @@ TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
 
 
 class BackendUnavailable(Exception):
-    """The backend's MCP endpoint cannot be reached, or the connection broke while a call was out."""
+    """The backend's MCP endpoint cannot be reached, broke while a call was out, or refused the call (503)."""
 
-    def __init__(self, message: str, *, during_call: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        during_call: bool = False,
+        refused: bool = False,
+        retry_after: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.during_call = during_call
+        self.refused = refused
+        self.retry_after = retry_after
+
+
+class RateLimited(Exception):
+    """The backend answered a call HTTP 429: it did not run it, and the connection is still good."""
+
+    def __init__(self, retry_after: float | None) -> None:
+        super().__init__("HTTP 429 Too Many Requests")
+        self.retry_after = retry_after
 
 
 class Unauthorized(Exception):
@@ -130,6 +154,8 @@ class Upstream:
         # Counts of HTTP answers the MCP transport turns into generic errors; compared around a call.
         self._rejections = 0
         self._gateway_errors = 0
+        self._refusals = 0
+        self._refusal: tuple[int, float | None] = (REFUSED, None)  # the latest refusal's status and wait
 
     # ── connection owner ──
 
@@ -150,6 +176,9 @@ class Upstream:
             raise AuthenticationError("This account or grant cannot access the selected target", 403)
         elif response.status_code in GATEWAY_STATUSES:
             self._gateway_errors += 1
+        elif response.status_code in (RATE_LIMITED, REFUSED):
+            self._refusals += 1
+            self._refusal = (response.status_code, retry_after_seconds(response.headers.get("retry-after")))
 
     async def run(self, *, task_status: TaskStatus[None] = anyio.TASK_STATUS_IGNORED) -> None:
         """Connect, serve until the connection breaks, reconnect with backoff; forever.
@@ -166,7 +195,7 @@ class Upstream:
         while True:
             self._wake = anyio.Event()
             self._attempting = True
-            rejections = self._rejections
+            rejections, refusals = self._rejections, self._refusals
             try:
                 async with AsyncExitStack() as stack:
                     http = await stack.enter_async_context(self._http_client())
@@ -218,7 +247,10 @@ class Upstream:
             if not started:
                 started = True
                 task_status.started()
-            with anyio.move_on_after(delay):
+            wait = delay
+            if self._refusals > refusals and self._refusal[1] is not None:
+                wait = max(delay, self._refusal[1])  # the service said when it takes requests again
+            with anyio.move_on_after(wait):
                 await self._wake.wait()
             delay = min(delay * 2, 30.0)
 
@@ -341,7 +373,7 @@ class Upstream:
         progress: ProgressFnT | None = None,
     ) -> types.CallToolResult:
         client = await self.client()
-        rejections, gateway_errors = self._rejections, self._gateway_errors
+        rejections, gateway_errors, refusals = self._rejections, self._gateway_errors, self._refusals
         try:
             return await client.call_tool(
                 name,
@@ -353,6 +385,16 @@ class Upstream:
             if self._rejections > rejections:
                 self.mark_broken()
                 raise Unauthorized("HTTP 401 Unauthorized") from exc
+            if self._refusals > refusals:
+                status, retry_after = self._refusal
+                if status == RATE_LIMITED:
+                    raise RateLimited(retry_after) from exc
+                self.mark_broken()
+                raise BackendUnavailable(
+                    "Cassette did not take the call (HTTP 503); it is not taking work right now",
+                    refused=True,
+                    retry_after=retry_after,
+                ) from exc
             if exc.code in (types.CONNECTION_CLOSED, types.REQUEST_TIMEOUT) or (
                 self._gateway_errors > gateway_errors
             ):

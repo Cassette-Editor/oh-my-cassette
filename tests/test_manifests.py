@@ -11,7 +11,7 @@ import oh_my_cassette
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src/oh_my_cassette"
 VERSION = oh_my_cassette.__version__
-HOST_TIMEOUT_SEC = 600  # room for the bridge's local wait plus the backend's bounded wait (contract §7)
+HOST_TIMEOUT_SEC = 600  # room for the bridge's local wait plus the backend's bounded wait
 # Names a Cassette backend has used or may use for its tools; the skill must not depend on any of them.
 BACKEND_TOOL_SAMPLES = (
     "cassette_project_open",
@@ -97,8 +97,6 @@ def test_no_manifest_or_guide_points_at_the_retired_settings():
         "README.md",
         "README.zh-cn.md",
         "llms-install.md",
-        "docs/development.md",
-        "docs/development.zh-cn.md",
     ):
         text = (ROOT / rel).read_text("utf-8")
         assert "CASSETTE_CALL_TIMEOUT_SEC" not in text and "oh_my_cassette.server" not in text, rel

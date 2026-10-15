@@ -2,7 +2,7 @@
 
 A host call waits for its local phase at most CASSETTE_LOCAL_WAIT_SEC. When the phase is not done
 by then, the call returns the non-error `preparing` result and the work goes on; calling again with
-the same arguments attaches to the same task (contract §7). A finished phase's refs stay cached for
+the same arguments attaches to the same task. A finished phase's refs stay cached for
 the life of the bridge process; a failed one is reported once and then forgotten, so the next call
 starts over.
 """

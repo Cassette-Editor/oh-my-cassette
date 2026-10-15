@@ -40,9 +40,9 @@ uvx oh-my-cassette==0.5.0 --version
 - if the server itself misbehaves, its stderr with `OH_MY_CASSETTE_LOG=DEBUG` set in the host's
   server environment.
 
-Error codes starting with `bridge.` come from this plugin and are explained in
-[docs/development.md](./docs/development.md#troubleshooting); any other code comes from the Cassette
-service.
+Error codes starting with `bridge.` come from this plugin and are explained in the skill's error table
+([skills/cassette-video-edit/SKILL.md](./skills/cassette-video-edit/SKILL.md)); any other code comes
+from the Cassette service.
 
 ## Why the backend is separate
 

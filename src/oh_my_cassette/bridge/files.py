@@ -1,8 +1,9 @@
-"""Local file arguments (contract §3): the local policy, preparation, the upload handshake, refs.
+"""Local file arguments: the local policy, preparation, the upload handshake, refs.
 
 The backend decides which arguments are local paths, which MIME types it accepts and how media is
 prepared; this module decides which files may leave the machine. The backend can narrow that
-policy, never widen it.
+policy, never widen it. An artifact goes up in one PUT, or in parts whose URLs the backend's
+`upload.parts` tool signs a batch at a time; each part is retried on its own.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import json
 import mimetypes
 import shutil
 import tempfile
-from collections.abc import Callable, Hashable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Hashable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,16 +25,24 @@ import httpx
 import mcp_types as types
 from mcp.shared.exceptions import MCPError
 
-from oh_my_cassette.bridge.errors import BridgeError, unauthorized, unreachable
+from oh_my_cassette.bridge.errors import (
+    BridgeError,
+    backoff_seconds,
+    rate_limited,
+    retry_after_seconds,
+    unauthorized,
+    unreachable,
+)
 from oh_my_cassette.bridge.jobs import DONE, TRANSCODING, UPLOADING, FileProgress, LocalJob
 from oh_my_cassette.bridge.prepare import Preparer
 from oh_my_cassette.bridge.settings import BridgeSettings
-from oh_my_cassette.bridge.upstream import BackendUnavailable, Unauthorized, Upstream
+from oh_my_cassette.bridge.upstream import BackendUnavailable, RateLimited, Unauthorized, Upstream
 from oh_my_cassette.contract import (
     ARTIFACT_ORIGINAL,
     DEFAULT_LOCAL_ACCEPT,
     ROLE_UPLOAD_BEGIN,
     ROLE_UPLOAD_COMPLETE,
+    ROLE_UPLOAD_PARTS,
     ContractError,
     Convert,
     LocalFilesSpec,
@@ -45,6 +54,8 @@ from oh_my_cassette.contract import (
 )
 
 CHUNK = 1024 * 1024
+PART_ATTEMPTS = 4  # sends of one part before a transient failure is reported
+PART_URL_MAX_AGE_SEC = 600.0  # a part URL signed longer ago than this is signed again before use
 
 # Media types the platform tables often miss.
 for _ext, _mime in {
@@ -58,6 +69,8 @@ for _ext, _mime in {
     ".heic": "image/heic",
     ".heif": "image/heif",
     ".avif": "image/avif",
+    ".jfif": "image/jpeg",
+    ".apng": "image/apng",
     ".opus": "audio/ogg",
     ".flac": "audio/flac",
     ".aif": "audio/aiff",
@@ -152,6 +165,21 @@ class LocalCall:
             )
             for source in self.sources
         ]
+
+
+@dataclass(frozen=True)
+class PutTarget:
+    """Where one artifact goes: one PUT to `url` with `headers`, or `parts` of (part size, part count)."""
+
+    url: str
+    headers: dict[str, str]
+    parts: tuple[int, int] | None
+
+
+@dataclass(frozen=True)
+class SignedParts:
+    completed: frozenset[int]
+    urls: dict[int, str]
 
 
 @dataclass(frozen=True)
@@ -291,7 +319,11 @@ class LocalFiles:
         except Unauthorized as exc:
             raise unauthorized(self._settings.mcp_url, has_token=bool(self._settings.auth_token)) from exc
         except BackendUnavailable as exc:
-            raise unreachable(self._settings.mcp_url, str(exc), during_call=exc.during_call) from exc
+            raise unreachable(
+                self._settings.mcp_url, str(exc), during_call=exc.during_call, retry_after=exc.retry_after
+            ) from exc
+        except RateLimited as exc:
+            raise rate_limited(self._settings.mcp_url, exc.retry_after) from exc
         finally:
             with anyio.CancelScope(shield=True):
                 await anyio.to_thread.run_sync(shutil.rmtree, workdir, True)
@@ -323,9 +355,7 @@ class LocalFiles:
                 index, name, source.relative, size, digest, conversion.mime_type, (converted,), None
             )
         digest = await sha256_file(source.path)
-        artifacts, report = await self._preparer.transcode(
-            source.path, preparation.renditions, workdir, transcoding
-        )
+        artifacts, report = await self._preparer.transcode(source.path, preparation, workdir, transcoding)
         renditions = tuple(
             [
                 UploadArtifact(a.role, a.path, a.path.stat().st_size, await sha256_file(a.path), a.mime_type)
@@ -335,7 +365,7 @@ class LocalFiles:
         name = source.path.name
         return UploadFile(index, name, source.relative, source.size, digest, source.mime, renditions, report)
 
-    # ── handshake (contract §3.1) ──
+    # ── handshake ──
 
     async def _call(self, tool: types.Tool, arguments: dict[str, Any]) -> types.CallToolResult:
         try:
@@ -349,6 +379,7 @@ class LocalFiles:
     async def _upload(self, call: LocalCall, files: list[UploadFile], job: LocalJob) -> dict[Path, str]:
         begin = self._upstream.tool_for_role(ROLE_UPLOAD_BEGIN)
         complete = self._upstream.tool_for_role(ROLE_UPLOAD_COMPLETE)
+        parts = self._upstream.tool_for_role(ROLE_UPLOAD_PARTS)
         if begin is None or complete is None:
             raise BridgeError("bridge.contract_violation", "the backend no longer offers its upload tools")
         for file in files:
@@ -367,7 +398,7 @@ class LocalFiles:
 
         by_ref = {file.client_ref: file for file in files}
         refs: dict[Path, str] = {}
-        pending: dict[str, tuple[UploadFile, dict[str, tuple[str, dict[str, str]]]]] = {}
+        pending: dict[str, tuple[UploadFile, dict[str, PutTarget]]] = {}
         seen: set[str] = set()
         for entry in uploads:
             client_ref = entry.get("clientRef") if isinstance(entry, Mapping) else None
@@ -378,7 +409,13 @@ class LocalFiles:
             seen.add(client_ref)
             file = by_ref[client_ref]
             if isinstance(entry.get("uploadId"), str):
-                pending[entry["uploadId"]] = (file, self._targets(begin.name, file, entry.get("puts")))
+                targets = self._targets(begin.name, file, entry.get("puts"))
+                if parts is None and any(target.parts for target in targets.values()):
+                    raise BridgeError(
+                        "bridge.contract_violation",
+                        f"{begin.name} asked for {file.name} in parts but the backend offers no tool to sign them",
+                    )
+                pending[entry["uploadId"]] = (file, targets)
             elif isinstance(entry.get("ref"), str):  # content the backend already has: nothing to send
                 refs[call.sources[file.index].path] = entry["ref"]
                 job.files[file.index].update(DONE)
@@ -390,8 +427,8 @@ class LocalFiles:
         if seen != set(by_ref):
             raise BridgeError("bridge.contract_violation", f"{begin.name} did not return one entry per file")
 
-        for file, targets in pending.values():
-            await self._send(file, targets, job.files[file.index])
+        for upload_id, (file, targets) in pending.items():
+            await self._send(parts, upload_id, file, targets, job.files[file.index])
         if pending:
             finished = await self._call(complete, {"uploadIds": list(pending)})
             for entry in (finished.structured_content or {}).get("files") or []:
@@ -412,18 +449,35 @@ class LocalFiles:
         return refs
 
     @staticmethod
-    def _targets(tool_name: str, file: UploadFile, puts: Any) -> dict[str, tuple[str, dict[str, str]]]:
-        """Each artifact role's PUT target, checked: exactly one per artifact, http(s) only."""
-        targets: dict[str, tuple[str, dict[str, str]]] = {}
+    def _targets(tool_name: str, file: UploadFile, puts: Any) -> dict[str, PutTarget]:
+        """Each artifact role's PUT target, checked: exactly one per artifact, http(s) only, parts that
+        cover the artifact exactly."""
+        sizes = {artifact.role: artifact.size for artifact in file.artifacts}
+        targets: dict[str, PutTarget] = {}
         for put in puts if isinstance(puts, list) else [None]:
             if not isinstance(put, Mapping) or not isinstance(put.get("role"), str):
                 raise BridgeError("bridge.contract_violation", f"{tool_name} returned a malformed put target")
-            url, headers = put.get("url"), put.get("headers") or {}
+            url, headers, multipart = put.get("url"), put.get("headers") or {}, put.get("multipart")
             if not isinstance(url, str) or not url.startswith(("http://", "https://")):
                 raise BridgeError("bridge.contract_violation", f"{tool_name}: upload URLs must be http(s)")
             if not isinstance(headers, Mapping):
                 raise BridgeError("bridge.contract_violation", f"{tool_name}: put headers must be an object")
-            targets[put["role"]] = (url, {str(k): str(v) for k, v in headers.items()})
+            parts: tuple[int, int] | None = None
+            if multipart is not None:
+                plan = multipart if isinstance(multipart, Mapping) else {}
+                part_size, part_count = plan.get("partSize"), plan.get("partCount")
+                size = max(1, sizes.get(put["role"], 0))
+                if not (
+                    _whole(part_size)
+                    and _whole(part_count)
+                    and part_size * (part_count - 1) < size <= part_size * part_count
+                ):
+                    raise BridgeError(
+                        "bridge.contract_violation",
+                        f"{tool_name}: the parts of {file.name} ({put['role']}) must cover it exactly",
+                    )
+                parts = (part_size, part_count)
+            targets[put["role"]] = PutTarget(url, {str(k): str(v) for k, v in headers.items()}, parts)
         roles = [artifact.role for artifact in file.artifacts]
         if sorted(targets) != sorted(roles) or len(targets) != len(puts):
             raise BridgeError(
@@ -433,7 +487,12 @@ class LocalFiles:
         return targets
 
     async def _send(
-        self, file: UploadFile, targets: dict[str, tuple[str, dict[str, str]]], progress: FileProgress
+        self,
+        parts: types.Tool | None,
+        upload_id: str,
+        file: UploadFile,
+        targets: dict[str, PutTarget],
+        progress: FileProgress,
     ) -> None:
         total, sent = max(1, sum(artifact.size for artifact in file.artifacts)), 0
 
@@ -443,30 +502,25 @@ class LocalFiles:
             progress.update(UPLOADING, 100 * sent / total)
 
         for artifact in file.artifacts:
-            await self._put(file, artifact, targets[artifact.role], count)
+            target = targets[artifact.role]
+            if target.parts is None:
+                await self._put(file, artifact, target, count)
+            else:
+                assert parts is not None  # `_upload` refuses parts without the tool that signs them
+                await self._put_parts(parts, upload_id, file, artifact, target.parts, count)
 
     async def _put(
-        self,
-        file: UploadFile,
-        artifact: UploadArtifact,
-        target: tuple[str, dict[str, str]],
-        sent: Callable[[int], None],
+        self, file: UploadFile, artifact: UploadArtifact, target: PutTarget, sent: Callable[[int], None]
     ) -> None:
-        url, given = target
         # The presigned URL is bound to the headers it was signed with, Content-Type included.
-        headers = {**given, "Content-Length": str(artifact.size)}
-        if same_origin(url, self._settings.mcp_url):
-            headers.update(await self._upstream.credentials.headers(url))
-
-        async def body():
-            async with await anyio.open_file(artifact.path, "rb") as handle:
-                while chunk := await handle.read(CHUNK):
-                    sent(len(chunk))
-                    yield chunk
-
+        headers = {**target.headers, "Content-Length": str(artifact.size)}
+        if same_origin(target.url, self._settings.mcp_url):
+            headers.update(await self._upstream.credentials.headers(target.url))
         what = f"uploading {file.relative} ({artifact.role})"
         try:
-            response = await self._http.put(url, content=body(), headers=headers)
+            response = await self._http.put(
+                target.url, content=_read(artifact.path, 0, artifact.size, sent), headers=headers
+            )
         except httpx.HTTPError as exc:
             raise BridgeError("bridge.upload_failed", f"{what}: {exc}", retryable=True) from exc
         if response.status_code >= 300:
@@ -475,3 +529,158 @@ class LocalFiles:
                 f"{what}: storage answered HTTP {response.status_code}",
                 retryable=response.status_code >= 500,
             )
+
+    async def _sign_parts(
+        self,
+        tool: types.Tool,
+        upload_id: str,
+        artifact: UploadArtifact,
+        plan: tuple[int, int],
+        numbers: list[int] | None = None,
+    ) -> SignedParts:
+        arguments: dict[str, Any] = {"uploadId": upload_id, "role": artifact.role}
+        if numbers:
+            arguments["partNumbers"] = numbers
+        data = (await self._call(tool, arguments)).structured_content or {}
+        completed, signed = data.get("completed"), data.get("parts")
+        if (data.get("partSize"), data.get("partCount")) != plan:
+            raise BridgeError(
+                "bridge.contract_violation",
+                f"{tool.name} changed the parts of {artifact.role} since upload.begin",
+            )
+        urls: dict[int, str] = {}
+        for part in signed if isinstance(signed, list) else [None]:
+            number = part.get("partNumber") if isinstance(part, Mapping) else None
+            url = part.get("url") if isinstance(part, Mapping) else None
+            if not (_whole(number) and number <= plan[1] and isinstance(url, str)) or not url.startswith(
+                ("http://", "https://")
+            ):
+                raise BridgeError("bridge.contract_violation", f"{tool.name} returned a malformed part")
+            urls[number] = url
+        if not isinstance(completed, list) or not all(_whole(n) and n <= plan[1] for n in completed):
+            raise BridgeError("bridge.contract_violation", f"{tool.name} returned a malformed completed list")
+        return SignedParts(frozenset(completed), urls)
+
+    async def _put_parts(
+        self,
+        tool: types.Tool,
+        upload_id: str,
+        file: UploadFile,
+        artifact: UploadArtifact,
+        plan: tuple[int, int],
+        sent: Callable[[int], None],
+    ) -> None:
+        """Send every part the store does not hold yet, a signed batch at a time."""
+        part_size, part_count = plan
+        what = f"uploading {file.relative} ({artifact.role})"
+        counted: set[int] = set()  # parts whose bytes are in the progress already
+        put: set[int] = set()  # parts sent in this run
+
+        def span(number: int) -> tuple[int, int]:
+            start = (number - 1) * part_size
+            return start, min(artifact.size, start + part_size) - start
+
+        while True:
+            batch = await self._sign_parts(tool, upload_id, artifact, plan)
+            signed_at = anyio.current_time()
+            for number in batch.completed - counted:  # held from an earlier attempt
+                counted.add(number)
+                sent(span(number)[1])
+            if not batch.urls:
+                if batch.completed >= set(range(1, part_count + 1)):
+                    return
+                raise BridgeError(
+                    "bridge.contract_violation",
+                    f"{tool.name} signed no part of {file.name} while parts are missing",
+                )
+            urls = dict(batch.urls)
+            for number in sorted(urls):
+                if number in put:
+                    raise BridgeError(
+                        "bridge.upload_failed",
+                        f"{what}: the store did not keep part {number}",
+                        retryable=True,
+                    )
+                if anyio.current_time() - signed_at > PART_URL_MAX_AGE_SEC:
+                    left = [n for n in sorted(urls) if n >= number]
+                    urls |= (await self._sign_parts(tool, upload_id, artifact, plan, left)).urls
+                    signed_at = anyio.current_time()
+
+                async def sign_again(number: int = number) -> str:
+                    again = (await self._sign_parts(tool, upload_id, artifact, plan, [number])).urls
+                    if number not in again:
+                        raise BridgeError(
+                            "bridge.contract_violation", f"{tool.name} did not sign part {number} again"
+                        )
+                    return again[number]
+
+                await self._put_part(what, artifact, number, urls[number], span(number), sign_again, sent)
+                put.add(number)
+                counted.add(number)
+
+    async def _put_part(
+        self,
+        what: str,
+        artifact: UploadArtifact,
+        number: int,
+        url: str,
+        span: tuple[int, int],
+        sign_again: Callable[[], Awaitable[str]],
+        sent: Callable[[int], None],
+    ) -> None:
+        """One part, retried: a refused URL (403/404) is signed again once, a transient failure (network,
+        5xx, 429) is sent again after the store's `Retry-After` or 1, 2, 4… seconds."""
+        start, length = span
+        resigned, attempt = False, 0
+        while True:
+            moved = 0
+
+            def count(size: int) -> None:
+                nonlocal moved
+                moved += size
+                sent(size)
+
+            # A part URL is signed for its bytes only: no content type, and no credential elsewhere.
+            headers = {"Content-Length": str(length)}
+            if same_origin(url, self._settings.mcp_url):
+                headers.update(await self._upstream.credentials.headers(url))
+            status, retry_after, detail = None, None, ""
+            try:
+                response = await self._http.put(
+                    url, content=_read(artifact.path, start, length, count), headers=headers
+                )
+                status, retry_after = (
+                    response.status_code,
+                    retry_after_seconds(response.headers.get("retry-after")),
+                )
+                detail = f"storage answered HTTP {status}"
+            except httpx.HTTPError as exc:
+                detail = str(exc) or type(exc).__name__
+            if status is not None and status < 300:
+                return
+            sent(-moved)
+            if status in (403, 404) and not resigned:
+                url, resigned = await sign_again(), True
+                continue
+            transient = status is None or status >= 500 or status == 429
+            if not transient or attempt + 1 >= PART_ATTEMPTS:
+                raise BridgeError(
+                    "bridge.upload_failed", f"{what}: part {number}: {detail}", retryable=transient
+                )
+            await anyio.sleep(backoff_seconds(attempt, retry_after))
+            attempt += 1
+
+
+def _whole(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+async def _read(path: Path, start: int, length: int, sent: Callable[[int], None]) -> AsyncIterator[bytes]:
+    """`length` bytes of `path` from `start`, counted as they go."""
+    async with await anyio.open_file(path, "rb") as handle:
+        await handle.seek(start)
+        left = length
+        while left > 0 and (chunk := await handle.read(min(CHUNK, left))):
+            left -= len(chunk)
+            sent(len(chunk))
+            yield chunk
