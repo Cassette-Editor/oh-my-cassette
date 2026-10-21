@@ -37,6 +37,8 @@ ProgressFn = Callable[[float], None]
 
 ENCODER = "libx264"
 HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67"})
+# A source is read as a local file only: a playlist or reference inside it cannot reach the network or a pipe.
+LOCAL_INPUT = ["-protocol_whitelist", "file"]
 STDERR_TAIL = 1000
 INSTALL_HINT = (
     "install ffmpeg (for example `brew install ffmpeg`, `sudo apt install ffmpeg` or `winget install ffmpeg`), "
@@ -373,7 +375,17 @@ class FFmpegPreparer:
     async def probe(self, path: Path) -> dict[str, Any]:
         _, ffprobe = self.programs()
         result = await anyio.run_process(
-            [ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
+            [
+                ffprobe,
+                "-v",
+                "error",
+                *LOCAL_INPUT,
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                str(path),
+            ],
             check=False,
         )
         if result.returncode != 0:
@@ -411,7 +423,7 @@ class FFmpegPreparer:
     def _command(self, source: Path) -> list[str]:
         ffmpeg, _ = self.programs()
         quiet = ["-hide_banner", "-nostdin", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y"]
-        return [ffmpeg, *quiet, "-i", str(source)]
+        return [ffmpeg, *quiet, *LOCAL_INPUT, "-i", str(source)]
 
     async def transcode(
         self, source: Path, plan: Transcode, workdir: Path, progress: ProgressFn

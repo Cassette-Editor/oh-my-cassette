@@ -38,6 +38,9 @@ def _env_path(name: str) -> Path | None:
 class BridgeSettings:
     mcp_url: str
     workspace: Path
+    # False when the workspace is a host's starting directory that spans the whole disk or the home directory:
+    # files then come only from CASSETTE_ALLOWED_ROOTS, never from everything a host happened to start in.
+    workspace_readable: bool = True
     auth_token: str | None = None
     allowed_roots: tuple[Path, ...] = ()
     download_dir: Path | None = None
@@ -59,17 +62,21 @@ class BridgeSettings:
 
     @property
     def temp_root(self) -> Path:
-        """Where local preparation writes its intermediate files."""
-        return self.temp_dir or Path(tempfile.gettempdir()) / "oh-my-cassette"
+        """Where each local job makes its own private directory (`mkdtemp`: a fresh name, mode 0700), never a
+        fixed path another user of the machine could create first."""
+        return self.temp_dir or Path(tempfile.gettempdir())
 
     @property
     def roots(self) -> tuple[Path, ...]:
         """Directories local files may come from, symlinks resolved."""
-        return tuple(root.resolve() for root in (self.workspace, *self.allowed_roots))
+        workspace = (self.workspace,) if self.workspace_readable else ()
+        return tuple(root.resolve() for root in (*workspace, *self.allowed_roots))
 
     @classmethod
     def from_env(cls, cwd: str | os.PathLike[str] | None = None) -> BridgeSettings:
-        workspace = Path(_env("CASSETTE_WORKSPACE") or cwd or os.getcwd()).expanduser().resolve()
+        explicit = _env("CASSETTE_WORKSPACE")
+        workspace = Path(explicit or cwd or os.getcwd()).expanduser().resolve()
+        broad = workspace in (Path(workspace.anchor), Path.home().resolve())
         roots = tuple(
             Path(item).expanduser()
             for item in (_env("CASSETTE_ALLOWED_ROOTS") or "").split(os.pathsep)
@@ -79,6 +86,7 @@ class BridgeSettings:
         return cls(
             mcp_url=_env("CASSETTE_MCP_URL") or (saved.resource if saved else DEFAULT_RESOURCE),
             workspace=workspace,
+            workspace_readable=bool(explicit) or not broad,
             auth_token=_env("CASSETTE_AUTH_TOKEN"),
             allowed_roots=roots,
             download_dir=_env_path("CASSETTE_DOWNLOAD_DIR"),
