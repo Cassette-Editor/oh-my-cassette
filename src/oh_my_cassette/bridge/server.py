@@ -236,7 +236,10 @@ class Bridge:
         try:
             await self.upstream.client()
             if (reason := self.incompatibility()) is not None:
-                raise BridgeError("bridge.upgrade_required", f"{reason}; run `uvx oh-my-cassette@latest`")
+                raise BridgeError(
+                    "bridge.upgrade_required",
+                    f"{reason}; update the oh-my-cassette version the MCP host runs (https://github.com/Cassette-Editor/oh-my-cassette#update)",
+                )
             tool = self.upstream.tool(name)
             if tool is not None and bridge_role(tool.meta) in BRIDGE_ROLES:
                 raise MCPError(types.INVALID_PARAMS, f"Unknown tool: {name}")
@@ -364,7 +367,7 @@ class Bridge:
         elif not connected:
             text = f"Cassette backend at {self.settings.mcp_url} is not reachable: {why}."
         elif reason:
-            text = f"Connected to {self.settings.mcp_url}, but {reason}. Upgrade with `uvx oh-my-cassette@latest`."
+            text = f"Connected to {self.settings.mcp_url}, but {reason}. Update the oh-my-cassette version the MCP host runs: https://github.com/Cassette-Editor/oh-my-cassette#update"
         else:
             text = (
                 f"Connected to {self.settings.mcp_url} ({data['tools']} tools). If they are not listed yet, "

@@ -15,6 +15,7 @@ from tests.reference_remote import ReferenceRemote, RemoteOptions, free_port, se
 from oh_my_cassette.bridge import downloads
 from oh_my_cassette.bridge.downloads import Downloads
 from oh_my_cassette.bridge.errors import BridgeError
+from oh_my_cassette.bridge.files import transfer_guard
 from oh_my_cassette.bridge.server import STATUS_TOOL
 from oh_my_cassette.contract import META_ELAPSED, META_HOST, META_WORKSPACE, DownloadSpec
 
@@ -380,3 +381,74 @@ async def test_undeclared_contract_is_a_plain_proxy(bridge_settings):
     async with serve_remote(remote), bridge_host(bridge_settings(remote.url)) as (_, host):
         result = await host.call_tool("slow_turn", {"steps": 1})
     assert result.structured_content["status"] == "completed"
+
+
+def _spec(remote, name: str, data: bytes) -> DownloadSpec:
+    remote.files[name] = data
+    return DownloadSpec(
+        url=f"{remote.base_url}/files/{name}",
+        file_name=f"{name}.bin",
+        size=len(data),
+        sha256=hashlib.sha256(data).hexdigest(),
+        pointer=None,
+    )
+
+
+async def test_downloads_never_write_through_a_symlink(remote, bridge_settings, tmp_path):
+    settings = bridge_settings(remote.url)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "target").write_bytes(b"precious")
+    exports = settings.downloads
+    exports.mkdir()
+    spec = _spec(remote, "kept", b"0123456789" * 100)
+    (exports / "kept.bin").symlink_to(outside / "target")  # planted under the final name
+    part = exports / f".kept.bin.{hashlib.sha256(spec.url.encode()).hexdigest()[:12]}.part"
+    part.symlink_to(outside / "target")  # and under the part's
+    async with httpx.AsyncClient() as http:
+        path = await Downloads(settings, http).fetch(spec)
+    assert path.name == "kept (1).bin" and path.read_bytes() == b"0123456789" * 100
+    assert (outside / "target").read_bytes() == b"precious" and not part.exists()
+
+
+async def test_downloads_stay_in_the_workspace_unless_a_directory_is_configured(
+    remote, bridge_settings, tmp_path
+):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    settings = bridge_settings(remote.url)
+    settings.downloads.symlink_to(outside, target_is_directory=True)
+    spec = _spec(remote, "kept", b"data")
+    async with httpx.AsyncClient() as http:
+        with pytest.raises(BridgeError) as caught:
+            await Downloads(settings, http).fetch(spec)
+        assert (
+            caught.value.code == "bridge.download_failed" and "CASSETTE_DOWNLOAD_DIR" in caught.value.message
+        )
+        configured = bridge_settings(remote.url, download_dir=outside)
+        assert (await Downloads(configured, http).fetch(spec)).parent == outside.resolve()
+    assert list(outside.iterdir()) == [outside / "kept.bin"]
+
+
+async def test_a_download_redirected_into_the_local_network_is_refused(bridge_settings):
+    endpoint = "https://mcp.example.com/mcp"
+    sent: list[str] = []
+
+    def store(request: httpx.Request) -> httpx.Response:
+        sent.append(str(request.url))
+        return httpx.Response(302, headers={"Location": "https://10.0.0.5/internal"})
+
+    spec = DownloadSpec(
+        url="https://mcp.example.com/downloads/export/1",
+        file_name="cut.mp4",
+        size=None,
+        sha256=None,
+        pointer=None,
+    )
+    hooks = {"request": [transfer_guard(endpoint)]}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(store), event_hooks=hooks) as http:
+        settings = bridge_settings(endpoint)
+        with pytest.raises(BridgeError, match="not a public address"):
+            await Downloads(settings, http).fetch(spec)
+    assert sent == ["https://mcp.example.com/downloads/export/1"]
+    assert list(settings.downloads.iterdir()) == []

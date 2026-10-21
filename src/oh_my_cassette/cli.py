@@ -15,6 +15,7 @@ from mcp.server.stdio import stdio_server
 
 from oh_my_cassette import __version__
 from oh_my_cassette.auth import AuthenticationError, Credentials, login, saved_connection
+from oh_my_cassette.bridge.files import transfer_guard
 from oh_my_cassette.bridge.server import Bridge
 from oh_my_cassette.bridge.settings import BridgeSettings
 
@@ -22,7 +23,8 @@ from oh_my_cassette.bridge.settings import BridgeSettings
 async def serve_stdio(settings: BridgeSettings) -> None:
     # Uploads and downloads: no overall deadline, only the same idle limit as the MCP connection.
     timeout = httpx.Timeout(settings.read_timeout_sec, connect=settings.connect_timeout_sec)
-    async with httpx.AsyncClient(timeout=timeout) as http, anyio.create_task_group() as tg:
+    hooks = {"request": [transfer_guard(settings.mcp_url)]}
+    async with httpx.AsyncClient(timeout=timeout, event_hooks=hooks) as http, anyio.create_task_group() as tg:
         bridge = Bridge(settings, http)
         await tg.start(bridge.run)
         server = bridge.build_server()
@@ -35,7 +37,7 @@ async def _check(args: argparse.Namespace) -> int:
     from oh_my_cassette.conformance import failed, render, run_checks, summary
 
     url = args.url or BridgeSettings.from_env().mcp_url
-    token = args.token or os.environ.get("CASSETTE_AUTH_TOKEN") or await Credentials(url).token()
+    token = os.environ.get("CASSETTE_AUTH_TOKEN") or await Credentials(url).token()
     checks = await run_checks(url, token=token, upload=args.upload, arguments=json.loads(args.arguments))
     print(render(checks, as_json=args.json))
     if not args.json:
@@ -80,6 +82,9 @@ async def _account_command(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> None:
+    if sys.platform == "win32":
+        # Windows otherwise looks up ffmpeg in the working directory, the host's project, before PATH.
+        os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
     level = os.environ.get("OH_MY_CASSETTE_LOG", "WARNING").upper()
     logging.basicConfig(
         level=getattr(logging, level, logging.WARNING),
@@ -110,7 +115,6 @@ def main(argv: list[str] | None = None) -> None:
     check.add_argument(
         "--url", help="MCP endpoint (default: CASSETTE_MCP_URL, the saved connection, or Cassette's)"
     )
-    check.add_argument("--token", help="bearer token (default: CASSETTE_AUTH_TOKEN)")
     check.add_argument("--upload", action="store_true", help="also run an upload round trip")
     check.add_argument(
         "--arguments",

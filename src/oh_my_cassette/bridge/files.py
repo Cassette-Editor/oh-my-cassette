@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import ipaddress
 import json
 import mimetypes
 import shutil
+import socket
 import tempfile
 from collections.abc import AsyncIterator, Awaitable, Callable, Hashable, Mapping
 from dataclasses import dataclass
@@ -84,9 +86,74 @@ def guess_mime(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
+def _riff(head: bytes, form: bytes) -> bool:
+    return head[:4] == b"RIFF" and head[8:12] == form
+
+
+# How the image and audio files a backend takes as they are begin. A file that leaves unchanged must begin
+# like one of its kind, so a document under a picture's or a song's name never goes up as one.
+SIGNATURES: Mapping[str, Callable[[bytes], bool]] = {
+    "image": lambda head: (
+        head.startswith(
+            (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF87a", b"GIF89a", b"BM", b"II*\x00", b"MM\x00*")
+        )
+        or _riff(head, b"WEBP")
+        or head[4:8] == b"ftyp"
+    ),
+    "audio": lambda head: (
+        head.startswith((b"ID3", b"OggS", b"fLaC", b"FORM", b"caff", b"0&\xb2u"))
+        or (len(head) > 1 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0)  # an MPEG audio or ADTS frame
+        or _riff(head, b"WAVE")
+        or head[4:8] == b"ftyp"
+    ),
+}
+
+
+def looks_like(path: Path, mime: str) -> bool:
+    """Whether the file begins like the kind of media its name says it is; kinds without signatures pass."""
+    test = SIGNATURES.get(mime.split("/")[0])
+    if test is None:
+        return True
+    with path.open("rb") as handle:
+        return test(handle.read(16))
+
+
 def same_origin(url: str, other: str) -> bool:
     a, b = urlsplit(url), urlsplit(other)
     return (a.scheme, a.hostname, a.port) == (b.scheme, b.hostname, b.port)
+
+
+def _loopback(host: str | None) -> bool:
+    try:
+        return host == "localhost" or ipaddress.ip_address(host or "").is_loopback
+    except ValueError:
+        return False
+
+
+def transfer_guard(endpoint: str) -> Callable[[httpx.Request], Awaitable[None]]:
+    """A request hook for the client that uploads and downloads: every request, redirects included, goes to
+    the endpoint's origin or to HTTPS on a host whose every address is public, so the URLs a backend hands out
+    cannot point this machine at its own network. A loopback endpoint (a local backend) is trusted with
+    loopback storage too."""
+    local = _loopback(urlsplit(endpoint).hostname)
+
+    async def check(request: httpx.Request) -> None:
+        url = str(request.url)
+        if same_origin(url, endpoint) or (local and _loopback(request.url.host)):
+            return
+        where = f"{request.url.scheme}://{request.url.host}"
+        if request.url.scheme != "https":
+            raise BridgeError("bridge.contract_violation", f"refused {where}: transfers must use HTTPS")
+        try:
+            infos = await anyio.getaddrinfo(
+                request.url.host, request.url.port or 443, type=socket.SOCK_STREAM
+            )
+        except OSError:
+            return  # unresolvable: the request itself fails as a network error
+        if not all(ipaddress.ip_address(str(info[4][0]).split("%")[0]).is_global for info in infos):
+            raise BridgeError("bridge.contract_violation", f"refused {where}: not a public address")
+
+    return check
 
 
 def _sha256(path: Path) -> str:
@@ -297,6 +364,12 @@ class LocalFiles:
         if not real.is_file():
             raise BridgeError("bridge.file_not_found", f"{raw}: not a regular file")
         root = next((root for root in self._settings.roots if real.is_relative_to(root)), None)
+        if root is None and not self._settings.workspace_readable:
+            raise BridgeError(
+                "bridge.file_outside_workspace",
+                f"the MCP host started this bridge in {self._settings.workspace}, too wide to read files from; "
+                "set CASSETTE_WORKSPACE to the project folder, or add the media folder to CASSETTE_ALLOWED_ROOTS",
+            )
         if root is None:
             raise BridgeError(
                 "bridge.file_outside_workspace",
@@ -359,7 +432,7 @@ class LocalFiles:
         """Prepare and upload a call's files; the backend's ref for each real path."""
         root = self._settings.temp_root
         root.mkdir(parents=True, exist_ok=True)
-        workdir = Path(tempfile.mkdtemp(prefix="job-", dir=root))
+        workdir = Path(tempfile.mkdtemp(prefix="oh-my-cassette-job-", dir=root))
         refs: dict[Path, str] = {}
         sends = anyio.CapacityLimiter(UPLOAD_CONCURRENCY)
         try:
@@ -406,6 +479,10 @@ class LocalFiles:
             progress.update(TRANSCODING, percent)
 
         if preparation is None:
+            if not (self._settings.upload_any_type or looks_like(source.path, source.mime)):
+                raise BridgeError(
+                    "bridge.file_type_rejected", f"{source.relative} does not contain {source.mime} data"
+                )
             digest = await sha256_file(source.path)
             original = UploadArtifact(ARTIFACT_ORIGINAL, source.path, source.size, digest, source.mime)
             name = source.path.name
@@ -540,6 +617,11 @@ class LocalFiles:
                 raise BridgeError("bridge.contract_violation", f"{tool_name}: upload URLs must be http(s)")
             if not isinstance(headers, Mapping):
                 raise BridgeError("bridge.contract_violation", f"{tool_name}: put headers must be an object")
+            if refused := sorted(str(k) for k in headers if not _signed_header(str(k))):
+                raise BridgeError(
+                    "bridge.contract_violation",
+                    f"{tool_name}: put header {refused[0]} is not one a backend may set",
+                )
             parts: tuple[int, int] | None = None
             if multipart is not None:
                 plan = multipart if isinstance(multipart, Mapping) else {}
@@ -766,6 +848,31 @@ class LocalFiles:
                 )
             await anyio.sleep(backoff_seconds(attempt, retry_after))
             attempt += 1
+
+
+# Headers a backend may not set on a PUT: they route the request, shape the connection or carry the cookies
+# and proxy credentials of this machine, none of which a signed upload needs.
+REFUSED_PUT_HEADERS = frozenset(
+    {
+        "host",
+        "cookie",
+        "connection",
+        "keep-alive",
+        "upgrade",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "content-length",
+        "expect",
+        "forwarded",
+        "proxy-authorization",
+    }
+)
+
+
+def _signed_header(name: str) -> bool:
+    name = name.lower()
+    return name not in REFUSED_PUT_HEADERS and not name.startswith(("proxy-", "x-forwarded-"))
 
 
 def _whole(value: Any) -> bool:

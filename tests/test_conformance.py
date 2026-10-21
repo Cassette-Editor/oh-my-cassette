@@ -93,21 +93,17 @@ async def test_unreachable_endpoint_fails_fast():
 
 
 def _cli(*args: str) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+    env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "CASSETTE_AUTH_TOKEN": REFERENCE_TOKEN}
     return subprocess.run(
         [sys.executable, "-m", "oh_my_cassette", *args], capture_output=True, text=True, env=env, timeout=60
     )
 
 
 async def test_cli_exit_codes(remote):
-    ok = await anyio.to_thread.run_sync(
-        _cli, "check", "--url", remote.url, "--token", REFERENCE_TOKEN, "--upload", "--json"
-    )
+    ok = await anyio.to_thread.run_sync(_cli, "check", "--url", remote.url, "--upload", "--json")
     assert ok.returncode == 0, ok.stderr
     assert {entry["status"] for entry in json.loads(ok.stdout)} == {"pass"}
 
-    down = await anyio.to_thread.run_sync(
-        _cli, "check", "--url", f"http://127.0.0.1:{free_port()}/mcp", "--token", REFERENCE_TOKEN
-    )
+    down = await anyio.to_thread.run_sync(_cli, "check", "--url", f"http://127.0.0.1:{free_port()}/mcp")
     assert down.returncode == 1
     assert down.stdout.startswith("FAIL") and "0 passed, 0 warnings, 1 failed" in down.stdout
