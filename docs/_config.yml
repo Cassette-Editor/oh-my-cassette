@@ -1,0 +1,5 @@
+title: Oh My Cassette
+description: >-
+  Open-source MCP bridge that connects Claude Code, Codex, OpenCode and Hermes
+  to the Cassette video-editing agent.
+theme: jekyll-theme-cayman
