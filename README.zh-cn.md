@@ -55,10 +55,10 @@ codex plugin add oh-my-cassette@cassette-editor
 
 ```bash
 # Hermes
-hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
+hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.1
 ```
 
-OpenCode 与其它 MCP 宿主见下文[安装](#安装)。运行 `uvx oh-my-cassette==0.5.0 login`，在浏览器中用邮箱验证码登录并授权。如果宿主不支持刷新工具列表，重启 agent 后直接说：
+OpenCode 与其它 MCP 宿主见下文[安装](#安装)。运行 `uvx oh-my-cassette==0.5.1 login`，在浏览器中用邮箱验证码登录并授权。如果宿主不支持刷新工具列表，重启 agent 后直接说：
 
 > *新建一个 Cassette 项目，导入 ./footage 里的素材，剪一个 30 秒的旅行短片，开头加标题。*
 
@@ -66,9 +66,9 @@ OpenCode 与其它 MCP 宿主见下文[安装](#安装)。运行 `uvx oh-my-cass
 
 0.5 是重写。0.4 插件自带剪辑运行时、配乐搜索和 Hermes 网关；0.5 只是通往 Cassette MCP 服务的一层薄 bridge，你的 agent 看到的工具都来自服务。
 
-- **重新登录**：`uvx oh-my-cassette==0.5.0 login`。0.4 的密码和令牌不再使用。
+- **重新登录**：`uvx oh-my-cassette==0.5.1 login`。0.4 的密码和令牌不再使用。
 - **工具是新的。** 项目、剪辑对话、提问、计划、撤销、素材、分析和导出都由服务提供并自带说明；0.4 的工具名（`cassette_run_job`、
-  `cassette_ingest_media`、`cassette_match_bgm` 等）已删除。重新安装插件，或把宿主配置改为 `uvx oh-my-cassette==0.5.0`。
+  `cassette_ingest_media`、`cassette_match_bgm` 等）已删除。重新安装插件，或把宿主配置改为 `uvx oh-my-cassette==0.5.1`。
 - **项目在你的 Cassette 账号里**，和网页版、Cassette for Mac 里的是同一批；每次回答带的编辑器链接打开的就是当前项目。0.4 的会话不会迁移。
 - **Hermes** 现在是普通 MCP 宿主，请移除 0.4 的网关插件。
 
@@ -106,9 +106,9 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 ## 环境要求
 
 - 实现约定 v1 的 Cassette MCP 服务，以及获准使用 Cassette 的账号。可以用
-  `uvx oh-my-cassette==0.5.0 check --url <端点>` 检查。服务连不上或不接受令牌时，
+  `uvx oh-my-cassette==0.5.1 check --url <端点>` 检查。服务连不上或不接受令牌时，
   工具列表里只有 `cassette_bridge_status`。
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5+。`uvx oh-my-cassette==0.5.0` 会自行解析 Python 3.11 或更新版本。
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5+。`uvx oh-my-cassette==0.5.1` 会自行解析 Python 3.11 或更新版本。
 - 导入视频需要 [ffmpeg](https://ffmpeg.org/download.html)（含 ffprobe）：`brew install ffmpeg`、
   `sudo apt install ffmpeg` 或 `winget install ffmpeg`。视频在你的电脑上转码后再上传；带 `zscale` 的
   ffmpeg 还能正确地把 HDR 素材色调映射到 SDR。
@@ -139,12 +139,12 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 
 ### Claude Code
 
-推荐用顶部两条插件命令。先运行 `oh-my-cassette login` 完成浏览器登录，插件沿用已保存的目标，并以 10 分钟工具超时启动 `uvx oh-my-cassette==0.5.0`。
+推荐用顶部两条插件命令。先运行 `oh-my-cassette login` 完成浏览器登录，插件沿用已保存的目标，并以 10 分钟工具超时启动 `uvx oh-my-cassette==0.5.1`。
 
 不用插件、只在项目范围接入：把 [`.mcp.json`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/.mcp.json) 复制到你的项目，或者：
 
 ```bash
-claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.5.0
+claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.5.1
 ```
 
 skill 在 [`skills/cassette-video-edit/SKILL.md`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/skills/cassette-video-edit/SKILL.md)，随插件一起安装。
@@ -154,7 +154,7 @@ skill 在 [`skills/cassette-video-edit/SKILL.md`](https://github.com/Cassette-Ed
 顶部两条插件命令（[`.codex-plugin/plugin.json`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/.codex-plugin/plugin.json) 内联声明了 server，`tool_timeout_sec: 600`，并从你的 shell 透传 `CASSETTE_*` 变量）。或者直接加 server：
 
 ```bash
-codex mcp add cassette -- uvx oh-my-cassette==0.5.0
+codex mcp add cassette -- uvx oh-my-cassette==0.5.1
 ```
 
 ### OpenCode
@@ -166,7 +166,7 @@ codex mcp add cassette -- uvx oh-my-cassette==0.5.0
   "mcp": {
     "cassette": {
       "type": "local",
-      "command": ["uvx", "oh-my-cassette==0.5.0"],
+      "command": ["uvx", "oh-my-cassette==0.5.1"],
       "timeout": 600000
     }
   }
@@ -177,7 +177,7 @@ codex mcp add cassette -- uvx oh-my-cassette==0.5.0
 
 ```bash
 mkdir -p ~/.config/opencode/skills/cassette-video-edit
-curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.5.0/skills/cassette-video-edit/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.5.1/skills/cassette-video-edit/SKILL.md \
   -o ~/.config/opencode/skills/cassette-video-edit/SKILL.md
 ```
 
@@ -186,10 +186,10 @@ OpenCode 没有 MCP elicitation，没关系：剪辑 agent 的提问会作为普
 ### Hermes
 
 ```bash
-hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
+hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.1
 
 mkdir -p ~/.hermes/skills/cassette-video-edit
-curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.5.0/skills/cassette-video-edit/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.5.1/skills/cassette-video-edit/SKILL.md \
   -o ~/.hermes/skills/cassette-video-edit/SKILL.md
 ```
 
@@ -197,7 +197,7 @@ curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.5
 
 ### 其它 MCP 宿主
 
-命令 `uvx`，参数 `["oh-my-cassette==0.5.0"]`，stdio 传输，工具超时 10 分钟，再加上面的环境变量。没有 uv 的机器可以用 `pipx run oh-my-cassette==0.5.0`。
+命令 `uvx`，参数 `["oh-my-cassette==0.5.1"]`，stdio 传输，工具超时 10 分钟，再加上面的环境变量。没有 uv 的机器可以用 `pipx run oh-my-cassette==0.5.1`。
 
 ## 一个 turn 长什么样
 
@@ -217,7 +217,7 @@ agent： （调用服务的导出工具）
 ## 检查服务
 
 ```bash
-uvx oh-my-cassette==0.5.0 check --url http://127.0.0.1:8790/mcp --upload \
+uvx oh-my-cassette==0.5.1 check --url http://127.0.0.1:8790/mcp --upload \
   --arguments '{"project_id": "<一个测试项目>"}'
 ```
 
