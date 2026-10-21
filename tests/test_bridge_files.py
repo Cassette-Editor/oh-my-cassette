@@ -283,6 +283,21 @@ async def test_a_malformed_prepare_declaration_is_a_contract_violation(bridge_se
     assert remote.begun == []
 
 
+async def test_a_typed_refusal_of_the_upload_reaches_the_host_as_the_service_sent_it(
+    bridge_settings, workspace
+):
+    refusal = {
+        "code": "project_media_on_device",
+        "message": "Import them in Cassette for Mac.",
+        "retryable": False,
+    }
+    remote = ReferenceRemote(options=RemoteOptions(begin_refusal=refusal))
+    async with serve_remote(remote), bridge_host(bridge_settings(remote.url)) as (_, host):
+        result = await host.call_tool("set_cover", {"image": "media/slide.png"})
+    assert result.is_error and result.structured_content == {"error": refusal}
+    assert remote.put_headers == [] and remote.calls == []
+
+
 async def test_a_begin_without_put_targets_is_a_contract_violation(bridge_settings, workspace):
     remote = ReferenceRemote(options=RemoteOptions(begin_without_puts=True))
     async with serve_remote(remote), bridge_host(bridge_settings(remote.url)) as (_, host):

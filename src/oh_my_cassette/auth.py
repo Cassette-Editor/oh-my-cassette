@@ -22,7 +22,6 @@ from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
-from uuid import UUID
 
 import anyio
 import httpx
@@ -34,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 CLIENT_ID = "oh-my-cassette"
 SCOPE = "cassette:agent"
-DEFAULT_WEB_RESOURCE = "https://trycassette.online/mcp"
+DEFAULT_RESOURCE = "https://mcp.trycassette.online/mcp"
 SERVICE = "oh-my-cassette.oauth"
 
 
@@ -57,7 +56,7 @@ def _secure_url(value: str) -> str:
     if url.username or url.password or url.fragment:
         raise AuthenticationError("Invalid authentication URL")
     if url.scheme != "https" and not (url.scheme == "http" and url.hostname == "127.0.0.1"):
-        raise AuthenticationError("Authentication requires HTTPS or an explicit loopback target")
+        raise AuthenticationError("Authentication requires HTTPS or an explicit loopback address")
     return value
 
 
@@ -99,7 +98,6 @@ class Grant(BaseModel):
 
 @dataclass(frozen=True)
 class Connection:
-    target: str
     resource: str
     issuer: str
     subject: str
@@ -107,7 +105,6 @@ class Connection:
     authorization_endpoint: str
     token_endpoint: str
     revocation_endpoint: str
-    profile_id: str | None = None
 
     @property
     def key(self) -> str:
@@ -116,15 +113,14 @@ class Connection:
         ).hexdigest()
 
 
-def saved_connection(target: str | None = None) -> Connection | None:
-    root = auth_directory()
+def resource_url() -> str:
+    """The Cassette MCP endpoint a new sign-in authorizes: `CASSETTE_MCP_URL`, else Cassette's own."""
+    return os.environ.get("CASSETTE_MCP_URL") or DEFAULT_RESOURCE
+
+
+def saved_connection() -> Connection | None:
     try:
-        selected = target or json.loads((root / "active.json").read_text())["target"]
-        if selected not in ("web", "desktop"):
-            raise ValueError("Invalid target")
-        connection = Connection(**json.loads((root / f"{selected}.json").read_text()))
-        if connection.target != selected:
-            raise ValueError("Target mismatch")
+        connection = Connection(**json.loads((auth_directory() / "connection.json").read_text()))
         _secure_url(connection.resource)
         _secure_url(connection.issuer)
         for endpoint in (
@@ -168,22 +164,18 @@ def _answer(response: httpx.Response) -> dict:
     return value
 
 
-def discover(resource: str, *, expected_issuer: str | None = None) -> dict:
+def discover(resource: str) -> dict:
     _secure_url(resource)
     url = urlsplit(resource)
     metadata_url = f"{url.scheme}://{url.netloc}/.well-known/oauth-protected-resource{url.path}"
     with auth_http() as http:
         resource_metadata = _answer(http.get(metadata_url))
         if resource_metadata.get("resource") != resource:
-            raise AuthenticationError("Resource metadata does not match the chosen target")
+            raise AuthenticationError("Resource metadata does not match this endpoint")
         issuers = resource_metadata.get("authorization_servers")
         if not isinstance(issuers, list) or len(issuers) != 1 or not isinstance(issuers[0], str):
             raise AuthenticationError("Expected one Cassette authorization service")
         issuer = _secure_url(issuers[0])
-        if expected_issuer is not None and issuer != expected_issuer:
-            raise AuthenticationError(
-                "Desktop authorization issuer does not match the open local profile", 403
-            )
         metadata = _answer(http.get(f"{issuer}/.well-known/openid-configuration"))
         if metadata.get("issuer") != issuer or "S256" not in metadata.get(
             "code_challenge_methods_supported", []
@@ -194,61 +186,6 @@ def discover(resource: str, *, expected_issuer: str | None = None) -> dict:
             if not isinstance(endpoint, str) or _origin(_secure_url(endpoint)) != _origin(issuer):
                 raise AuthenticationError("Invalid authorization endpoint")
         return metadata
-
-
-class DesktopDiscovery(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    authentication: str
-    issuer: str
-    resource: str
-    subject: UUID
-    profileId: UUID
-    deviceId: UUID
-    profileName: str = Field(min_length=1, max_length=100)
-
-
-def desktop_discovery() -> DesktopDiscovery:
-    default = (
-        Path.home() / "Library/Application Support/Cassette/mcp.json"
-        if sys.platform == "darwin"
-        else Path.home() / ".config/Cassette/mcp.json"
-    )
-    file = Path(os.environ.get("CASSETTE_DESKTOP_DISCOVERY", default)).expanduser()
-    try:
-        device = DesktopDiscovery.model_validate_json(file.read_text())
-        url, issuer = urlsplit(device.resource), urlsplit(device.issuer)
-        if (
-            device.authentication != "local"
-            or url.scheme != "http"
-            or url.hostname != "127.0.0.1"
-            or not url.port
-            or url.username
-            or url.password
-            or url.query
-            or url.fragment
-            or url.path != f"/devices/{device.deviceId}/mcp"
-            or issuer.scheme != "http"
-            or issuer.hostname != "127.0.0.1"
-            or not issuer.port
-            or issuer.username
-            or issuer.password
-            or issuer.query
-            or issuer.fragment
-            or issuer.path not in ("", "/")
-        ):
-            raise ValueError("Invalid discovery")
-        return device
-    except (OSError, KeyError, TypeError, ValueError) as exc:
-        raise AuthenticationError(
-            "Open a local profile in Cassette Desktop before choosing --target desktop", 503
-        ) from exc
-
-
-def target_resource(target: str) -> tuple[str, str | None]:
-    if target == "web":
-        return os.environ.get("CASSETTE_MCP_URL") or DEFAULT_WEB_RESOURCE, None
-    device = desktop_discovery()
-    return device.resource, str(device.subject)
 
 
 class Credentials:
@@ -278,17 +215,8 @@ class Credentials:
         connection = self.connection or saved_connection()
         if not connection or connection.resource != self.resource:
             raise AuthenticationError(
-                "Not connected. For Web, run oh-my-cassette login --target web. For Desktop, open a local profile, run oh-my-cassette login --target desktop and allow the connection. Restart the MCP host if it cannot refresh tools."
+                "Not connected. Run oh-my-cassette login and sign in with your Cassette account. Restart the MCP host if it cannot refresh tools."
             )
-        if connection.target == "desktop":
-            device = desktop_discovery()
-            if (
-                connection.resource != device.resource
-                or connection.issuer != device.issuer
-                or connection.subject != str(device.subject)
-                or connection.profile_id != str(device.profileId)
-            ):
-                raise AuthenticationError("Authorize the local profile currently open in Desktop", 403)
         return connection
 
     def _read(self, connection: Connection) -> Grant:
@@ -297,7 +225,7 @@ class Credentials:
             raise AuthenticationError("No saved grant. Run oh-my-cassette login")
         grant = Grant.model_validate_json(value)
         if grant.subject != connection.subject:
-            raise AuthenticationError("Saved grant belongs to another account or local profile", 403)
+            raise AuthenticationError("Saved grant belongs to another account", 403)
         return grant
 
     def _token(self) -> str:
@@ -404,19 +332,13 @@ class Credentials:
                 self._store().delete_password(SERVICE, connection.key)
             except PasswordDeleteError:
                 pass
-            (root / f"{connection.target}.json").unlink(missing_ok=True)
-            if saved_connection() is None:
-                (root / "active.json").unlink(missing_ok=True)
+            (root / "connection.json").unlink(missing_ok=True)
 
 
-def login(target: str, *, no_browser: bool = False, cancelled: threading.Event | None = None) -> Connection:
-    desktop = desktop_discovery() if target == "desktop" else None
-    resource, desktop_subject = (
-        (desktop.resource, str(desktop.subject)) if desktop else target_resource(target)
-    )
-    metadata = discover(resource, expected_issuer=desktop.issuer) if desktop else discover(resource)
-    if desktop and metadata["issuer"] != desktop.issuer:
-        raise AuthenticationError("Desktop authorization issuer does not match the open local profile", 403)
+def login(*, no_browser: bool = False, cancelled: threading.Event | None = None) -> Connection:
+    """Signs in with the Cassette account in the browser and saves the one connection every project is reached through."""
+    resource = resource_url()
+    metadata = discover(resource)
     state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(48)
     result: queue.Queue[str | AuthenticationError] = queue.Queue(maxsize=1)
     issuer = metadata["issuer"]
@@ -480,8 +402,7 @@ def login(target: str, *, no_browser: bool = False, cancelled: threading.Event |
             }
         )
     )
-    action = "allow the local Desktop connection" if target == "desktop" else "sign in to web"
-    print(f"Open this URL to {action}:\n{authorize}", file=sys.stderr, flush=True)
+    print(f"Open this URL to sign in to Cassette:\n{authorize}", file=sys.stderr, flush=True)
     try:
         if not no_browser:
             webbrowser.open(authorize)
@@ -525,25 +446,15 @@ def login(target: str, *, no_browser: bool = False, cancelled: threading.Event |
             or principal.get("clientId") != CLIENT_ID
             or "agent" not in principal.get("capabilities", [])
         ):
-            raise AuthenticationError("Authorization is not valid for this target", 403)
-        if desktop_subject and principal.get("subject") != desktop_subject:
-            raise AuthenticationError("Authorize the local profile currently open in Desktop", 403)
-        if desktop and (
-            principal.get("profileId") != str(desktop.profileId)
-            or principal.get("capabilities") != ["agent"]
-            or desktop_discovery() != desktop
-        ):
-            raise AuthenticationError("Authorize the local profile currently open in Desktop", 403)
+            raise AuthenticationError("Authorization is not valid for this endpoint", 403)
         connection = Connection(
-            target,
             resource,
             issuer,
             principal["subject"],
-            principal.get("profileName") or principal.get("email") or principal["subject"],
+            principal.get("email") or principal["subject"],
             metadata["authorization_endpoint"],
             metadata["token_endpoint"],
             metadata["revocation_endpoint"],
-            str(desktop.profileId) if desktop else None,
         )
         if str(tokens.get("token_type", "")).lower() != "bearer":
             raise AuthenticationError("Unsupported token type")
@@ -557,8 +468,7 @@ def login(target: str, *, no_browser: bool = False, cancelled: threading.Event |
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         with FileLock(root / f"{connection.key}.lock", timeout=30):
             native_keyring().set_password(SERVICE, connection.key, grant.model_dump_json())
-            _write_public(root / f"{target}.json", asdict(connection))
-            _write_public(root / "active.json", {"target": target})
+            _write_public(root / "connection.json", asdict(connection))
         return connection
     except (KeyringError, ValidationError, LockTimeout) as exc:
         raise AuthenticationError(

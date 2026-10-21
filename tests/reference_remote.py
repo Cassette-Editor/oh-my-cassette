@@ -114,6 +114,7 @@ class RemoteOptions:
     bad_pointer: bool = False
     bad_prepare: bool = False
     begin_without_puts: bool = False
+    begin_refusal: dict[str, Any] | None = None  # upload begin answers this typed error instead
     token: str | None = REFERENCE_TOKEN
     handshake_only: bool = False
     instructions: str | None = "Reference Cassette backend: import local media with import_media."
@@ -348,7 +349,15 @@ class ReferenceRemote:
             )
             async def upload_begin(
                 files: list[dict[str, Any]], tool: str = "", arguments: dict[str, Any] | None = None
-            ) -> dict[str, Any]:
+            ) -> types.CallToolResult:
+                if opts.begin_refusal:
+                    return types.CallToolResult(
+                        content=[
+                            types.TextContent(type="text", text=json.dumps({"error": opts.begin_refusal}))
+                        ],
+                        structured_content={"error": opts.begin_refusal},
+                        is_error=True,
+                    )
                 uploads: list[dict[str, Any]] = []
                 for item in files:
                     self.begun.append({"tool": tool, "arguments": arguments, **item})
@@ -378,7 +387,10 @@ class ReferenceRemote:
                                 put["multipart"] = {"partSize": plan[0], "partCount": plan[1]}
                             entry["puts"].append(put)
                     uploads.append(entry)
-                return {"uploads": uploads}
+                return types.CallToolResult(
+                    content=[types.TextContent(type="text", text=json.dumps({"uploads": uploads}))],
+                    structured_content={"uploads": uploads},
+                )
 
             if opts.parts_tool:
 

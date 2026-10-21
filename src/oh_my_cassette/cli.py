@@ -49,23 +49,21 @@ async def _account_command(args: argparse.Namespace) -> int:
         cancelled = threading.Event()
         try:
             connection = await anyio.to_thread.run_sync(
-                lambda: login(args.target, no_browser=args.no_browser, cancelled=cancelled),
+                lambda: login(no_browser=args.no_browser, cancelled=cancelled),
                 abandon_on_cancel=True,
             )
         finally:
             cancelled.set()
-        print(
-            f"Signed in as {connection.email} → {connection.target}. Restart the MCP host if its tool list does not update."
-        )
+        print(f"Signed in as {connection.email}. Restart the MCP host if its tool list does not update.")
         return 0
-    connection = saved_connection(args.target)
+    connection = saved_connection()
     if not connection:
-        print("Not signed in. Run oh-my-cassette login --target web (or desktop).")
+        print("Not signed in. Run oh-my-cassette login.")
         return 1
     credentials = Credentials(connection.resource, connection=connection)
     if args.command == "logout":
         await credentials.logout()
-        print(f"Signed out of {connection.target}.")
+        print(f"Signed out of {connection.email}.")
     else:
         identity = await credentials.identity()
         print(
@@ -73,7 +71,6 @@ async def _account_command(args: argparse.Namespace) -> int:
                 {
                     "signed_in": True,
                     "email": identity["email"],
-                    "target": connection.target,
                     "resource": connection.resource,
                     "expires_at": identity["expiresAt"],
                 }
@@ -98,9 +95,6 @@ def main(argv: list[str] | None = None) -> None:
     commands.add_parser("serve", help="run the stdio bridge (the default)")
     for name in ("login", "status", "logout"):
         account = commands.add_parser(name, help=f"{name} a saved Cassette connection")
-        account.add_argument(
-            "--target", choices=("web", "desktop"), default="web" if name == "login" else None
-        )
         if name == "login":
             account.add_argument(
                 "--no-browser",
@@ -109,7 +103,7 @@ def main(argv: list[str] | None = None) -> None:
             )
     check = commands.add_parser("check", help="check a Cassette MCP endpoint against the bridge contract")
     check.add_argument(
-        "--url", help="MCP endpoint (default: CASSETTE_MCP_URL, saved target, or Cassette Web)"
+        "--url", help="MCP endpoint (default: CASSETTE_MCP_URL, the saved connection, or Cassette's)"
     )
     check.add_argument("--token", help="bearer token (default: CASSETTE_AUTH_TOKEN)")
     check.add_argument("--upload", action="store_true", help="also run an upload round trip")

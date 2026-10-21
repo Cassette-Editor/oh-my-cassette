@@ -59,9 +59,9 @@ error code is Cassette's own: follow its message and the tool description.
 | --- | --- |
 | `bridge.backend_unreachable` | A tool that names its request in an argument has already been sent again by the bridge while the call's wait lasted. If the message says the connection broke during the call, the work may still be running: call the same tool again with the same arguments to pick it up. If it says Cassette did not take the call, retry after `retry_after_seconds` when the error gives it. Otherwise call `cassette_bridge_status` once, tell the user the service is not reachable and at which URL, and retry only after it reports connected. |
 | `bridge.rate_limited` | Cassette is taking too many requests and did not run the call. Wait `retry_after_seconds` (from the error), then call the same tool again with the same arguments; do not retry sooner. |
-| `bridge.forbidden` | This account or grant cannot access the target. Ask the user to check access or use the account currently open in Desktop. Do not repeatedly trigger login. |
+| `bridge.forbidden` | This account or grant cannot access Cassette. Ask the user to check that they signed in with the account of their projects. Do not repeatedly trigger login. |
 | `bridge.auth_unavailable` | Online authentication or secure credential storage is unavailable. Tell the user to restore the connection or unlock the system keyring, then retry. |
-| `bridge.unauthorized` | The service refused the token. Tell the user to run `oh-my-cassette login --target web` or explicitly choose `--target desktop`. The browser handles email verification and consent. Restart the MCP host only if it cannot refresh tools. Do not repeatedly trigger login. |
+| `bridge.unauthorized` | The service refused the token. Tell the user to run `oh-my-cassette login`. The browser handles email verification and consent. Restart the MCP host only if it cannot refresh tools. Do not repeatedly trigger login. |
 | `bridge.upgrade_required` | Tell the user to update the plugin (`uvx oh-my-cassette@latest`, or reinstall it). Do not retry. |
 | `bridge.protocol_unsupported` | The service at that URL is too old for this plugin (it does not speak MCP 2026-07-28). Tell the user the Cassette service must be updated. Do not retry. |
 | `bridge.file_not_found` | Ask the user for the correct path. |

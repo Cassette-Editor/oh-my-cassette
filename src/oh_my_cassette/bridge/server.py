@@ -152,7 +152,7 @@ class Bridge:
             if self.settings.auth_token
             else BridgeError(
                 "bridge.unauthorized",
-                "For Web, sign in with oh-my-cassette login --target web. For Desktop, open a local profile, run oh-my-cassette login --target desktop and allow the connection. Tools refresh after authorization; restart the MCP host if it cannot refresh its tool list.",
+                "Sign in with oh-my-cassette login, using the Cassette account of your projects. Tools refresh after authorization; restart the MCP host if it cannot refresh its tool list.",
             )
         )
 
@@ -163,7 +163,7 @@ class Bridge:
         if self.upstream.unauthorized:
             return "bridge.unauthorized", self._unauthorized().message
         if self.upstream.forbidden:
-            return "bridge.forbidden", "This account or grant cannot access the selected target (HTTP 403)."
+            return "bridge.forbidden", "This account or grant cannot access Cassette (HTTP 403)."
         if self.upstream.protocol_unsupported:
             return "bridge.protocol_unsupported", protocol_unsupported(self.upstream.last_error or "").message
         return "bridge.backend_unreachable", self.upstream.last_error or "not connected yet"

@@ -57,7 +57,7 @@ on the next call.
 
 ## Environment variables
 
-`CASSETTE_MCP_URL` (optional target override), `CASSETTE_AUTH_TOKEN` (advanced credential override), `CASSETTE_WORKSPACE` (default: the server's working directory), `CASSETTE_ALLOWED_ROOTS`,
+`CASSETTE_MCP_URL` (optional endpoint override), `CASSETTE_AUTH_TOKEN` (advanced credential override), `CASSETTE_WORKSPACE` (default: the server's working directory), `CASSETTE_ALLOWED_ROOTS`,
 `CASSETTE_DOWNLOAD_DIR`, `CASSETTE_MAX_UPLOAD_MB`, `CASSETTE_MAX_DOWNLOAD_MB`, `CASSETTE_UPLOAD_ANY_TYPE`,
 `CASSETTE_LOCAL_WAIT_SEC`, `CASSETTE_FFMPEG`, `CASSETTE_FFPROBE`, `CASSETTE_TEMP_DIR`,
 `CASSETTE_CONNECT_TIMEOUT_SEC`, `OH_MY_CASSETTE_LOG`. See README.md for defaults.

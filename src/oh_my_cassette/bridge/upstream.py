@@ -173,7 +173,7 @@ class Upstream:
         if response.status_code == 401:
             self._rejections += 1
         elif response.status_code == 403:
-            raise AuthenticationError("This account or grant cannot access the selected target", 403)
+            raise AuthenticationError("This account or grant cannot access Cassette", 403)
         elif response.status_code in GATEWAY_STATUSES:
             self._gateway_errors += 1
         elif response.status_code in (RATE_LIMITED, REFUSED):
@@ -346,7 +346,7 @@ class Upstream:
     async def client(self) -> Client:
         if not await self.wait_connected(self.settings.connect_timeout_sec):
             if self.forbidden:
-                raise AuthenticationError("This account or grant cannot access the selected target", 403)
+                raise AuthenticationError("This account or grant cannot access Cassette", 403)
             if self.unauthorized:
                 raise Unauthorized(self.last_error or "HTTP 401 Unauthorized")
             if self.protocol_unsupported and self.last_error:

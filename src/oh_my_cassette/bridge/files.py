@@ -107,6 +107,20 @@ def _text(result: types.CallToolResult) -> str:
     )
 
 
+def _service_error(result: types.CallToolResult) -> BridgeError | None:
+    """The service's own typed refusal of an upload tool call, which the host sees as the service sent it."""
+    error = (result.structured_content or {}).get("error")
+    if not isinstance(error, Mapping):
+        return None
+    code, message, retryable = error.get("code"), error.get("message"), error.get("retryable")
+    if not (isinstance(code, str) and isinstance(message, str) and isinstance(retryable, bool)):
+        return None
+    after = error.get("retry_after_seconds")
+    return BridgeError(
+        code, message, retryable=retryable, retry_after=after if isinstance(after, (int, float)) else None
+    )
+
+
 @dataclass(frozen=True)
 class LocalSource:
     """A local file a call names, after the local policy: its real path and identity."""
@@ -373,7 +387,9 @@ class LocalFiles:
         except MCPError as exc:
             raise BridgeError("bridge.upload_failed", f"{tool.name}: {exc.message}", retryable=True) from exc
         if result.is_error:
-            raise BridgeError("bridge.upload_failed", f"{tool.name}: {_text(result)}", retryable=True)
+            raise _service_error(result) or BridgeError(
+                "bridge.upload_failed", f"{tool.name}: {_text(result)}", retryable=True
+            )
         return result
 
     async def _upload(self, call: LocalCall, files: list[UploadFile], job: LocalJob) -> dict[Path, str]:

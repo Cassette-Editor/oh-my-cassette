@@ -21,7 +21,8 @@ import anyio
 import pytest
 from tests.bridge_support import bridge_host
 
-from oh_my_cassette.bridge.settings import DEFAULT_MCP_URL, BridgeSettings
+from oh_my_cassette.auth import DEFAULT_RESOURCE
+from oh_my_cassette.bridge.settings import BridgeSettings
 
 pytestmark = [pytest.mark.live, pytest.mark.anyio]
 
@@ -68,7 +69,7 @@ def settings(tmp_path: Path) -> BridgeSettings:
     workspace = tmp_path / "workspace"
     (workspace / "media").mkdir(parents=True)
     return BridgeSettings(
-        mcp_url=os.environ.get("CASSETTE_MCP_URL") or DEFAULT_MCP_URL,
+        mcp_url=os.environ.get("CASSETTE_MCP_URL") or DEFAULT_RESOURCE,
         workspace=workspace.resolve(),
         auth_token=os.environ.get("CASSETTE_AUTH_TOKEN") or None,
         temp_dir=tmp_path / "bridge-temp",

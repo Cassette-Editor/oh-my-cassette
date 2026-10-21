@@ -80,11 +80,11 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 
 ## 配置
 
-先运行 `oh-my-cassette login --target web`。连接已登录的 Desktop 时，显式使用 `--target desktop`；失败不会切换到 Web。凭证保存在系统钥匙串，无需复制 token。下面是可选覆盖配置。
+先运行一次 `oh-my-cassette login`，用你项目所在的 Cassette 账号登录：浏览器里输入邮件验证码并确认授权。一次登录即可访问该账号的所有项目，无论是在网页版还是 Cassette for Mac 里创建的。素材在 Mac 上的项目在那台 Mac 的 App 里打开；读取它的画面或声音、导出它都需要那台 Mac 在线，它的素材也在那台 Mac 上导入。凭证保存在系统钥匙串，无需复制 token。下面是可选覆盖配置。
 
 | 变量 | 默认值 | 含义 |
 | --- | --- | --- |
-| `CASSETTE_MCP_URL` | 已保存目标，否则 Cassette Web | 显式覆盖 MCP 端点。 |
+| `CASSETTE_MCP_URL` | 已保存的连接，否则 `https://mcp.trycassette.online/mcp` | 显式覆盖 MCP 端点。 |
 | `CASSETTE_AUTH_TOKEN` | 未设置 | 高级兼容入口；默认使用 `login` 和系统钥匙串。仍受账号、scope 和 resource 校验。不要写入共享配置。 |
 | `CASSETTE_WORKSPACE` | 宿主启动 server 时的目录 | 相对路径从这里解析，服务也可以据此记住这个目录对应的项目。 |
 | `CASSETTE_ALLOWED_ROOTS` | 未设置 | 额外允许读取本地文件的目录（用 `:` 分隔，Windows 上用 `;`）。 |

@@ -51,7 +51,7 @@ def test_claude_plugin_manifest():
     mcp = load(".mcp.json")["mcpServers"]["cassette"]
     assert mcp["command"] == "uvx" and mcp["args"] == [f"oh-my-cassette=={VERSION}"]
     assert mcp["timeout"] == HOST_TIMEOUT_SEC * 1000
-    assert not mcp.get("env"), "Plugin must preserve the saved OAuth target"
+    assert not mcp.get("env"), "Plugin must preserve the saved OAuth connection"
     marketplace = load(".claude-plugin/marketplace.json")
     assert marketplace["plugins"][0]["version"] == VERSION
     assert marketplace["plugins"][0]["source"]["ref"] == "release"
@@ -72,7 +72,7 @@ def test_opencode_and_registry_manifests():
     opencode = load("opencode.json")["mcp"]["cassette"]
     assert opencode["type"] == "local" and opencode["command"] == ["uvx", f"oh-my-cassette=={VERSION}"]
     assert opencode["timeout"] == HOST_TIMEOUT_SEC * 1000
-    assert not opencode.get("environment"), "Plugin must preserve the saved OAuth target"
+    assert not opencode.get("environment"), "Plugin must preserve the saved OAuth connection"
     server = load("server.json")
     assert server["version"] == VERSION
     package = server["packages"][0]

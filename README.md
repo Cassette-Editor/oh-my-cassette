@@ -85,11 +85,11 @@ Which formats a tool accepts, and how files are prepared before upload, is decla
 
 ## Configuration
 
-Sign in once with `oh-my-cassette login --target web`. To connect to the open Desktop profile, use `--target desktop` and allow the connection on its local authorization page. Desktop needs no cloud login and can pair offline. Login, status and logout use your operating-system keyring; no token needs to be copied. Environment variables below are optional overrides.
+Sign in once with `oh-my-cassette login`, using the Cassette account of your projects: the browser asks for the emailed code and your consent. One sign-in reaches every project of the account, whether it was made on the web or in Cassette for Mac. A project whose media lie on a Mac opens in the app on that Mac; reading its pictures or sound and exporting it need that Mac online, and its media are imported there. Login, status and logout use your operating-system keyring; no token needs to be copied. Environment variables below are optional overrides.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `CASSETTE_MCP_URL` | saved target, otherwise Cassette Web | Explicit MCP endpoint override. |
+| `CASSETTE_MCP_URL` | the saved connection, otherwise `https://mcp.trycassette.online/mcp` | Explicit MCP endpoint override. |
 | `CASSETTE_AUTH_TOKEN` | unset | Advanced bearer-token override. Normally use `login`; the same account, scope and resource checks apply. Never place it in shared configuration. |
 | `CASSETTE_WORKSPACE` | the directory the host starts the server in | Where relative paths resolve, and the directory the service may remember a project for. |
 | `CASSETTE_ALLOWED_ROOTS` | unset | Extra directories local files may come from (`:`-separated; `;` on Windows). |
