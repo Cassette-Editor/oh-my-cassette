@@ -17,14 +17,15 @@ The standing release PR (`release-type: python`) bumps, in one commit:
 
 `tests/test_manifests.py` fails if any of these disagree, so CI on the release PR is the check.
 
-Merging the release PR creates the `vX.Y.Z` tag and the GitHub Release, which triggers:
+Merging the release PR creates the `vX.Y.Z` tag and the GitHub Release. A release made with
+`GITHUB_TOKEN` starts no workflow, so `release-please.yml` then:
 
-1. `publish-pypi.yml` — `uv build`, checks that the tag equals the package version, publishes the
-   wheel and sdist through the `pypi` environment with OIDC (no API token), then waits until PyPI
-   serves the version and publishes `server.json` to the MCP registry (`mcp-publisher login
-   github-oidc`; ownership is proven by the `mcp-name: io.github.Cassette-Editor/oh-my-cassette`
+1. force-pushes the `release` branch to the new tag and verifies it;
+2. dispatches `publish-pypi.yml` on the tag — `uv build`, checks that the tag equals the package
+   version, publishes the wheel and sdist through the `pypi` environment with OIDC (no API
+   token), then waits until PyPI serves the version and publishes `server.json` to the MCP
+   registry (`mcp-publisher login github-oidc`; ownership is proven by the `mcp-name: io.github.Cassette-Editor/oh-my-cassette`
    marker in the README that PyPI shows).
-2. `release-please.yml` — force-pushes the `release` branch to the new tag and verifies it.
 
 ## Update channels
 
@@ -33,6 +34,10 @@ Merging the release PR creates the `vX.Y.Z` tag and the GitHub Release, which tr
 | Claude Code plugin, Codex plugin | PyPI (`uvx oh-my-cassette==X.Y.Z`, pinned in the manifests) | `release` branch (marketplace entries pin `ref: release`) |
 | OpenCode, Hermes, any MCP host | PyPI, the pin the user wrote in their config | — |
 | MCP registry | PyPI | `server.json` on the tag |
+
+`version.txt` (`0.5.0`, never bumped) exists only for 0.4 installs, whose runtime reads
+`release/version.txt` once a day and offers its update command when that number is newer. Any
+version above 0.4 is enough for them to reach the current release, so leave the file as it is.
 
 Do not enable branch protection on `release`; the workflow force-pushes it. Never commit to
 `release` directly.
