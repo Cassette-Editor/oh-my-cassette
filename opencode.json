@@ -5,7 +5,7 @@
       "type": "local",
       "command": [
         "uvx",
-        "oh-my-cassette==0.5.0"
+        "oh-my-cassette==0.5.1"
       ],
       "timeout": 600000,
       "enabled": true

@@ -68,7 +68,7 @@ ask Cassette.
 | You want to | Do this |
 |---|---|
 | Limit what can be read | Keep media in the workspace, or grant narrow `CASSETTE_ALLOWED_ROOTS` — never your whole home directory |
-| Sign this machine out | `uvx oh-my-cassette==0.5.0 logout` — revokes the grant, then deletes the keyring entry |
+| Sign this machine out | `uvx oh-my-cassette==0.5.1 logout` — revokes the grant, then deletes the keyring entry |
 | Remove everything local | Sign out, delete `~/.config/oh-my-cassette`, and uninstall the plugin |
 | Delete a cloud project now | Delete it in Cassette, or leave it idle for three days |
 
