@@ -93,8 +93,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("-V", "--version", action="version", version=f"oh-my-cassette {__version__}")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("serve", help="run the stdio bridge (the default)")
-    for name in ("login", "status", "logout"):
-        account = commands.add_parser(name, help=f"{name} a saved Cassette connection")
+    account_commands = {
+        "login": "sign in to Cassette in the browser and save the connection",
+        "status": "show the saved connection",
+        "logout": "forget the saved connection",
+    }
+    for name, help_text in account_commands.items():
+        account = commands.add_parser(name, help=help_text)
         if name == "login":
             account.add_argument(
                 "--no-browser",
