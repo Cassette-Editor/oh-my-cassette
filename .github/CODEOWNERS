@@ -14,6 +14,7 @@
 # Release automation and CI.
 /.github/            @epc314 @Crimson725
 /release-please-config.json    @epc314 @Crimson725
+/.plugin-scanner.toml          @epc314 @Crimson725
 
 # Security-sensitive surfaces: credentials, what may be read and sent, what is written.
 /src/oh_my_cassette/auth.py              @epc314 @Crimson725
