@@ -11,9 +11,9 @@
 
 <p align="center">
   <a href="https://pypi.org/project/oh-my-cassette/"><img alt="PyPI" src="https://img.shields.io/pypi/v/oh-my-cassette?label=oh-my-cassette" /></a>
-  <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue" /></a>
+  <a href="https://github.com/Cassette-Editor/oh-my-cassette/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue" /></a>
   <a href="https://discord.gg/qd9NY4k8d7"><img alt="Discord" src="https://img.shields.io/discord/1514649803626250452?logo=discord&logoColor=white&label=Discord&color=5865F2" /></a>
-  <a href="./README.zh-cn.md">中文</a>
+  <a href="https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.zh-cn.md">中文</a>
 </p>
 
 ---
@@ -113,14 +113,14 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
   says why.
 
 The rules between the plugin and the service are defined in
-[`src/oh_my_cassette/contract.py`](./src/oh_my_cassette/contract.py); `oh-my-cassette check` verifies a
+[`src/oh_my_cassette/contract.py`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/src/oh_my_cassette/contract.py); `oh-my-cassette check` verifies a
 service against them.
 
 ## Requirements
 
 - An invited Cassette account and a Cassette MCP service that implements contract v1. Check it with `uvx oh-my-cassette==0.5.0 check --url <endpoint>`. While the
   service is unreachable or refuses the token, only `cassette_bridge_status` is listed.
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5 or newer. `uvx oh-my-cassette==0.5.0` resolves Python 3.11–3.13 by itself.
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5 or newer. `uvx oh-my-cassette==0.5.0` resolves Python 3.11 or newer by itself.
 - [ffmpeg](https://ffmpeg.org/download.html) (with ffprobe) to import video: `brew install ffmpeg`,
   `sudo apt install ffmpeg` or `winget install ffmpeg`. Video is transcoded on your machine before it
   uploads. A build with `zscale` also tone-maps HDR footage properly.
@@ -154,17 +154,17 @@ Sign in once with `oh-my-cassette login`, using the Cassette account of your pro
 
 Plugin (recommended): the two commands at the top. The plugin uses the connection saved by `oh-my-cassette login` and starts `uvx oh-my-cassette==0.5.0` with a 10-minute tool timeout.
 
-Project scope without the plugin: copy [`.mcp.json`](./.mcp.json) into your project, or run:
+Project scope without the plugin: copy [`.mcp.json`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/.mcp.json) into your project, or run:
 
 ```bash
 claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.5.0
 ```
 
-The skill lives in [`skills/cassette-video-edit/SKILL.md`](./skills/cassette-video-edit/SKILL.md) and ships with the plugin.
+The skill lives in [`skills/cassette-video-edit/SKILL.md`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/skills/cassette-video-edit/SKILL.md) and ships with the plugin.
 
 ### Codex
 
-Plugin: the two commands at the top ([`.codex-plugin/plugin.json`](./.codex-plugin/plugin.json) declares the server inline with `tool_timeout_sec: 600` and passes the `CASSETTE_*` variables through from your shell). Or add the server directly:
+Plugin: the two commands at the top ([`.codex-plugin/plugin.json`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/.codex-plugin/plugin.json) declares the server inline with `tool_timeout_sec: 600` and passes the `CASSETTE_*` variables through from your shell). Or add the server directly:
 
 ```bash
 codex mcp add cassette -- uvx oh-my-cassette==0.5.0
@@ -190,7 +190,7 @@ Then copy the skill so OpenCode loads it:
 
 ```bash
 mkdir -p ~/.config/opencode/skills/cassette-video-edit
-curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/skills/cassette-video-edit/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.5.0/skills/cassette-video-edit/SKILL.md \
   -o ~/.config/opencode/skills/cassette-video-edit/SKILL.md
 ```
 
@@ -202,7 +202,7 @@ OpenCode has no MCP elicitation, which is fine: the editing agent's questions co
 hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
 
 mkdir -p ~/.hermes/skills/cassette-video-edit
-curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/skills/cassette-video-edit/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.5.0/skills/cassette-video-edit/SKILL.md \
   -o ~/.hermes/skills/cassette-video-edit/SKILL.md
 ```
 
@@ -210,7 +210,7 @@ Set `mcp_servers.cassette.timeout: 600` in `~/.hermes/config.yaml` so a call's b
 
 ### Any other MCP host
 
-Command `uvx`, args `["oh-my-cassette==0.5.0"]`, stdio transport, a tool timeout of 10 minutes, and the environment variables above. No `pipx`? `pipx run oh-my-cassette==0.5.0` works too.
+Command `uvx`, args `["oh-my-cassette==0.5.0"]`, stdio transport, a tool timeout of 10 minutes, and the environment variables above. No uv? `pipx run oh-my-cassette==0.5.0` works too.
 
 ## How a turn looks
 
@@ -243,7 +243,7 @@ answers the handshake-era `initialize` fails the transport check, and the bridge
 
 ## Update
 
-Bump the pin in your host config (`oh-my-cassette==<new version>`) or reinstall the plugin; `uvx` fetches the new wheel on next start. Releases: [CHANGELOG.md](./CHANGELOG.md).
+Bump the pin in your host config (`oh-my-cassette==<new version>`) or reinstall the plugin; `uvx` fetches the new wheel on next start. Releases: [CHANGELOG.md](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md).
 
 ## Development
 
@@ -256,7 +256,7 @@ uv run oh-my-cassette check --url <endpoint>       # conformance check
 ```
 
 `tests/reference_remote.py` is an executable reference service for the contract;
-[RELEASING.md](./RELEASING.md) has the PyPI release flow.
+[RELEASING.md](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/RELEASING.md) has the PyPI release flow.
 
 ## Credits
 
@@ -271,10 +271,16 @@ trims and reorders it, and adds place names, a title and music.
 
 The music is "Pamgaea" by Kevin MacLeod (incompetech.com)<br />
 Licensed under Creative Commons: By Attribution 4.0<br />
-https://creativecommons.org/licenses/by/4.0/
+https://creativecommons.org/licenses/by/4.0/<br />
+The teaser uses an excerpt of it.
 
 ## License
 
-MIT. Oh My Cassette is the client; the Cassette service has its own terms.
+The code is MIT. Oh My Cassette is the client; the Cassette service has its own terms.
+
+The demo recording (`assets/demo-claude-code.gif`), the teaser frames (`assets/turkey-teaser.jpg`)
+and the teaser video attached to the release contain the works credited above. They are not covered
+by the MIT license and remain under their own licenses (CC BY 3.0 for the footage, CC BY 4.0 for
+the music).
 
 <sub>MCP registry: `mcp-name: io.github.Cassette-Editor/oh-my-cassette`</sub>

@@ -1,5 +1,5 @@
 name: 🐛 Plugin bug
-description: Something in the plugin itself is broken — install, auth, MCP tools, transport, or file handling.
+description: Something in the plugin itself is broken — install, sign-in, the MCP connection, or file handling.
 labels: ["bug", "needs-triage"]
 body:
   - type: markdown
@@ -17,9 +17,9 @@ body:
       label: Scope
       options:
         - label: >-
-            This is about the plugin — install, authentication, MCP tools,
-            transport, file handling, or host integration. It is not about the
-            quality of the edit the AI produced.
+            This is about the plugin — install, sign-in, the MCP connection,
+            file handling, or host integration. It is not about the quality of
+            the edit the AI produced.
           required: true
         - label: I searched existing issues and discussions for this problem.
           required: true
@@ -32,7 +32,7 @@ body:
       placeholder: |
         1. Ran `claude plugin install oh-my-cassette@cassette-editor`
         2. Asked the agent to edit ./footage
-        3. Expected the import to start; got `file_not_found` instead
+        3. Expected the import to start; got `bridge.file_not_found` instead
     validations:
       required: true
 
@@ -46,19 +46,6 @@ body:
         - OpenCode
         - Hermes Agent
         - Other MCP host
-        - Web demo
-    validations:
-      required: true
-
-  - type: dropdown
-    id: transport
-    attributes:
-      label: Transport
-      description: The default is `api`. Pick "not sure" if you never changed it.
-      options:
-        - api (default)
-        - browser
-        - not sure
     validations:
       required: true
 
@@ -68,9 +55,8 @@ body:
       label: How it was installed
       options:
         - Plugin marketplace (claude/codex plugin install)
-        - Hermes plugin manager
-        - Git checkout / install_plugin.py
-        - Web demo
+        - uvx in the host config (`uvx oh-my-cassette==X.Y.Z`)
+        - Git checkout (`uv run oh-my-cassette`)
         - Other
     validations:
       required: true

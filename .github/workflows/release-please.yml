@@ -5,15 +5,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
-  actions: write
+permissions: {}
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         id: release
@@ -21,45 +22,58 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # release-please bumps every bare version field (pyproject, __init__, plugin manifests,
-      # server.json) itself. The `uvx oh-my-cassette==X.Y.Z` pins inside the host manifests are
-      # not bare fields, so this keeps them in step on the release PR branch.
+      # server.json) itself. The `oh-my-cassette==X.Y.Z` pins in the host manifests and the docs, and
+      # the tag the plugin marketplaces install from, are not bare fields, so this keeps them in step on
+      # the release PR branch.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: ${{ steps.release.outputs.pr }}
         with:
           ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Sync the uvx version pins on the release PR
+      - name: Sync the version pins on the release PR
         if: ${{ steps.release.outputs.pr }}
         run: |
           set -eu
           version="$(python3 -c 'import json;print(json.load(open(".release-please-manifest.json"))["."])')"
-          for file in .mcp.json .codex-plugin/plugin.json opencode.json; do
-            sed -i -E "s/oh-my-cassette==[0-9]+\.[0-9]+\.[0-9]+([-.a-zA-Z0-9]*)?/oh-my-cassette==${version}/g" "$file"
+          for file in .mcp.json .codex-plugin/plugin.json opencode.json README.md README.zh-cn.md \
+            llms.txt llms-install.md SUPPORT.md SECURITY.md docs/index.md docs/privacy.md docs/terms.md; do
+            sed -i -E "s/oh-my-cassette==[0-9]+\.[0-9]+\.[0-9]+([-.a-zA-Z0-9]*[a-zA-Z0-9])?/oh-my-cassette==${version}/g" "$file"
           done
-          if git diff --quiet; then exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore: pin host manifests to ${version}"
-          git push
+          for file in .claude-plugin/marketplace.json .agents/plugins/marketplace.json; do
+            sed -i -E "s/\"ref\": \"v[0-9]+\.[0-9]+\.[0-9]+\"/\"ref\": \"v${version}\"/" "$file"
+          done
+          sed -i -E "s#oh-my-cassette/v[0-9]+\.[0-9]+\.[0-9]+/skills/#oh-my-cassette/v${version}/skills/#g" README.md README.zh-cn.md
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "chore: pin host manifests and docs to ${version}"
+            git push
+          fi
 
-      # Codex and Claude install the plugin manifests from `release`, so it must always
-      # point at the newest tag. The runtime itself comes from PyPI (publish-pypi.yml).
+      # Pull requests and pushes made with GITHUB_TOKEN start no workflow, so the release PR would
+      # never get the `ci-ok` check main requires; a dispatch is the one event GITHUB_TOKEN may start.
+      - name: Run CI on the release PR
+        if: ${{ steps.release.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref "${{ fromJSON(steps.release.outputs.pr).headBranchName }}"
+
+      # Claude and Codex install the plugin from the tag the marketplace entries name, and tags
+      # cannot be moved, so a release is only reachable once its tag exists.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: ${{ steps.release.outputs.release_created }}
-      - name: Fast-forward the release channel to the new tag
-        if: ${{ steps.release.outputs.release_created }}
-        run: git push --force origin HEAD:release
-
-      - name: Verify the release channel serves the new tag
+        with:
+          ref: ${{ steps.release.outputs.tag_name }}
+      - name: Verify the tag pins its own version everywhere
         if: ${{ steps.release.outputs.release_created }}
         run: |
-          tag_sha="$(git rev-parse HEAD)"
-          channel_sha="$(git ls-remote origin refs/heads/release | cut -f1)"
-          test "$tag_sha" = "$channel_sha"
+          set -eu
           grep -q "oh-my-cassette==${{ steps.release.outputs.version }}" .mcp.json
+          grep -q '"ref": "${{ steps.release.outputs.tag_name }}"' .claude-plugin/marketplace.json
+          grep -q '"ref": "${{ steps.release.outputs.tag_name }}"' .agents/plugins/marketplace.json
 
       # A release created with GITHUB_TOKEN raises no `release` event, so publishing is
-      # dispatched on the tag; a dispatch is the one event GITHUB_TOKEN may start.
+      # dispatched on the tag; the `pypi` environment then waits for a maintainer's approval.
       - name: Publish the tag to PyPI
         if: ${{ steps.release.outputs.release_created }}
         env:

@@ -4,7 +4,21 @@ venv
 __pycache__
 **/__pycache__
 *.pyc
+.pytest_cache
+.ruff_cache
 dist
 cassette-exports
 assets
 tests
+# Local credentials and agent state never go into an image.
+.env
+.env.*
+*.pem
+*.key
+.pypirc
+.claude
+.codex
+.serena
+.impeccable
+AGENTS.md
+CLAUDE.md

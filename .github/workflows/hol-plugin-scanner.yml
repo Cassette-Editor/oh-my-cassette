@@ -14,12 +14,14 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write  # uploads the SARIF report
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: HOL Plugin Scanner
