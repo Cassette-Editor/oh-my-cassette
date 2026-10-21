@@ -13,10 +13,15 @@ Release Please derives versions and changelog entries from commits on `main`:
 - `feat: …` — user-visible feature;
 - `fix: …` — bug fix;
 - `feat!: …` or a `BREAKING CHANGE:` footer — breaking change;
-- `docs: …`, `ci: …`, `chore: …`, `test: …`, and `refactor: …` — no release bump by themselves.
+- `docs: …`, `ci: …`, `chore: …`, `test: …`, and `refactor: …` — no release bump by themselves
+  (`release-please-config.json` hides them from the changelog).
 
 PRs are squash-merged using the PR title, so the title must itself be a conventional commit line.
-Branch from `main` and target `main`. The `release` branch is machine-owned (see [RELEASING.md](RELEASING.md)).
+Branch from `main` and target `main`; a PR merges once the `ci-ok` check is green. The `release`
+branch is frozen at 0.5.0 for 0.4 installs and takes no commits (see [RELEASING.md](RELEASING.md)).
+
+By contributing you agree that your contribution is licensed under the MIT License of this
+repository.
 
 ## Development setup
 
@@ -47,15 +52,18 @@ claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -- uv run --directory "$
 - `tests/test_manifests.py` pins the version and the `uvx oh-my-cassette==X.Y.Z` pins across every
   manifest, checks the host timeouts and environment, and checks that both skill copies are identical,
   name no backend tool and cover every `bridge.*` error code.
-- The live test runs against a local Cassette-Editor stack and its MCP service, and is skipped by
-  default (it exports, which renders through the backend's configured provider):
+- The live test is for maintainers: it runs against a Cassette MCP service and an invited account
+  (production by default, or a local Cassette stack through `CASSETTE_MCP_URL`), and is skipped by
+  default because it imports media and exports, which renders through the service's provider:
 
   ```bash
-  RUN_CASSETTE_LIVE=1 CASSETTE_AUTH_TOKEN=... uv run pytest tests/live -q -rs
+  uvx oh-my-cassette login                     # once, or set CASSETTE_AUTH_TOKEN
+  RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q -rs
   ```
 
-CI installs ffmpeg and runs lint and the suite on Linux only (Python 3.11 and 3.13), builds the wheel
-and starts it once with `uvx`. Keep it credential-free and deterministic.
+CI installs ffmpeg and runs lint and the suite on Linux only (Python 3.11, 3.13 and 3.14), builds the
+wheel and starts it once with `uvx`; the `ci-ok` job sums them up. Keep it credential-free and
+deterministic.
 
 ## Changing the contract
 

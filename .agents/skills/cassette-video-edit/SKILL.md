@@ -22,6 +22,9 @@ them, and when they disagree with anything you remember, they win.
    the editor link points come from the latest result, not from memory.
 4. **Render only when asked.** Export or render only when the user asks to export, render, download,
    or finish.
+5. **Say where the media goes.** When the user has not asked for Cassette by name in this
+   conversation, tell them before the first upload that the files they named go to the Cassette
+   service for editing, and go on once they agree.
 
 ## Local files
 

@@ -11,9 +11,9 @@
 
 <p align="center">
   <a href="https://pypi.org/project/oh-my-cassette/"><img alt="PyPI" src="https://img.shields.io/pypi/v/oh-my-cassette?label=oh-my-cassette" /></a>
-  <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue" /></a>
+  <a href="https://github.com/Cassette-Editor/oh-my-cassette/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue" /></a>
   <a href="https://discord.gg/qd9NY4k8d7"><img alt="Discord" src="https://img.shields.io/discord/1514649803626250452?logo=discord&logoColor=white&label=Discord&color=5865F2" /></a>
-  <a href="./README.md">English</a>
+  <a href="https://github.com/Cassette-Editor/oh-my-cassette/blob/main/README.md">English</a>
 </p>
 
 ---
@@ -100,7 +100,7 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
   `retry_after_seconds`）；服务连不上或不接受令牌时，工具列表里只有一个 `cassette_bridge_status`，
   调用它能看到原因。
 
-插件和服务之间的约定定义在 [`src/oh_my_cassette/contract.py`](./src/oh_my_cassette/contract.py)，
+插件和服务之间的约定定义在 [`src/oh_my_cassette/contract.py`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/src/oh_my_cassette/contract.py)，
 `oh-my-cassette check` 可以按它检查一个服务。
 
 ## 环境要求
@@ -108,7 +108,7 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 - 实现约定 v1 的 Cassette MCP 服务，以及获准使用 Cassette 的账号。可以用
   `uvx oh-my-cassette==0.5.0 check --url <端点>` 检查。服务连不上或不接受令牌时，
   工具列表里只有 `cassette_bridge_status`。
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5+。`uvx oh-my-cassette==0.5.0` 会自行解析 Python 3.11–3.13。
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5+。`uvx oh-my-cassette==0.5.0` 会自行解析 Python 3.11 或更新版本。
 - 导入视频需要 [ffmpeg](https://ffmpeg.org/download.html)（含 ffprobe）：`brew install ffmpeg`、
   `sudo apt install ffmpeg` 或 `winget install ffmpeg`。视频在你的电脑上转码后再上传；带 `zscale` 的
   ffmpeg 还能正确地把 HDR 素材色调映射到 SDR。
@@ -140,17 +140,17 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 
 推荐用顶部两条插件命令。先运行 `oh-my-cassette login` 完成浏览器登录，插件沿用已保存的目标，并以 10 分钟工具超时启动 `uvx oh-my-cassette==0.5.0`。
 
-不用插件、只在项目范围接入：把 [`.mcp.json`](./.mcp.json) 复制到你的项目并替换 `${user_config.*}`，或者：
+不用插件、只在项目范围接入：把 [`.mcp.json`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/.mcp.json) 复制到你的项目，或者：
 
 ```bash
 claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.5.0
 ```
 
-skill 在 [`skills/cassette-video-edit/SKILL.md`](./skills/cassette-video-edit/SKILL.md)，随插件一起安装。
+skill 在 [`skills/cassette-video-edit/SKILL.md`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/skills/cassette-video-edit/SKILL.md)，随插件一起安装。
 
 ### Codex
 
-顶部两条插件命令（[`.codex-plugin/plugin.json`](./.codex-plugin/plugin.json) 内联声明了 server，`tool_timeout_sec: 600`，并从你的 shell 透传 `CASSETTE_*` 变量）。或者直接加 server：
+顶部两条插件命令（[`.codex-plugin/plugin.json`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/.codex-plugin/plugin.json) 内联声明了 server，`tool_timeout_sec: 600`，并从你的 shell 透传 `CASSETTE_*` 变量）。或者直接加 server：
 
 ```bash
 codex mcp add cassette -- uvx oh-my-cassette==0.5.0
@@ -176,7 +176,7 @@ codex mcp add cassette -- uvx oh-my-cassette==0.5.0
 
 ```bash
 mkdir -p ~/.config/opencode/skills/cassette-video-edit
-curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/skills/cassette-video-edit/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.5.0/skills/cassette-video-edit/SKILL.md \
   -o ~/.config/opencode/skills/cassette-video-edit/SKILL.md
 ```
 
@@ -188,7 +188,7 @@ OpenCode 没有 MCP elicitation，没关系：剪辑 agent 的提问会作为普
 hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
 
 mkdir -p ~/.hermes/skills/cassette-video-edit
-curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/skills/cassette-video-edit/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.5.0/skills/cassette-video-edit/SKILL.md \
   -o ~/.hermes/skills/cassette-video-edit/SKILL.md
 ```
 
@@ -227,7 +227,7 @@ bridge 也会以 `bridge.protocol_unsupported` 拒绝它。
 
 ## 更新
 
-改宿主配置里的版本号（`oh-my-cassette==<新版本>`）或重装插件；`uvx` 下次启动时拉取新 wheel。版本记录见 [CHANGELOG.md](./CHANGELOG.md)。
+改宿主配置里的版本号（`oh-my-cassette==<新版本>`）或重装插件；`uvx` 下次启动时拉取新 wheel。版本记录见 [CHANGELOG.md](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md)。
 
 ## 开发
 
@@ -239,7 +239,7 @@ uv run oh-my-cassette                              # bridge 本体（stdio）
 uv run oh-my-cassette check --url <endpoint>       # 一致性检查
 ```
 
-`tests/reference_remote.py` 是一个可执行的参考服务。PyPI 发布流程见 [RELEASING.md](./RELEASING.md)。
+`tests/reference_remote.py` 是一个可执行的参考服务。PyPI 发布流程见 [RELEASING.md](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/RELEASING.md)。
 
 ## 署名
 
@@ -254,10 +254,14 @@ uv run oh-my-cassette check --url <endpoint>       # 一致性检查
 
 音乐为 "Pamgaea" Kevin MacLeod (incompetech.com)<br />
 Licensed under Creative Commons: By Attribution 4.0<br />
-https://creativecommons.org/licenses/by/4.0/
+https://creativecommons.org/licenses/by/4.0/<br />
+预告片使用了其中的一段。
 
 ## 许可证
 
-MIT。Oh My Cassette 是客户端；Cassette 服务有自己的条款。
+代码采用 MIT 许可。Oh My Cassette 是客户端；Cassette 服务有自己的条款。
+
+演示录屏（`assets/demo-claude-code.gif`）、预告片截帧（`assets/turkey-teaser.jpg`）和 release 附带的预告片
+包含上面致谢的作品，不在 MIT 许可范围内，仍适用各自的许可（素材为 CC BY 3.0，音乐为 CC BY 4.0）。
 
 <sub>MCP registry: `mcp-name: io.github.Cassette-Editor/oh-my-cassette`</sub>

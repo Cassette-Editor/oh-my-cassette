@@ -22,7 +22,7 @@ That split decides where a given problem can be solved, so it is worth knowing b
 | The edit came back bad — wrong shots, odd pacing, the agent misread the request | [Discussions](https://github.com/Cassette-Editor/oh-my-cassette/discussions) |
 | Cassette account, access, or billing | [Cassette](https://trycassette.online) |
 | A question, an idea, or a cut you want to show off | [Discussions](https://github.com/Cassette-Editor/oh-my-cassette/discussions) or [Discord](https://discord.gg/qd9NY4k8d7) |
-| A security vulnerability | [Private advisory](https://github.com/Cassette-Editor/oh-my-cassette/security/advisories/new) — see [SECURITY.md](./SECURITY.md) |
+| A security vulnerability | [Private vulnerability report](https://github.com/Cassette-Editor/oh-my-cassette/security/advisories/new) — see [SECURITY.md](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SECURITY.md) |
 
 Not sure which side a problem is on? Ask in Discussions. Guessing wrong costs you nothing and we
 would rather route it than have you not report it.

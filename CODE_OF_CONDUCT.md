@@ -58,9 +58,10 @@ community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the maintainers privately by direct-messaging a maintainer on
-[Discord](https://discord.gg/qd9NY4k8d7). All complaints will be reviewed and
-investigated promptly and fairly.
+reported privately to the maintainers, [@Crimson725](https://github.com/Crimson725)
+and [@epc314](https://github.com/epc314), by direct message on
+[Discord](https://discord.gg/qd9NY4k8d7). A report about one of them goes to the
+other. All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the
 reporter of any incident.
