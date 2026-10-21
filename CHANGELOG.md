@@ -11,11 +11,16 @@ conventional commits.
 
 ### ⚠ BREAKING CHANGES
 
-* 0.5 — a bridge to the Cassette MCP service ([#88](https://github.com/Cassette-Editor/oh-my-cassette/issues/88))
+* The plugin is now a stdio bridge to the Cassette MCP service, and the tools your agent sees are the service's. Sign in again with `uvx oh-my-cassette==0.5.0 login`; the 0.4 tools, sessions, music search and Hermes gateway are gone. See "Upgrading from 0.4" in the README ([#88](https://github.com/Cassette-Editor/oh-my-cassette/issues/88)) ([0a1bf8e](https://github.com/Cassette-Editor/oh-my-cassette/commit/0a1bf8e3797c0f51e01c32fbc6d2657f5f3daf16))
 
 ### Features
 
-* 0.5 — a bridge to the Cassette MCP service ([#88](https://github.com/Cassette-Editor/oh-my-cassette/issues/88)) ([0a1bf8e](https://github.com/Cassette-Editor/oh-my-cassette/commit/0a1bf8e3797c0f51e01c32fbc6d2657f5f3daf16))
+* Published on PyPI: hosts start it with `uvx oh-my-cassette==0.5.0`.
+* `login`, `status` and `logout` sign in through the browser and keep one saved connection in the system keyring.
+* Local files are transcoded with ffmpeg into the renditions the service declares; each file uploads while the next is prepared, in parts, four transfers at a time, and an interrupted upload resumes when the file is imported again.
+* Exports download into `cassette-exports/`, resuming an interrupted download.
+* The bridge reconnects after a deploy, sends a turn again once when the connection drops, and while the service cannot be reached lists only `cassette_bridge_status`, which says why.
+* `oh-my-cassette check` verifies a Cassette MCP service against the bridge contract.
 
 ## [0.4.19](https://github.com/Cassette-Editor/oh-my-cassette/compare/v0.4.18...v0.4.19) (2026-09-02)
 
