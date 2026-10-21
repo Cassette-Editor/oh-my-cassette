@@ -22,7 +22,7 @@ codex plugin marketplace add https://github.com/Cassette-Editor/oh-my-cassette.g
 codex plugin add oh-my-cassette@cassette-editor
 ```
 
-Then sign in once with `uvx oh-my-cassette==0.5.0 login`. Requires [uv](https://docs.astral.sh/uv/),
+Then sign in once with `uvx oh-my-cassette==0.5.1 login`. Requires [uv](https://docs.astral.sh/uv/),
 `ffmpeg` for video, and an invited [Cassette](https://trycassette.online) account. Other hosts and
 every option are in the [README](https://github.com/Cassette-Editor/oh-my-cassette#readme).
 
