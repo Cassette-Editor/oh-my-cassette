@@ -4,6 +4,7 @@ venv
 __pycache__
 **/__pycache__
 *.pyc
+dist
+cassette-exports
 assets
-docs
 tests

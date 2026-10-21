@@ -3,11 +3,12 @@
   "mcp": {
     "cassette": {
       "type": "local",
-      "command": ["python3", "scripts/run_local_mcp.py"],
-      "enabled": true,
-      "environment": {
-        "CASSETTE_MCP_HOST": "opencode"
-      }
+      "command": [
+        "uvx",
+        "oh-my-cassette==0.5.0"
+      ],
+      "timeout": 600000,
+      "enabled": true
     }
   }
 }

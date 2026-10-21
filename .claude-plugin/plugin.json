@@ -1,7 +1,7 @@
 {
   "name": "oh-my-cassette",
-  "version": "0.4.19",
-  "description": "Edit local project media through a self-contained stdio MCP runtime that connects directly to Cassette.",
+  "version": "0.5.0",
+  "description": "Edit video with the Cassette agent from Claude Code: import local media, send editing turns, undo or revert them, export.",
   "author": {
     "name": "Oh My Cassette contributors",
     "url": "https://github.com/Cassette-Editor/oh-my-cassette"
@@ -15,5 +15,5 @@
     "media",
     "mcp"
   ],
-  "mcpServers": "./.claude-plugin/mcp.json"
+  "mcpServers": "./.mcp.json"
 }
