@@ -78,7 +78,10 @@ async def test_accepted_files_upload_unchanged_and_refs_replace_paths(
         {"role": "original", "size": len(data), "sha256": _sha(data), "mimeType": "image/png"}
     ]
     assert png["preparation"] is None and wav["preparation"] is None
-    assert [h["content-type"] for h in remote.put_headers] == ["image/png", guess_mime(FIXTURES / "tone.wav")]
+    # each file goes up as soon as it is ready, so the two PUTs may arrive in either order
+    assert sorted(h["content-type"] for h in remote.put_headers) == sorted(
+        ["image/png", guess_mime(FIXTURES / "tone.wav")]
+    )
 
 
 async def test_known_content_is_not_uploaded_again(remote, bridge_settings, workspace):
