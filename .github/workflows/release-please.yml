@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   release-please:
@@ -56,6 +57,14 @@ jobs:
           channel_sha="$(git ls-remote origin refs/heads/release | cut -f1)"
           test "$tag_sha" = "$channel_sha"
           grep -q "oh-my-cassette==${{ steps.release.outputs.version }}" .mcp.json
+
+      # A release created with GITHUB_TOKEN raises no `release` event, so publishing is
+      # dispatched on the tag; a dispatch is the one event GITHUB_TOKEN may start.
+      - name: Publish the tag to PyPI
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run publish-pypi.yml --ref "${{ steps.release.outputs.tag_name }}"
 
       # The MCP registry entry is published by publish-pypi.yml once the wheel is on PyPI,
       # because the registry validates the PyPI package before accepting the version.
