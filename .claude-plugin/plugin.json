@@ -1,6 +1,6 @@
 {
   "name": "oh-my-cassette",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Edit video with the Cassette agent from Claude Code: import local media, send editing turns, undo or revert them, export.",
   "author": {
     "name": "Oh My Cassette contributors",
