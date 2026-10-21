@@ -51,6 +51,15 @@ def auth_directory() -> Path:
     ).expanduser()
 
 
+def private_auth_directory() -> Path:
+    """The auth directory, created if needed and kept to its owner (0700) every time it is written to."""
+    root = auth_directory()
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        root.chmod(0o700)
+    return root
+
+
 def _secure_url(value: str) -> str:
     url = urlsplit(value)
     if url.username or url.password or url.fragment:
@@ -232,8 +241,7 @@ class Credentials:
         if self.explicit_token:
             return self.explicit_token
         connection = self._connection()
-        root = auth_directory()
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root = private_auth_directory()
         with FileLock(root / f"{connection.key}.lock", timeout=30):
             grant = self._read(connection)
             if grant.expires_at <= time.time() + 60:
@@ -464,8 +472,7 @@ def login(*, no_browser: bool = False, cancelled: threading.Event | None = None)
             subject=principal["subject"],
             expires_at=time.time() + float(tokens["expires_in"]),
         )
-        root = auth_directory()
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root = private_auth_directory()
         with FileLock(root / f"{connection.key}.lock", timeout=30):
             native_keyring().set_password(SERVICE, connection.key, grant.model_dump_json())
             _write_public(root / "connection.json", asdict(connection))
