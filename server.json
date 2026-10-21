@@ -2,9 +2,9 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Cassette-Editor/oh-my-cassette",
   "title": "Oh My Cassette",
-  "description": "Chat-driven AI video montage: beat-synced cuts, auto-matched music, subtitles, transitions.",
-  "version": "0.4.19",
-  "websiteUrl": "https://cassette-editor.github.io/oh-my-cassette/",
+  "description": "Video editing through the Cassette agent: import media, edit by chat turn, read the timeline, export",
+  "version": "0.5.0",
+  "websiteUrl": "https://github.com/Cassette-Editor/oh-my-cassette",
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/assets/logo-400.png",
@@ -18,5 +18,33 @@
     "url": "https://github.com/Cassette-Editor/oh-my-cassette",
     "source": "github",
     "id": "1265161922"
-  }
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "oh-my-cassette",
+      "version": "0.5.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "CASSETTE_MCP_URL",
+          "description": "Optional explicit target override; normally use the target saved by oh-my-cassette login.",
+          "isRequired": false
+        },
+        {
+          "name": "CASSETTE_AUTH_TOKEN",
+          "description": "Advanced compatibility override. Normally use oh-my-cassette login and the operating-system keyring.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "CASSETTE_FFMPEG",
+          "description": "Path to ffmpeg, used to prepare local video before upload (default: from PATH)",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
 }
