@@ -27,7 +27,7 @@ dependencies = [
   "mcp>=2.3,<3",
   "httpx>=0.28,<1",
   "keyring>=25,<27",
-  "filelock>=3.20.1,<4",
+  "filelock>=3.20.1,<5",
   "pydantic>=2.11,<3",
 ]
 
