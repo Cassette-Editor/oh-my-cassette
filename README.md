@@ -1,25 +1,47 @@
 <p align="center">
-  <img src="./assets/logo-400.png" alt="Oh My Cassette" width="120" />
+  <img src="https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/assets/banner.jpg" width="80%" alt="Oh My Cassette" />
 </p>
 
 <h1 align="center">Oh My Cassette</h1>
 
 <p align="center">
-  Video editing through the <a href="https://trycassette.online">Cassette</a> agent, from Claude Code, Codex, OpenCode and Hermes.<br />
+  Edit video by talking to the <a href="https://trycassette.online">Cassette</a> agent from Claude Code, Codex, OpenCode or Hermes.<br />
   <sub>A small MCP bridge on PyPI. The editing tools come from the Cassette MCP service, so they stay current without a plugin update.</sub>
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/oh-my-cassette/"><img alt="PyPI" src="https://img.shields.io/pypi/v/oh-my-cassette?label=oh-my-cassette" /></a>
   <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue" /></a>
+  <a href="https://discord.gg/qd9NY4k8d7"><img alt="Discord" src="https://img.shields.io/discord/1514649803626250452?logo=discord&logoColor=white&label=Discord&color=5865F2" /></a>
   <a href="./README.zh-cn.md">中文</a>
 </p>
 
 ---
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/assets/demo-claude-code.gif" width="100%" alt="One Claude Code session: import five 4K films and a song, ask for a 30-second teaser, revise it, export it" />
+</p>
+
+**One Claude Code session, typed as you see it.** Five 4K travel films (10½ minutes of footage) and a song go in, a
+four-sentence brief and a one-line revision go to the Cassette agent word for word, and a 30-second 1080p MP4 lands in
+`cassette-exports/`. Waits are fast-forwarded: in real time the import took 4½ minutes, the first cut 9½, the revision
+3½ and the export 1.
+
+> *Cut a 30-second teaser for Turkey from these five films, on the beat of Pamgaea.mp3. Open on a hot-air balloon
+> lighting up at dawn in Cappadocia, travel from the ancient ruins to the sea, name each place when it first appears,
+> and end on the misty lake with the title TURKEY.*
+>
+> *The ruins part drags. Keep only the two best Ephesus shots, and put the camel right after the balloons.*
+
+<p align="center">
+  <a href="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.5.0/turkey-teaser.mp4"><img src="https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/assets/turkey-teaser.jpg" width="100%" alt="Frames of the teaser it made: the balloon at dawn, the camel, two Ephesus shots, the Datça coast, the misty lake with the title TURKEY" /></a>
+  <br /><sub><a href="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.5.0/turkey-teaser.mp4">Watch the teaser it made (MP4, 30 s, with sound)</a>. Footage and music credits are <a href="#credits">below</a>.</sub>
+</p>
+
 ## Install in 30 seconds
 
-You need [uv](https://docs.astral.sh/uv/) (it fetches Python and the package on first start).
+You need [uv](https://docs.astral.sh/uv/) (it fetches Python and the package on first start) and
+[ffmpeg](https://ffmpeg.org/download.html) to import video.
 
 ```bash
 # Claude Code
@@ -38,9 +60,30 @@ codex plugin add oh-my-cassette@cassette-editor
 hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
 ```
 
-OpenCode and any other MCP host: see [Install](#install) below. Run `uvx oh-my-cassette==0.5.0 login` and complete the email-code sign-in in your browser. Then restart your agent if it cannot refresh its tool list, and say:
+OpenCode and any other MCP host: see [Install](#install) below. Run `uvx oh-my-cassette==0.5.0 login` and complete the
+email-code sign-in in your browser. Then restart your agent if it cannot refresh its tool list, and say:
 
-> *Import ./footage/*.mp4 and cut a 30-second travel vlog with a title at the start.*
+> *Start a new Cassette project and import the clips in ./footage, then cut a 30-second travel video with a title at the start.*
+
+## Upgrading from 0.4
+
+0.5 is a rewrite. The 0.4 plugin carried its own editing runtime, music search and Hermes gateway; 0.5 is a thin bridge
+to the Cassette MCP service, and the tools your agent sees are the service's.
+
+- **Sign in again** with `uvx oh-my-cassette==0.5.0 login`. 0.4 passwords and tokens are not used.
+- **Tools are new.** Projects, editing turns, questions, plans, undo, media, analysis and export come from the service,
+  with their own descriptions; the 0.4 tool names (`cassette_run_job`, `cassette_ingest_media`, `cassette_match_bgm`, …)
+  are gone. Reinstall the plugin, or point your host config at `uvx oh-my-cassette==0.5.0`.
+- **Projects live in your Cassette account**, the same ones you open on the web or in Cassette for Mac, and the editor
+  link each answer carries opens the project you are working on. 0.4 sessions do not carry over.
+- **Hermes** is a plain MCP host now; remove the 0.4 gateway plugin.
+
+## Projects and retention
+
+A project the bridge starts is a cloud project that Cassette deletes, with its media, after three idle days; every use
+pushes that back, and each answer says when it is due (`retention_expires_at`). Exported files are already on your
+machine in `cassette-exports/` and stay there. A project made in Cassette for Mac is kept, and the bridge can open, edit
+and export it while that Mac is online, but its media are imported in the app.
 
 ## Overview
 
@@ -57,6 +100,8 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 - **The bridge adds only what needs your machine.** Local files named in a call are prepared and
   uploaded first (only from the workspace, media types only): video is transcoded with ffmpeg into the
   renditions the service declares, and audio or images it does not take as they are get converted.
+  Each file uploads while the next one is prepared, in parts, four transfers at a time; a file whose
+  upload was interrupted picks up its earlier import when you import it again.
   Exported files are downloaded into `cassette-exports/`. The workspace identity travels with each
   call so the service can remember a project per directory.
 - **Long work never times out the host.** Every call waits a bounded time; slow local preparation
@@ -153,7 +198,7 @@ OpenCode has no MCP elicitation, which is fine: the editing agent's questions co
 ### Hermes
 
 ```bash
-hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0 \
+hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
 
 mkdir -p ~/.hermes/skills/cassette-video-edit
 curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/skills/cassette-video-edit/SKILL.md \
@@ -211,6 +256,21 @@ uv run oh-my-cassette check --url <endpoint>       # conformance check
 
 `tests/reference_remote.py` is an executable reference service for the contract;
 [RELEASING.md](./RELEASING.md) has the PyPI release flow.
+
+## Credits
+
+The demo footage is by [yasin ilcebay](https://vimeo.com/yasinilcebay), licensed
+[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), from Wikimedia Commons:
+[Aizanoi Temple of Zeus](https://commons.wikimedia.org/wiki/File:Aizonai_Temple_of_Zeus_(4K)_-_TURKEY.webm),
+[Cappadocia](https://commons.wikimedia.org/wiki/File:Cappadocia_4K_-_TURKEY.webm),
+[Datça](https://commons.wikimedia.org/wiki/File:Dat%C3%A7a_-_TURKEY_4K.webm),
+[Ephesus](https://commons.wikimedia.org/wiki/File:Ephesus_Ancient_City_-_Celsus_Library_4K.webm) and
+[Gölcük Lake](https://commons.wikimedia.org/wiki/File:G%C3%B6lc%C3%BCk_Natural_Park_4K_-_Turkey.webm). The teaser
+trims and reorders it, and adds place names, a title and music.
+
+The music is "Pamgaea" by Kevin MacLeod (incompetech.com)<br />
+Licensed under Creative Commons: By Attribution 4.0<br />
+https://creativecommons.org/licenses/by/4.0/
 
 ## License
 

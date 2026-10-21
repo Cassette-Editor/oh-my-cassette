@@ -1,25 +1,45 @@
 <p align="center">
-  <img src="./assets/logo-400.png" alt="Oh My Cassette" width="120" />
+  <img src="https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/assets/banner.jpg" width="80%" alt="Oh My Cassette" />
 </p>
 
 <h1 align="center">Oh My Cassette</h1>
 
 <p align="center">
-  在 Claude Code、Codex、OpenCode、Hermes 里，通过 <a href="https://trycassette.online">Cassette</a> 的剪辑 agent 剪视频。<br />
+  在 Claude Code、Codex、OpenCode、Hermes 里，和 <a href="https://trycassette.online">Cassette</a> 的剪辑 agent 对话来剪视频。<br />
   <sub>一个发布在 PyPI 上的小型 MCP bridge。剪辑工具由 Cassette MCP 服务提供，服务更新后不用升级插件也能用上。</sub>
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/oh-my-cassette/"><img alt="PyPI" src="https://img.shields.io/pypi/v/oh-my-cassette?label=oh-my-cassette" /></a>
   <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue" /></a>
+  <a href="https://discord.gg/qd9NY4k8d7"><img alt="Discord" src="https://img.shields.io/discord/1514649803626250452?logo=discord&logoColor=white&label=Discord&color=5865F2" /></a>
   <a href="./README.md">English</a>
 </p>
 
 ---
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/assets/demo-claude-code.gif" width="100%" alt="一次 Claude Code 会话：导入五段 4K 影片和一首曲子，要一支 30 秒预告片，改一次，导出" />
+</p>
+
+**一次 Claude Code 会话，画面里的字就是实际输入。** 五段 4K 旅行影片（共 10 分半）和一首曲子导入项目，四句话的需求和一句修改原样交给
+Cassette agent，一支 30 秒 1080p 的 MP4 落到 `cassette-exports/`。等待部分做了快进：实际导入用了 4 分半，第一版 9 分半，修改 3 分半，
+导出 1 分钟。
+
+> *Cut a 30-second teaser for Turkey from these five films, on the beat of Pamgaea.mp3. Open on a hot-air balloon
+> lighting up at dawn in Cappadocia, travel from the ancient ruins to the sea, name each place when it first appears,
+> and end on the misty lake with the title TURKEY.*
+>
+> *The ruins part drags. Keep only the two best Ephesus shots, and put the camel right after the balloons.*
+
+<p align="center">
+  <a href="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.5.0/turkey-teaser.mp4"><img src="https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/assets/turkey-teaser.jpg" width="100%" alt="成片截图：黎明的热气球、骆驼、以弗所两个镜头、达特恰海岸、雾中湖面与 TURKEY 标题" /></a>
+  <br /><sub><a href="https://github.com/Cassette-Editor/oh-my-cassette/releases/download/v0.5.0/turkey-teaser.mp4">观看这支预告片（MP4，30 秒，有声）</a>。素材与音乐署名见<a href="#署名">下文</a>。</sub>
+</p>
+
 ## 30 秒安装
 
-需要 [uv](https://docs.astral.sh/uv/)（首次启动时自动拉取 Python 和包）。
+需要 [uv](https://docs.astral.sh/uv/)（首次启动时自动拉取 Python 和包），导入视频还需要 [ffmpeg](https://ffmpeg.org/download.html)。
 
 ```bash
 # Claude Code
@@ -40,7 +60,23 @@ hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
 
 OpenCode 与其它 MCP 宿主见下文[安装](#安装)。运行 `uvx oh-my-cassette==0.5.0 login`，在浏览器中用邮箱验证码登录并授权。如果宿主不支持刷新工具列表，重启 agent 后直接说：
 
-> *把 ./footage 里的 mp4 导入，剪一个 30 秒的旅行 vlog，开头加标题。*
+> *新建一个 Cassette 项目，导入 ./footage 里的素材，剪一个 30 秒的旅行短片，开头加标题。*
+
+## 从 0.4 升级
+
+0.5 是重写。0.4 插件自带剪辑运行时、配乐搜索和 Hermes 网关；0.5 只是通往 Cassette MCP 服务的一层薄 bridge，你的 agent 看到的工具都来自服务。
+
+- **重新登录**：`uvx oh-my-cassette==0.5.0 login`。0.4 的密码和令牌不再使用。
+- **工具是新的。** 项目、剪辑对话、提问、计划、撤销、素材、分析和导出都由服务提供并自带说明；0.4 的工具名（`cassette_run_job`、
+  `cassette_ingest_media`、`cassette_match_bgm` 等）已删除。重新安装插件，或把宿主配置改为 `uvx oh-my-cassette==0.5.0`。
+- **项目在你的 Cassette 账号里**，和网页版、Cassette for Mac 里的是同一批；每次回答带的编辑器链接打开的就是当前项目。0.4 的会话不会迁移。
+- **Hermes** 现在是普通 MCP 宿主，请移除 0.4 的网关插件。
+
+## 项目保留期
+
+bridge 新建的是云端项目，闲置三天后 Cassette 会连同素材一起删除；每次使用都会顺延，每次回答都写明删除时间（`retention_expires_at`）。
+已导出的文件在你电脑的 `cassette-exports/` 里，不受影响。在 Cassette for Mac 里建的项目会一直保留，bridge 可以在那台 Mac 在线时打开、
+编辑和导出它，但它的素材要在 App 里导入。
 
 ## 概览
 
@@ -54,7 +90,8 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 - **工具属于服务。** 服务列出什么（项目、剪辑对话、回答提问、撤销、导出），你的 agent 就看到什么，
   描述和工作流说明也都来自服务。Cassette 改了，工具跟着变，插件不用发版。
 - **bridge 只做必须在你电脑上做的事。** 调用里写到的本地文件先预处理再上传（只限工作区内、只限媒体类型）：
-  视频用 ffmpeg 转码成服务声明的各个产物，服务不直接接受的音频和图片先转换。导出的文件下载到
+  视频用 ffmpeg 转码成服务声明的各个产物，服务不直接接受的音频和图片先转换。每个文件准备好就开始上传，
+  同时准备下一个，分片上传、最多四路并发；上传中断的文件再次导入时会接上之前那次导入。导出的文件下载到
   `cassette-exports/`。每次调用附带工作区标识，服务可以据此记住一个目录对应的项目。
 - **长任务不会让宿主超时。** 每次调用只等一个有界窗口；本地预处理没做完时回答 `preparing`，工作在后台继续，
   用同样的参数再调用一次就能接上。
@@ -148,7 +185,7 @@ OpenCode 没有 MCP elicitation，没关系：剪辑 agent 的提问会作为普
 ### Hermes
 
 ```bash
-hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0 \
+hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
 
 mkdir -p ~/.hermes/skills/cassette-video-edit
 curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/main/skills/cassette-video-edit/SKILL.md \
@@ -203,6 +240,21 @@ uv run oh-my-cassette check --url <endpoint>       # 一致性检查
 ```
 
 `tests/reference_remote.py` 是一个可执行的参考服务。PyPI 发布流程见 [RELEASING.md](./RELEASING.md)。
+
+## 署名
+
+演示素材作者 [yasin ilcebay](https://vimeo.com/yasinilcebay)，采用 [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) 许可，
+来自 Wikimedia Commons：
+[Aizanoi Temple of Zeus](https://commons.wikimedia.org/wiki/File:Aizonai_Temple_of_Zeus_(4K)_-_TURKEY.webm)、
+[Cappadocia](https://commons.wikimedia.org/wiki/File:Cappadocia_4K_-_TURKEY.webm)、
+[Datça](https://commons.wikimedia.org/wiki/File:Dat%C3%A7a_-_TURKEY_4K.webm)、
+[Ephesus](https://commons.wikimedia.org/wiki/File:Ephesus_Ancient_City_-_Celsus_Library_4K.webm)、
+[Gölcük Lake](https://commons.wikimedia.org/wiki/File:G%C3%B6lc%C3%BCk_Natural_Park_4K_-_Turkey.webm)。
+预告片对素材做了剪裁和重排，并加上了地名、标题和音乐。
+
+音乐为 "Pamgaea" Kevin MacLeod (incompetech.com)<br />
+Licensed under Creative Commons: By Attribution 4.0<br />
+https://creativecommons.org/licenses/by/4.0/
 
 ## 许可证
 
