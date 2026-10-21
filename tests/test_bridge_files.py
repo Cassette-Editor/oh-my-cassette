@@ -61,7 +61,8 @@ async def test_accepted_files_upload_unchanged_and_refs_replace_paths(
     assert len(remote.put_headers) == 2  # the repeated path is uploaded once
     assert remote.blobs[refs[0]] == {"original": (FIXTURES / "slide.png").read_bytes()}
 
-    png, wav = remote.begun
+    # each file begins its upload as soon as it is ready, so the two begins may arrive in either order
+    png, wav = sorted(remote.begun, key=lambda begun: begun["clientRef"])
     # the backend sees the call's arguments with every local path replaced by its clientRef
     assert png["tool"] == "import_media"
     assert png["arguments"] == {"project_id": "p1", "paths": ["f0", "f1", "f0"]}
