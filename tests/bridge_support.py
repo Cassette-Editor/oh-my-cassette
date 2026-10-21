@@ -11,6 +11,7 @@ import httpx
 from mcp.client import Client
 
 from oh_my_cassette.bridge.errors import BridgeError
+from oh_my_cassette.bridge.files import transfer_guard
 from oh_my_cassette.bridge.prepare import Artifact, Preparer
 from oh_my_cassette.bridge.server import Bridge
 from oh_my_cassette.bridge.settings import BridgeSettings
@@ -21,7 +22,8 @@ async def bridge_host(
     settings: BridgeSettings, *, mode: str = "auto", message_handler=None, preparer: Preparer | None = None
 ) -> AsyncIterator[tuple[Bridge, Client]]:
     """A bridge connected upstream, plus an in-process host client talking to it."""
-    async with httpx.AsyncClient() as http, anyio.create_task_group() as tg:
+    hooks = {"request": [transfer_guard(settings.mcp_url)]}  # as the CLI builds it
+    async with httpx.AsyncClient(event_hooks=hooks) as http, anyio.create_task_group() as tg:
         bridge = Bridge(settings, http, preparer=preparer)
         await tg.start(bridge.run)
         async with Client(bridge.build_server(), mode=mode, message_handler=message_handler) as host:

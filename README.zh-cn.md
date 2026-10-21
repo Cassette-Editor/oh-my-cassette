@@ -123,15 +123,16 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 | --- | --- | --- |
 | `CASSETTE_MCP_URL` | 已保存的连接，否则 `https://mcp.trycassette.online/mcp` | 显式覆盖 MCP 端点。 |
 | `CASSETTE_AUTH_TOKEN` | 未设置 | 高级兼容入口；默认使用 `login` 和系统钥匙串。仍受账号、scope 和 resource 校验。不要写入共享配置。 |
-| `CASSETTE_WORKSPACE` | 宿主启动 server 时的目录 | 相对路径从这里解析，服务也可以据此记住这个目录对应的项目。 |
+| `CASSETTE_WORKSPACE` | 宿主启动 server 时的目录 | 相对路径从这里解析，本地文件只能来自这里，服务也可以据此记住这个目录对应的项目。宿主在整个磁盘根目录或主目录启动 server 时，不会读取任何文件，直到设置这一项或 `CASSETTE_ALLOWED_ROOTS`。 |
 | `CASSETTE_ALLOWED_ROOTS` | 未设置 | 额外允许读取本地文件的目录（用 `:` 分隔，Windows 上用 `;`）。 |
-| `CASSETTE_DOWNLOAD_DIR` | `<工作区>/cassette-exports` | 导出文件保存的位置。 |
+| `CASSETTE_DOWNLOAD_DIR` | `<工作区>/cassette-exports` | 导出文件保存的位置。默认位置必须在工作区内：指向别处的 `cassette-exports` 符号链接会被拒绝。 |
 | `CASSETTE_MAX_UPLOAD_MB` / `CASSETTE_MAX_DOWNLOAD_MB` | `4096` / `16384` | 单个文件的大小上限。 |
 | `CASSETTE_UPLOAD_ANY_TYPE` | 关闭 | 工具接受时，允许上传非媒体文件。 |
 | `CASSETTE_LOCAL_WAIT_SEC` | `240` | 一次调用最多等本地预处理和上传多久，超过就回答 `preparing`。 |
 | `CASSETTE_FFMPEG` / `CASSETTE_FFPROBE` | 从 `PATH` 查找 | 预处理本地媒体用的 ffmpeg 和 ffprobe。 |
-| `CASSETTE_TEMP_DIR` | `<系统临时目录>/oh-my-cassette` | 预处理产物在上传前存放的位置。 |
+| `CASSETTE_TEMP_DIR` | 系统临时目录 | 每次上传在这里新建自己的私有目录（`oh-my-cassette-job-*`），存放上传前的预处理产物。 |
 | `CASSETTE_CONNECT_TIMEOUT_SEC` | `10` | 连接服务时的最长等待时间。 |
+| `CASSETTE_MCP_HOST` | 未设置 | 宿主没有报出自己的名字时，发给服务的宿主名。 |
 | `OH_MY_CASSETTE_LOG` | `WARNING` | stderr 日志级别。 |
 
 ## 安装

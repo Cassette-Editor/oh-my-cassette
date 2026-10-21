@@ -20,7 +20,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
 
 from oh_my_cassette import __version__
-from oh_my_cassette.bridge.files import same_origin
+from oh_my_cassette.bridge.files import same_origin, transfer_guard
 from oh_my_cassette.bridge.upstream import describe, protocol_refusal, require_modern
 from oh_my_cassette.contract import (
     ARTIFACT_ORIGINAL,
@@ -231,7 +231,7 @@ async def _upload_round_trip(
     headers["Content-Length"] = str(len(PROBE_PNG))
     if token and same_origin(put["url"], url):
         headers.setdefault("Authorization", f"Bearer {token}")
-    async with httpx.AsyncClient(timeout=30) as http:
+    async with httpx.AsyncClient(timeout=30, event_hooks={"request": [transfer_guard(url)]}) as http:
         response = await http.put(put["url"], content=PROBE_PNG, headers=headers)
     if response.status_code >= 300:
         report.add("fail", "upload round trip", f"PUT answered HTTP {response.status_code}")
@@ -323,7 +323,7 @@ async def run_checks(
             hint = (
                 "the token was rejected"
                 if token
-                else "a token is required; pass --token or set CASSETTE_AUTH_TOKEN"
+                else "a token is required; run oh-my-cassette login or set CASSETTE_AUTH_TOKEN"
             )
             report.add("fail", "transport", f"HTTP 401 Unauthorized: {hint}")
         else:

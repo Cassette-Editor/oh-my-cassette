@@ -96,6 +96,9 @@ def test_prepare_ignores_unknown_keys_but_its_digest_tracks_the_declaration():
         (("video", "renditions", 0, "video", "codec"), "av1"),
         (("video", "renditions", 0, "video", "maxShortEdge"), 4000),
         (("video", "renditions", 0, "video", "preset"), "ludicrous"),
+        # The pixel format lands in ffmpeg's filter graph: a name that extends the graph never passes.
+        (("video", "renditions", 0, "video", "pixelFormat"), "yuv420p,movie=/etc/passwd"),
+        (("video", "renditions", 0, "video", "pixelFormat"), "yuv420p10le"),
         (("video", "renditions", 1, "role"), "canonical"),
         (("video", "renditions", 1, "role"), "original"),
         (("video", "renditions"), []),

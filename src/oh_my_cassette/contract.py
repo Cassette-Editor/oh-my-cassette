@@ -44,6 +44,8 @@ MEDIA_KINDS: tuple[str, ...] = ("video", "audio", "image")
 # that needs another encoding raises the contract version instead.
 VIDEO_CODECS: frozenset[str] = frozenset({"h264"})
 VIDEO_PROFILES: frozenset[str] = frozenset({"baseline", "main", "high"})
+# The rendition graph writes the pixel format into ffmpeg's filter syntax, so only names it knows pass.
+VIDEO_PIXEL_FORMATS: frozenset[str] = frozenset({"yuv420p"})
 VIDEO_PRESETS: frozenset[str] = frozenset(
     {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}
 )
@@ -314,7 +316,7 @@ def _rendition(raw: Any, where: str) -> Rendition:
         video=VideoEncoding(
             codec=_text(video, "codec", vw, VIDEO_CODECS),
             profile=_text(video, "profile", vw, VIDEO_PROFILES),
-            pixel_format=_text(video, "pixelFormat", vw),
+            pixel_format=_text(video, "pixelFormat", vw, VIDEO_PIXEL_FORMATS),
             bit_depth=_integer(video, "bitDepth", vw, 8, 8),
             max_frame_rate=_positive(video, "maxFrameRate", vw),
             max_long_edge=long_edge,

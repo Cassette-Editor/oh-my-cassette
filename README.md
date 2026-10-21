@@ -136,15 +136,16 @@ Sign in once with `oh-my-cassette login`, using the Cassette account of your pro
 | --- | --- | --- |
 | `CASSETTE_MCP_URL` | the saved connection, otherwise `https://mcp.trycassette.online/mcp` | Explicit MCP endpoint override. |
 | `CASSETTE_AUTH_TOKEN` | unset | Advanced bearer-token override. Normally use `login`; the same account, scope and resource checks apply. Never place it in shared configuration. |
-| `CASSETTE_WORKSPACE` | the directory the host starts the server in | Where relative paths resolve, and the directory the service may remember a project for. |
+| `CASSETTE_WORKSPACE` | the directory the host starts the server in | Where relative paths resolve, where local files may come from, and the directory the service may remember a project for. A host that starts the server in the whole disk or your home folder gives it no files to read until you set this, or `CASSETTE_ALLOWED_ROOTS`. |
 | `CASSETTE_ALLOWED_ROOTS` | unset | Extra directories local files may come from (`:`-separated; `;` on Windows). |
-| `CASSETTE_DOWNLOAD_DIR` | `<workspace>/cassette-exports` | Where exported files are saved. |
+| `CASSETTE_DOWNLOAD_DIR` | `<workspace>/cassette-exports` | Where exported files are saved. The default must stay inside the workspace: a `cassette-exports` symlink leading elsewhere is refused. |
 | `CASSETTE_MAX_UPLOAD_MB` / `CASSETTE_MAX_DOWNLOAD_MB` | `4096` / `16384` | Size limits per file. |
 | `CASSETTE_UPLOAD_ANY_TYPE` | off | Allow non-media uploads when a tool accepts them. |
 | `CASSETTE_LOCAL_WAIT_SEC` | `240` | How long one call waits for local preparation and upload before it answers `preparing`. |
 | `CASSETTE_FFMPEG` / `CASSETTE_FFPROBE` | from `PATH` | The ffmpeg and ffprobe programs used to prepare local media. |
-| `CASSETTE_TEMP_DIR` | `<system temp>/oh-my-cassette` | Where prepared files are written until they are uploaded. |
+| `CASSETTE_TEMP_DIR` | the system temp directory | Where each upload makes its own private directory (`oh-my-cassette-job-*`) for prepared files until they are uploaded. |
 | `CASSETTE_CONNECT_TIMEOUT_SEC` | `10` | How long to wait for the service when connecting. |
+| `CASSETTE_MCP_HOST` | unset | The host name sent to the service when the host does not identify itself. |
 | `OH_MY_CASSETTE_LOG` | `WARNING` | Log level on stderr. |
 
 ## Install

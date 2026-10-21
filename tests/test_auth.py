@@ -268,3 +268,9 @@ def test_login_interruption_closes_callback_and_saves_no_grant(environment, monk
         assert probe.connect_ex(("127.0.0.1", opened[0])) != 0
     assert not store.values
     assert not (root / "connection.json").exists()
+
+
+def test_the_auth_directory_is_kept_to_its_owner(environment):
+    root, _ = environment
+    root.chmod(0o755)
+    assert auth.private_auth_directory() == root and root.stat().st_mode & 0o777 == 0o700

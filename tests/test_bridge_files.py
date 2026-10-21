@@ -6,12 +6,15 @@ import hashlib
 import shutil
 from pathlib import Path
 
+import httpx
 import pytest
 from tests.bridge_support import FakePreparer, bridge_host
-from tests.reference_remote import ReferenceRemote, RemoteOptions, serve_remote
+from tests.reference_remote import REFERENCE_TOKEN, ReferenceRemote, RemoteOptions, serve_remote
 
 from oh_my_cassette.bridge import files
-from oh_my_cassette.bridge.files import guess_mime
+from oh_my_cassette.bridge.errors import BridgeError
+from oh_my_cassette.bridge.files import guess_mime, transfer_guard
+from oh_my_cassette.bridge.settings import BridgeSettings
 
 pytestmark = pytest.mark.anyio
 
@@ -75,7 +78,10 @@ async def test_accepted_files_upload_unchanged_and_refs_replace_paths(
         {"role": "original", "size": len(data), "sha256": _sha(data), "mimeType": "image/png"}
     ]
     assert png["preparation"] is None and wav["preparation"] is None
-    assert [h["content-type"] for h in remote.put_headers] == ["image/png", guess_mime(FIXTURES / "tone.wav")]
+    # each file goes up as soon as it is ready, so the two PUTs may arrive in either order
+    assert sorted(h["content-type"] for h in remote.put_headers) == sorted(
+        ["image/png", guess_mime(FIXTURES / "tone.wav")]
+    )
 
 
 async def test_known_content_is_not_uploaded_again(remote, bridge_settings, workspace):
@@ -355,3 +361,87 @@ async def test_a_begin_without_put_targets_is_a_contract_violation(bridge_settin
     # a failed local phase is reported once and forgotten: the next call starts over
     assert _error(second) == "bridge.contract_violation" and len(remote.begun) == 2
     assert remote.put_headers == [] and remote.calls == []
+
+
+async def test_a_file_that_does_not_begin_like_its_type_does_not_leave(remote, bridge_settings, workspace):
+    (workspace / "id_ed25519.png").write_text("-----BEGIN OPENSSH PRIVATE KEY-----\n")
+    async with bridge_host(bridge_settings(remote.url)) as (_, host):
+        result = await host.call_tool("set_cover", {"image": "id_ed25519.png"})
+    assert _error(result) == "bridge.file_type_rejected"
+    assert remote.begun == [] and remote.put_headers == []
+
+
+async def test_a_host_started_in_the_home_folder_reads_only_the_folders_named_for_it(
+    remote, tmp_path, monkeypatch
+):
+    home = tmp_path / "home"
+    (home / "Movies").mkdir(parents=True)
+    shutil.copy(FIXTURES / "slide.png", home / "Movies" / "slide.png")
+    for name in ("CASSETTE_WORKSPACE", "CASSETTE_ALLOWED_ROOTS", "CASSETTE_DOWNLOAD_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CASSETTE_MCP_URL", remote.url)
+    monkeypatch.setenv("CASSETTE_AUTH_TOKEN", REFERENCE_TOKEN)
+    monkeypatch.setenv("CASSETTE_TEMP_DIR", str(tmp_path / "bridge-temp"))
+
+    async def cover(settings: BridgeSettings):
+        async with bridge_host(settings) as (_, host):
+            return await host.call_tool("set_cover", {"image": "Movies/slide.png"})
+
+    refused = await cover(BridgeSettings.from_env(cwd=home))
+    assert _error(refused) == "bridge.file_outside_workspace"
+    assert "CASSETTE_WORKSPACE" in refused.structured_content["error"]["message"]
+    monkeypatch.setenv("CASSETTE_ALLOWED_ROOTS", str(home / "Movies"))
+    assert not (await cover(BridgeSettings.from_env(cwd=home))).is_error
+    monkeypatch.delenv("CASSETTE_ALLOWED_ROOTS")
+    monkeypatch.setenv("CASSETTE_WORKSPACE", str(home))  # chosen on purpose, it is the workspace
+    assert not (await cover(BridgeSettings.from_env(cwd=home))).is_error
+
+
+@pytest.mark.parametrize(
+    "url, refusal",
+    [
+        ("https://mcp.example.com/downloads/export/1", None),  # the endpoint's own origin
+        ("https://93.184.216.34/object", None),
+        ("http://93.184.216.34/object", "HTTPS"),
+        ("https://127.0.0.1/object", "public"),
+        ("https://[::1]/object", "public"),
+        ("https://10.1.2.3/object", "public"),
+        ("https://169.254.169.254/latest/meta-data", "public"),
+        ("https://localhost/object", "public"),
+    ],
+)
+async def test_transfers_go_to_the_endpoint_or_public_https_hosts_only(url, refusal):
+    check = transfer_guard("https://mcp.example.com/mcp")
+    if refusal is None:
+        await check(httpx.Request("GET", url))
+    else:
+        with pytest.raises(BridgeError, match=refusal) as caught:
+            await check(httpx.Request("GET", url))
+        assert caught.value.code == "bridge.contract_violation" and "object" not in caught.value.message
+
+
+async def test_a_local_backend_may_hand_out_loopback_storage_only():
+    check = transfer_guard("http://127.0.0.1:8790/mcp")
+    await check(httpx.Request("PUT", "http://127.0.0.1:9000/bucket/key"))
+    with pytest.raises(BridgeError):
+        await check(httpx.Request("PUT", "http://10.0.0.7/bucket/key"))
+
+
+@pytest.mark.parametrize(
+    "header", ["Host", "Cookie", "Transfer-Encoding", "Proxy-Authorization", "X-Forwarded-For"]
+)
+def test_put_targets_may_not_set_routing_or_cookie_headers(header):
+    artifact = files.UploadArtifact(files.ARTIFACT_ORIGINAL, Path("slide.png"), 10, "0" * 64, "image/png")
+    file = files.UploadFile(0, "slide.png", "slide.png", 10, "0" * 64, "image/png", (artifact,), None)
+    put = {
+        "role": files.ARTIFACT_ORIGINAL,
+        "url": "https://store.example/k",
+        "headers": {"X-Upload-Token": "t"},
+    }
+    assert files.LocalFiles._targets("upload.begin", file, [put])[files.ARTIFACT_ORIGINAL].headers == {
+        "X-Upload-Token": "t"
+    }
+    with pytest.raises(BridgeError, match=header) as caught:
+        files.LocalFiles._targets("upload.begin", file, [{**put, "headers": {header: "x"}}])
+    assert caught.value.code == "bridge.contract_violation"
