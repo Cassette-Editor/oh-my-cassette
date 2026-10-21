@@ -6,10 +6,11 @@ service at `CASSETTE_MCP_URL`, so the editing tools come from that service.
 
 ## Prerequisites
 
-- `uv` on PATH (https://docs.astral.sh/uv/getting-started/installation/). It provides Python 3.11–3.13.
+- `uv` on PATH (https://docs.astral.sh/uv/getting-started/installation/). It provides Python 3.11 or newer.
 - `ffmpeg` and `ffprobe` on PATH to import video (`brew install ffmpeg`, `sudo apt install ffmpeg`,
   `winget install ffmpeg`), or `CASSETTE_FFMPEG` / `CASSETTE_FFPROBE` set to them.
-- A reachable Cassette MCP service (contract v1) and an access token for it. Check it with
+- An invited Cassette account. Sign in once with `uvx oh-my-cassette==0.5.0 login` (the browser
+  asks for an emailed code and consent; tokens go to the OS keyring). Check the service with
   `uvx oh-my-cassette==0.5.0 check`: every line should be PASS.
 
 ## Claude Code
@@ -19,7 +20,7 @@ claude plugin marketplace add Cassette-Editor/oh-my-cassette
 claude plugin install oh-my-cassette@cassette-editor
 ```
 
-The plugin asks for `mcp_url` and `auth_token`. Or project scope:
+Then sign in once (`uvx oh-my-cassette==0.5.0 login`) if you have not. Or project scope:
 `claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.5.0`.
 Health check: `claude mcp list` shows `cassette: … - ✓ Connected`.
 
@@ -41,7 +42,7 @@ then copy `skills/cassette-video-edit/SKILL.md` to `~/.config/opencode/skills/ca
 ## Hermes
 
 ```bash
-hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0 \
+hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.0
 
 ```
 
@@ -60,7 +61,8 @@ on the next call.
 `CASSETTE_MCP_URL` (optional endpoint override), `CASSETTE_AUTH_TOKEN` (advanced credential override), `CASSETTE_WORKSPACE` (default: the server's working directory), `CASSETTE_ALLOWED_ROOTS`,
 `CASSETTE_DOWNLOAD_DIR`, `CASSETTE_MAX_UPLOAD_MB`, `CASSETTE_MAX_DOWNLOAD_MB`, `CASSETTE_UPLOAD_ANY_TYPE`,
 `CASSETTE_LOCAL_WAIT_SEC`, `CASSETTE_FFMPEG`, `CASSETTE_FFPROBE`, `CASSETTE_TEMP_DIR`,
-`CASSETTE_CONNECT_TIMEOUT_SEC`, `OH_MY_CASSETTE_LOG`. See README.md for defaults.
+`CASSETTE_CONNECT_TIMEOUT_SEC`, `CASSETTE_MCP_HOST`, `CASSETTE_AUTH_DIRECTORY`, `OH_MY_CASSETTE_LOG`.
+See README.md for defaults.
 
 ## Verify
 
@@ -71,7 +73,8 @@ and the reason.
 
 ## Uninstalling
 
-Remove the server from the host config (`claude plugin uninstall oh-my-cassette@cassette-editor`,
+Sign out first with `uvx oh-my-cassette==0.5.0 logout` (it revokes the grant and deletes the keyring
+entry), then remove the server from the host config (`claude plugin uninstall oh-my-cassette@cassette-editor`,
 `codex plugin remove oh-my-cassette`, delete the `opencode.json` block, `hermes mcp remove cassette`),
-then run `uv cache clean oh-my-cassette`. The bridge keeps no local state; exported files stay in
-`cassette-exports/`.
+delete `~/.config/oh-my-cassette` (connection metadata, no token) and run `uv cache clean oh-my-cassette`.
+Exported files stay in `cassette-exports/`.

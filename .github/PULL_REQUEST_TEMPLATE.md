@@ -12,8 +12,7 @@ title itself must be a conventional commit line:
 ## Verification
 
 <!--
-CONTRIBUTING.md asks for real evidence, not just "tests pass". Paste the commands
-you ran and what came back.
+Paste the commands you ran and what came back, not just "tests pass".
 -->
 
 - **Hosts tested:** <!-- Claude Code / Codex / OpenCode / Hermes -->

@@ -51,6 +51,5 @@ body:
         - OpenCode
         - Hermes Agent
         - Any MCP host
-        - Web demo
     validations:
       required: true

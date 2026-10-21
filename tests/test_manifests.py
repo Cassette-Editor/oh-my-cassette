@@ -36,11 +36,32 @@ def load(path: str):
     return json.loads((ROOT / path).read_text("utf-8"))
 
 
+def _sources() -> list[str]:
+    return [path.read_text("utf-8") for path in SRC.rglob("*.py")]
+
+
+DOCS = ("README.md", "README.zh-cn.md", "llms.txt", "llms-install.md", "SUPPORT.md", "SECURITY.md", "docs")
+
+
+def test_every_documented_install_pins_this_release():
+    files = [ROOT / doc for doc in DOCS if (ROOT / doc).is_file()]
+    files += [path for doc in DOCS if (ROOT / doc).is_dir() for path in (ROOT / doc).rglob("*.md")]
+    for path in files:
+        text = path.read_text("utf-8")
+        assert not re.search(r"uvx oh-my-cassette(?!==)", text), f"{path.name}: an unpinned uvx install"
+        pins = set(re.findall(r"oh-my-cassette==([0-9][0-9A-Za-z.\-]*[0-9A-Za-z])", text))
+        assert pins <= {VERSION}, f"{path.name} pins {pins}"
+        refs = set(
+            re.findall(r"raw\.githubusercontent\.com/Cassette-Editor/oh-my-cassette/([^/]+)/skills/", text)
+        )
+        assert refs <= {f"v{VERSION}"}, f"{path.name} downloads the skill from {refs}"
+
+
 def test_pyproject_and_package_agree():
     pyproject = (ROOT / "pyproject.toml").read_text("utf-8")
     assert f'version = "{VERSION}"' in pyproject
     assert 'oh-my-cassette = "oh_my_cassette.cli:main"' in pyproject
-    assert json.loads((ROOT / ".release-please-manifest.json").read_text("utf-8")) == {".": VERSION} or True
+    assert json.loads((ROOT / ".release-please-manifest.json").read_text("utf-8")) == {".": VERSION}
 
 
 def test_claude_plugin_manifest():
@@ -54,7 +75,9 @@ def test_claude_plugin_manifest():
     assert not mcp.get("env"), "Plugin must preserve the saved OAuth connection"
     marketplace = load(".claude-plugin/marketplace.json")
     assert marketplace["plugins"][0]["version"] == VERSION
-    assert marketplace["plugins"][0]["source"]["ref"] == "release"
+    # Installs come from the release's tag, which cannot move, never from a branch.
+    assert marketplace["plugins"][0]["source"]["ref"] == f"v{VERSION}"
+    assert load(".agents/plugins/marketplace.json")["plugins"][0]["source"]["ref"] == f"v{VERSION}"
 
 
 def test_codex_plugin_manifest():
@@ -63,8 +86,10 @@ def test_codex_plugin_manifest():
     server = plugin["mcpServers"]["cassette"]
     assert server["command"] == "uvx" and server["args"] == [f"oh-my-cassette=={VERSION}"]
     assert server["tool_timeout_sec"] == HOST_TIMEOUT_SEC and server["startup_timeout_sec"] >= 60
-    assert {"CASSETTE_MCP_URL", "CASSETTE_AUTH_TOKEN", "CASSETTE_LOCAL_WAIT_SEC"} <= set(server["env_vars"])
-    for rel in (plugin["interface"]["logo"], *plugin["interface"]["screenshots"]):
+    # Codex passes a host variable to the server only when it is listed: list every one the bridge reads.
+    read = set(re.findall(r'"((?:CASSETTE|OH_MY_CASSETTE)_[A-Z_]+)"', "".join(_sources())))
+    assert read and read <= set(server["env_vars"]), read - set(server["env_vars"])
+    for rel in (plugin["interface"]["logo"], *plugin["interface"].get("screenshots", [])):
         assert (ROOT / rel).exists(), rel
 
 

@@ -2,16 +2,23 @@
 * @epc314 @Crimson725
 
 # Packaging and host manifests — breaking these breaks every install path.
+/pyproject.toml      @epc314 @Crimson725
+/uv.lock             @epc314 @Crimson725
+/server.json         @epc314 @Crimson725
 /.claude-plugin/     @epc314 @Crimson725
 /.codex-plugin/      @epc314 @Crimson725
-/plugin.yaml         @epc314 @Crimson725
+/.agents/plugins/    @epc314 @Crimson725
 /.mcp.json           @epc314 @Crimson725
 /opencode.json       @epc314 @Crimson725
 
 # Release automation and CI.
-/.github/workflows/  @epc314 @Crimson725
+/.github/            @epc314 @Crimson725
 /release-please-config.json    @epc314 @Crimson725
 
-# Security-sensitive surfaces.
-/security.py         @epc314 @Crimson725
+# Security-sensitive surfaces: credentials, what may be read and sent, what is written.
+/src/oh_my_cassette/auth.py              @epc314 @Crimson725
+/src/oh_my_cassette/contract.py          @epc314 @Crimson725
+/src/oh_my_cassette/bridge/files.py      @epc314 @Crimson725
+/src/oh_my_cassette/bridge/downloads.py  @epc314 @Crimson725
+/src/oh_my_cassette/bridge/prepare.py    @epc314 @Crimson725
 /SECURITY.md         @epc314 @Crimson725
