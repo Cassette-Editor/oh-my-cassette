@@ -89,7 +89,7 @@ def test_codex_plugin_manifest():
     # Codex passes a host variable to the server only when it is listed: list every one the bridge reads.
     read = set(re.findall(r'"((?:CASSETTE|OH_MY_CASSETTE)_[A-Z_]+)"', "".join(_sources())))
     assert read and read <= set(server["env_vars"]), read - set(server["env_vars"])
-    for rel in (plugin["interface"]["logo"], *plugin["interface"]["screenshots"]):
+    for rel in (plugin["interface"]["logo"], *plugin["interface"].get("screenshots", [])):
         assert (ROOT / rel).exists(), rel
 
 

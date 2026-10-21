@@ -1,5 +1,6 @@
 ---
 name: cassette-video-edit
+license: MIT
 description: Edit, trim, cut, caption, retime, combine, or export video, audio, and image files through Cassette. Use this skill whenever the user asks to change, preview, or render media in the project, even if they never say "Cassette" or name a tool, for example "trim the intro off demo.mp4", "add subtitles to this clip", "make a 30-second cut", "put a title on it", "export the video". Drives the tools of the `cassette` MCP server (oh-my-cassette), which relays a running conversation with the Cassette editing agent.
 ---
 

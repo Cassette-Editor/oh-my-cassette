@@ -63,7 +63,6 @@
     "termsOfServiceURL": "https://cassette-editor.github.io/oh-my-cassette/terms",
     "logo": "./assets/logo-400.png",
     "composerIcon": "./assets/logo-400.png",
-    "screenshots": [],
     "defaultPrompt": [
       "Edit this project video with Cassette.",
       "Let me choose the Cassette model for this edit.",
