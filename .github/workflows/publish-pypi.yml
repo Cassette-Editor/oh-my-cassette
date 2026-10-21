@@ -1,12 +1,14 @@
 name: Publish to PyPI
 
-# Runs when release-please tags a release. Uses PyPI trusted publishing (OIDC): the
-# project on PyPI must list this repository + workflow file as a trusted publisher.
+# Uses PyPI trusted publishing (OIDC): the project on PyPI must list this repository +
+# workflow file as a trusted publisher. release-please dispatches it on the new tag, because
+# a release it creates with GITHUB_TOKEN raises no `release` event; a release published by
+# hand runs it too.
 on:
   release:
     types: [published]
-  # Manual runs are rehearsals: they upload to TestPyPI (environment `testpypi`), never
-  # to PyPI. Only a published release reaches PyPI.
+  # A run on a version tag publishes that release to PyPI. A run on a branch is a rehearsal
+  # that uploads to TestPyPI (environment `testpypi`).
   workflow_dispatch:
 
 permissions:
@@ -21,7 +23,7 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - run: uv build
       - name: Check that the tag matches the package version
-        if: github.event_name == 'release'
+        if: ${{ (github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')) }}
         run: |
           set -eu
           tag="${GITHUB_REF_NAME#v}"
@@ -37,7 +39,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: ${{ github.event_name == 'release' && 'pypi' || 'testpypi' }}
+    environment: ${{ (github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')) && 'pypi' || 'testpypi' }}
     permissions:
       id-token: write
     steps:
@@ -47,8 +49,8 @@ jobs:
           path: dist/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          repository-url: ${{ github.event_name == 'release' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
-          skip-existing: ${{ github.event_name != 'release' }}
+          repository-url: ${{ (github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')) && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
+          skip-existing: ${{ !(github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')) }}
 
   # The registry serves whatever version was last pushed to it, so a release that skips
   # this leaves io.github.Cassette-Editor/oh-my-cassette advertising the old one. It
@@ -56,7 +58,7 @@ jobs:
   # after the wheel is visible on PyPI.
   registry:
     needs: publish
-    if: github.event_name == 'release'
+    if: (github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
