@@ -445,7 +445,8 @@ async def test_the_bridge_prepares_real_files_before_the_handshake(remote, bridg
     async with bridge_host(settings) as (_, host):
         result = await host.call_tool("import_media", {"paths": paths})
     assert not result.is_error, result
-    clip, scan, tone, still = remote.begun
+    begun = {entry["relativePath"]: entry for entry in remote.begun}  # each file begins once it is prepared
+    clip, scan, tone, still = (begun[path] for path in paths)
     assert clip["mimeType"] == "video/x-matroska" and clip["size"] == (media / "clip.mkv").stat().st_size
     assert [(a["role"], a["mimeType"]) for a in clip["artifacts"]] == [(r, "video/mp4") for r in ROLES]
     _check_report_shape(clip["preparation"])

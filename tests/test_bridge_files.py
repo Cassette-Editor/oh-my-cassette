@@ -117,6 +117,51 @@ async def test_video_uploads_every_rendition_under_the_source_identity(remote, b
     assert list(settings.temp_root.iterdir()) == []  # intermediate files are gone once uploaded
 
 
+async def test_each_file_uploads_while_the_next_one_is_prepared(remote, bridge_settings, workspace):
+    (workspace / "media" / "second.mp4").write_bytes((FIXTURES / "clip.mp4").read_bytes() + b"another take")
+    preparer = FakePreparer(delay=0.5, events=remote.events)
+    async with bridge_host(bridge_settings(remote.url), preparer=preparer) as (_, host):
+        result = await host.call_tool("import_media", {"paths": ["media/clip.mp4", "media/second.mp4"]})
+    assert not result.is_error, result
+    assert len(set(result.structured_content["refs"])) == 2
+    assert remote.events == [
+        "prepared:clip.mp4",
+        "begin:clip.mp4",
+        "complete:clip.mp4",
+        "prepared:second.mp4",
+        "begin:second.mp4",
+        "complete:second.mp4",
+    ]
+
+
+async def test_a_second_copy_of_the_same_content_waits_for_the_first_and_is_not_sent(
+    bridge_settings, workspace
+):
+    shutil.copy(FIXTURES / "clip.mp4", workspace / "media" / "copy.mp4")
+    remote = ReferenceRemote(
+        options=RemoteOptions(put_delay=0.5)
+    )  # the first copy is still uploading when the second is ready
+    preparer = FakePreparer(events=remote.events)
+    async with serve_remote(remote), bridge_host(bridge_settings(remote.url), preparer=preparer) as (_, host):
+        result = await host.call_tool("import_media", {"paths": ["media/clip.mp4", "media/copy.mp4"]})
+    assert not result.is_error, result
+    first, second = result.structured_content["refs"]
+    assert first == second
+    assert remote.events.index("complete:clip.mp4") < remote.events.index("begin:copy.mp4")
+    assert len(remote.put_headers) == 2  # the two renditions, once
+
+
+async def test_parts_go_up_four_at_a_time(bridge_settings, workspace):
+    data = (FIXTURES / "tone.wav").read_bytes()
+    remote = ReferenceRemote(options=RemoteOptions(part_size=1024, part_batch=32, put_delay=0.05))
+    async with serve_remote(remote), bridge_host(bridge_settings(remote.url)) as (_, host):
+        result = await host.call_tool("import_media", {"paths": ["media/tone.wav"]})
+    assert not result.is_error, result
+    (ref,) = result.structured_content["refs"]
+    assert remote.blobs[ref] == {"original": data}
+    assert remote.most_puts_in_flight == files.UPLOAD_CONCURRENCY == 4
+
+
 async def test_unaccepted_media_is_converted_before_upload(remote, bridge_settings, workspace):
     preparer = FakePreparer()
     async with bridge_host(bridge_settings(remote.url), preparer=preparer) as (_, host):
@@ -189,7 +234,8 @@ async def test_part_urls_signed_too_long_ago_are_signed_again_before_use(
         result = await host.call_tool("import_media", {"paths": ["media/tone.wav"]})
     assert not result.is_error, result
     # tone.wav is two parts: one batch, each part's URL signed again just before it is sent
-    assert [entry["partNumbers"] for entry in remote.signed] == [None, [1, 2], [2], None]
+    signed = [entry["partNumbers"] for entry in remote.signed]
+    assert signed[0] is None and sorted(signed[1:3]) == [[1], [2]] and signed[3:] == [None]
 
 
 async def test_parts_without_a_tool_to_sign_them_are_a_contract_violation(bridge_settings, workspace):

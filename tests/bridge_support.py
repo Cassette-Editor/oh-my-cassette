@@ -32,8 +32,9 @@ async def bridge_host(
 class FakePreparer:
     """Stands in for ffmpeg: writes small marker files, counts its calls, and can be slow or fail."""
 
-    def __init__(self, *, delay: float = 0.0, failures: int = 0) -> None:
+    def __init__(self, *, delay: float = 0.0, failures: int = 0, events: list[str] | None = None) -> None:
         self.delay = delay
+        self.events = events if events is not None else []  # "prepared:<name>" as each transcode ends
         self.failures = failures
         self.transcodes = 0
         self.conversions = 0
@@ -56,6 +57,7 @@ class FakePreparer:
             path = workdir / f"{rendition.role}.mp4"
             path.write_bytes(f"{rendition.role}:{source.name}:".encode() * 64)
             artifacts.append(Artifact(rendition.role, path, rendition.mime_type))
+        self.events.append(f"prepared:{source.name}")
         return artifacts, {"fake": True, "source": source.name, "roles": [r.role for r in renditions]}
 
     async def convert(self, source: Path, kind: str, conversion, workdir: Path, progress):

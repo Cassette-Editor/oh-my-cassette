@@ -125,6 +125,7 @@ class RemoteOptions:
     parts_tool: bool = True
     fail_part_once: int | None = None  # that part's first PUT answers 503
     expire_part_once: int | None = None  # that part's first URL answers 403, as an expired signature does
+    put_delay: float = 0.0  # seconds each upload PUT takes before it answers
     # Misbehaviour a test switches on mid-session.
     drop_turn_once: bool = False  # the first turn acted on loses its connection before it answers
     refusals: list[tuple[int, int | None]] = field(
@@ -149,6 +150,9 @@ class ReferenceRemote:
     put_headers: list[dict[str, str]] = field(default_factory=list)
     part_headers: list[dict[str, str]] = field(default_factory=list)
     signed: list[dict[str, Any]] = field(default_factory=list)
+    events: list[str] = field(default_factory=list)  # "begin:<name>" and "complete:<name>", in order
+    puts_in_flight: int = 0
+    most_puts_in_flight: int = 0
     request_headers: list[dict[str, str]] = field(default_factory=list)
     refused: list[int] = field(default_factory=list)
     turns: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -220,6 +224,17 @@ class ReferenceRemote:
             }
         reply = {"jsonrpc": "2.0", "id": request.get("id"), "error": error}
         await JSONResponse(reply, status_code=400)(scope, _replay(b"", None), send)
+
+    async def _slow_body(self, request: Request) -> bytes:
+        """An upload's body, taking `put_delay` while counting the uploads in flight."""
+        self.puts_in_flight += 1
+        self.most_puts_in_flight = max(self.most_puts_in_flight, self.puts_in_flight)
+        try:
+            body = await request.body()
+            await anyio.sleep(self.options.put_delay)
+            return body
+        finally:
+            self.puts_in_flight -= 1
 
     def _upload_base(self) -> str:
         # `localhost` and `127.0.0.1` are different origins: the bridge must not send its token there.
@@ -361,6 +376,7 @@ class ReferenceRemote:
                 uploads: list[dict[str, Any]] = []
                 for item in files:
                     self.begun.append({"tool": tool, "arguments": arguments, **item})
+                    self.events.append(f"begin:{item['name']}")
                     if item["sha256"] in self.refs_by_sha:  # content identity: the source's sha256
                         uploads.append(
                             {"clientRef": item["clientRef"], "ref": self.refs_by_sha[item["sha256"]]}
@@ -454,6 +470,7 @@ class ReferenceRemote:
                             }
                         )
                         continue
+                    self.events.append(f"complete:{item['name']}")
                     ref = f"media:{item['sha256'][:16]}"
                     self.refs_by_sha[item["sha256"]] = ref
                     self.blobs[ref] = dict(data)
@@ -472,7 +489,7 @@ class ReferenceRemote:
             # Like a presigned URL, the target is bound to the Content-Type it was issued for.
             if artifact is None or request.headers.get("content-type") != artifact["mimeType"]:
                 return Response(status_code=403)
-            record["data"][role] = await request.body()
+            record["data"][role] = await self._slow_body(request)
             return Response(status_code=200)
 
         @mcp.custom_route("/parts/{upload_id}/{role}/{number}", methods=["PUT"])
@@ -483,7 +500,7 @@ class ReferenceRemote:
             record = self.uploads.get(upload_id)
             if record is None or sig not in record["sigs"].get((role, number), set()):
                 return Response(status_code=403)
-            body = await request.body()
+            body = await self._slow_body(request)
             once = {"expired": self.options.expire_part_once, "failed": self.options.fail_part_once}
             for kind, status in (("expired", 403), ("failed", 503)):
                 key = (upload_id, role, number, kind)

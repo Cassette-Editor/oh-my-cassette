@@ -54,6 +54,7 @@ from oh_my_cassette.contract import (
 )
 
 CHUNK = 1024 * 1024
+UPLOAD_CONCURRENCY = 4  # PUTs a call keeps in flight across its files, artifacts and parts
 PART_ATTEMPTS = 4  # sends of one part before a transient failure is reported
 PART_URL_MAX_AGE_SEC = 600.0  # a part URL signed longer ago than this is signed again before use
 
@@ -238,6 +239,41 @@ class UploadFile:
         }
 
 
+class _Tasks:
+    """Tasks run side by side; the first failure cancels the others and is raised as it was raised."""
+
+    def __init__(self) -> None:
+        self._group = anyio.create_task_group()
+        self._failure: Exception | None = None
+
+    async def __aenter__(self) -> _Tasks:
+        await self._group.__aenter__()
+        return self
+
+    def start(self, work: Callable[[], Awaitable[Any]]) -> None:
+        self._group.start_soon(self._run, work)
+
+    async def _run(self, work: Callable[[], Awaitable[Any]]) -> None:
+        try:
+            await work()
+        except Exception as exc:
+            self._fail(exc)
+
+    def _fail(self, exc: Exception) -> None:
+        if self._failure is None:
+            self._failure = exc
+        self._group.cancel_scope.cancel()
+
+    async def __aexit__(self, kind: Any, exc: BaseException | None, tb: Any) -> bool:
+        if isinstance(exc, Exception):
+            self._fail(exc)
+            kind = exc = tb = None
+        handled = await self._group.__aexit__(kind, exc, tb)
+        if self._failure is not None:
+            raise self._failure
+        return bool(handled)
+
+
 class LocalFiles:
     def __init__(
         self, settings: BridgeSettings, upstream: Upstream, http: httpx.AsyncClient, preparer: Preparer
@@ -324,12 +360,31 @@ class LocalFiles:
         root = self._settings.temp_root
         root.mkdir(parents=True, exist_ok=True)
         workdir = Path(tempfile.mkdtemp(prefix="job-", dir=root))
+        refs: dict[Path, str] = {}
+        sends = anyio.CapacityLimiter(UPLOAD_CONCURRENCY)
         try:
-            files = [
-                await self._describe(index, source, call, workdir / f"f{index}", job.files[index])
-                for index, source in enumerate(call.sources)
-            ]
-            return await self._upload(call, files, job)
+            # Files are prepared one at a time (a transcode keeps the cores busy); each one uploads as soon as it
+            # is ready, while the next is prepared. A second file of the same content begins once the first has
+            # uploaded, so the backend knows it rather than taking it for an unfinished upload of the first.
+            uploaded: dict[str, anyio.Event] = {}
+            async with _Tasks() as uploads:
+                for index, source in enumerate(call.sources):
+                    file = await self._describe(index, source, call, workdir / f"f{index}", job.files[index])
+                    earlier = uploaded.get(file.sha256)
+                    done = uploaded.setdefault(file.sha256, anyio.Event())
+
+                    async def upload(
+                        file: UploadFile = file,
+                        earlier: anyio.Event | None = earlier,
+                        done: anyio.Event = done,
+                    ) -> None:
+                        if earlier is not None:
+                            await earlier.wait()
+                        refs.update(await self._upload(call, [file], job, sends))
+                        done.set()
+
+                    uploads.start(upload)
+            return refs
         except Unauthorized as exc:
             raise unauthorized(self._settings.mcp_url, has_token=bool(self._settings.auth_token)) from exc
         except BackendUnavailable as exc:
@@ -392,7 +447,9 @@ class LocalFiles:
             )
         return result
 
-    async def _upload(self, call: LocalCall, files: list[UploadFile], job: LocalJob) -> dict[Path, str]:
+    async def _upload(
+        self, call: LocalCall, files: list[UploadFile], job: LocalJob, sends: anyio.CapacityLimiter
+    ) -> dict[Path, str]:
         begin = self._upstream.tool_for_role(ROLE_UPLOAD_BEGIN)
         complete = self._upstream.tool_for_role(ROLE_UPLOAD_COMPLETE)
         parts = self._upstream.tool_for_role(ROLE_UPLOAD_PARTS)
@@ -443,8 +500,13 @@ class LocalFiles:
         if seen != set(by_ref):
             raise BridgeError("bridge.contract_violation", f"{begin.name} did not return one entry per file")
 
-        for upload_id, (file, targets) in pending.items():
-            await self._send(parts, upload_id, file, targets, job.files[file.index])
+        async with _Tasks() as transfers:
+            for upload_id, (file, targets) in pending.items():
+                transfers.start(
+                    lambda upload_id=upload_id, file=file, targets=targets: self._send(
+                        parts, upload_id, file, targets, job.files[file.index], sends
+                    )
+                )
         if pending:
             finished = await self._call(complete, {"uploadIds": list(pending)})
             for entry in (finished.structured_content or {}).get("files") or []:
@@ -457,7 +519,7 @@ class LocalFiles:
                 if isinstance(entry.get("ref"), str):
                     refs[call.sources[file.index].path] = entry["ref"]
                     job.files[file.index].update(DONE)
-        missing = [source.relative for source in call.sources if source.path not in refs]
+        missing = [file.relative for file in files if call.sources[file.index].path not in refs]
         if missing:
             raise BridgeError(
                 "bridge.contract_violation", f"{complete.name} returned no ref for {', '.join(missing)}"
@@ -509,6 +571,7 @@ class LocalFiles:
         file: UploadFile,
         targets: dict[str, PutTarget],
         progress: FileProgress,
+        sends: anyio.CapacityLimiter,
     ) -> None:
         total, sent = max(1, sum(artifact.size for artifact in file.artifacts)), 0
 
@@ -517,16 +580,30 @@ class LocalFiles:
             sent += size
             progress.update(UPLOADING, 100 * sent / total)
 
-        for artifact in file.artifacts:
-            target = targets[artifact.role]
-            if target.parts is None:
-                await self._put(file, artifact, target, count)
-            else:
-                assert parts is not None  # `_upload` refuses parts without the tool that signs them
-                await self._put_parts(parts, upload_id, file, artifact, target.parts, count)
+        async with _Tasks() as artifacts:
+            for artifact in file.artifacts:
+                target = targets[artifact.role]
+                if target.parts is None:
+                    artifacts.start(
+                        lambda artifact=artifact, target=target: self._put(
+                            file, artifact, target, count, sends
+                        )
+                    )
+                else:
+                    assert parts is not None  # `_upload` refuses parts without the tool that signs them
+                    artifacts.start(
+                        lambda artifact=artifact, target=target: self._put_parts(
+                            parts, upload_id, file, artifact, target.parts, count, sends
+                        )
+                    )
 
     async def _put(
-        self, file: UploadFile, artifact: UploadArtifact, target: PutTarget, sent: Callable[[int], None]
+        self,
+        file: UploadFile,
+        artifact: UploadArtifact,
+        target: PutTarget,
+        sent: Callable[[int], None],
+        sends: anyio.CapacityLimiter,
     ) -> None:
         # The presigned URL is bound to the headers it was signed with, Content-Type included.
         headers = {**target.headers, "Content-Length": str(artifact.size)}
@@ -534,9 +611,10 @@ class LocalFiles:
             headers.update(await self._upstream.credentials.headers(target.url))
         what = f"uploading {file.relative} ({artifact.role})"
         try:
-            response = await self._http.put(
-                target.url, content=_read(artifact.path, 0, artifact.size, sent), headers=headers
-            )
+            async with sends:
+                response = await self._http.put(
+                    target.url, content=_read(artifact.path, 0, artifact.size, sent), headers=headers
+                )
         except httpx.HTTPError as exc:
             raise BridgeError("bridge.upload_failed", f"{what}: {exc}", retryable=True) from exc
         if response.status_code >= 300:
@@ -585,8 +663,9 @@ class LocalFiles:
         artifact: UploadArtifact,
         plan: tuple[int, int],
         sent: Callable[[int], None],
+        sends: anyio.CapacityLimiter,
     ) -> None:
-        """Send every part the store does not hold yet, a signed batch at a time."""
+        """Send every part the store does not hold yet, a signed batch at a time, its parts side by side."""
         part_size, part_count = plan
         what = f"uploading {file.relative} ({artifact.role})"
         counted: set[int] = set()  # parts whose bytes are in the progress already
@@ -595,6 +674,14 @@ class LocalFiles:
         def span(number: int) -> tuple[int, int]:
             start = (number - 1) * part_size
             return start, min(artifact.size, start + part_size) - start
+
+        async def sign_again(number: int) -> str:
+            again = (await self._sign_parts(tool, upload_id, artifact, plan, [number])).urls
+            if number not in again:
+                raise BridgeError(
+                    "bridge.contract_violation", f"{tool.name} did not sign part {number} again"
+                )
+            return again[number]
 
         while True:
             batch = await self._sign_parts(tool, upload_id, artifact, plan)
@@ -609,30 +696,24 @@ class LocalFiles:
                     "bridge.contract_violation",
                     f"{tool.name} signed no part of {file.name} while parts are missing",
                 )
-            urls = dict(batch.urls)
-            for number in sorted(urls):
-                if number in put:
-                    raise BridgeError(
-                        "bridge.upload_failed",
-                        f"{what}: the store did not keep part {number}",
-                        retryable=True,
+            if lost := sorted(put & set(batch.urls)):
+                raise BridgeError(
+                    "bridge.upload_failed", f"{what}: the store did not keep part {lost[0]}", retryable=True
+                )
+
+            async def send(number: int, url: str, signed_at: float = signed_at) -> None:
+                async with sends:
+                    if anyio.current_time() - signed_at > PART_URL_MAX_AGE_SEC:
+                        url = await sign_again(number)
+                    await self._put_part(
+                        what, artifact, number, url, span(number), lambda: sign_again(number), sent
                     )
-                if anyio.current_time() - signed_at > PART_URL_MAX_AGE_SEC:
-                    left = [n for n in sorted(urls) if n >= number]
-                    urls |= (await self._sign_parts(tool, upload_id, artifact, plan, left)).urls
-                    signed_at = anyio.current_time()
-
-                async def sign_again(number: int = number) -> str:
-                    again = (await self._sign_parts(tool, upload_id, artifact, plan, [number])).urls
-                    if number not in again:
-                        raise BridgeError(
-                            "bridge.contract_violation", f"{tool.name} did not sign part {number} again"
-                        )
-                    return again[number]
-
-                await self._put_part(what, artifact, number, urls[number], span(number), sign_again, sent)
                 put.add(number)
                 counted.add(number)
+
+            async with _Tasks() as parts:
+                for number, url in sorted(batch.urls.items()):
+                    parts.start(lambda number=number, url=url: send(number, url))
 
     async def _put_part(
         self,
