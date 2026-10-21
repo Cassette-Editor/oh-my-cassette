@@ -197,10 +197,11 @@ async def test_images_the_service_converts_itself_and_its_other_types_upload_unc
         result = await host.call_tool("import_media", {"paths": paths})
     assert not result.is_error, result
     data = (FIXTURES / "slide.png").read_bytes()
-    assert [(b["name"], b["mimeType"], b["sha256"]) for b in remote.begun] == [
+    # the three files upload concurrently, so their begins may arrive in any order
+    assert sorted((b["name"], b["mimeType"], b["sha256"]) for b in remote.begun) == [
+        ("photo.apng", "image/apng", _sha(data)),
         ("photo.heic", "image/heic", _sha(data)),
         ("photo.jfif", "image/jpeg", _sha(data)),
-        ("photo.apng", "image/apng", _sha(data)),
     ]
     assert preparer.conversions == 0
 
