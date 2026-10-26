@@ -3,7 +3,7 @@
   "name": "io.github.Cassette-Editor/oh-my-cassette",
   "title": "Oh My Cassette",
   "description": "Video editing through the Cassette agent: import media, edit by chat turn, read the timeline, export",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "websiteUrl": "https://github.com/Cassette-Editor/oh-my-cassette",
   "icons": [
     {
@@ -23,7 +23,7 @@
     {
       "registryType": "pypi",
       "identifier": "oh-my-cassette",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "transport": {
         "type": "stdio"
       },
