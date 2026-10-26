@@ -70,8 +70,6 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python }}
-      - name: Install ffmpeg (the local media preparation tests run it)
-        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg
       - run: uv sync --frozen --group dev
       - run: uv run pytest -q -rs
       - name: Build the distribution the hosts will install
