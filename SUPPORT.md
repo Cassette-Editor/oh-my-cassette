@@ -32,7 +32,7 @@ would rather route it than have you not report it.
 Include these, none of which contain credentials:
 
 ```bash
-uvx oh-my-cassette==0.5.1 --version
+uvx oh-my-cassette==0.6.0 --version
 ```
 
 - the host (Claude Code, Codex, OpenCode, Hermes) and its version;

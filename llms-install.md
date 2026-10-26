@@ -1,7 +1,7 @@
 # Installing Oh My Cassette (for AI agents)
 
 Oh My Cassette is a stdio MCP bridge published on PyPI as `oh-my-cassette`. Hosts start it with
-`uvx oh-my-cassette==0.5.1`; there is nothing to clone or build. It relays to the Cassette MCP
+`uvx oh-my-cassette==0.6.0`; there is nothing to clone or build. It relays to the Cassette MCP
 service at `CASSETTE_MCP_URL`, so the editing tools come from that service.
 
 ## Prerequisites
@@ -9,9 +9,9 @@ service at `CASSETTE_MCP_URL`, so the editing tools come from that service.
 - `uv` on PATH (https://docs.astral.sh/uv/getting-started/installation/). It provides Python 3.11 or newer.
 - `ffmpeg` and `ffprobe` on PATH to import video (`brew install ffmpeg`, `sudo apt install ffmpeg`,
   `winget install ffmpeg`), or `CASSETTE_FFMPEG` / `CASSETTE_FFPROBE` set to them.
-- An invited Cassette account. Sign in once with `uvx oh-my-cassette==0.5.1 login` (the browser
+- An invited Cassette account. Sign in once with `uvx oh-my-cassette==0.6.0 login` (the browser
   asks for an emailed code and consent; tokens go to the OS keyring). Check the service with
-  `uvx oh-my-cassette==0.5.1 check`: every line should be PASS.
+  `uvx oh-my-cassette==0.6.0 check`: every line should be PASS.
 
 ## Claude Code
 
@@ -20,8 +20,8 @@ claude plugin marketplace add Cassette-Editor/oh-my-cassette
 claude plugin install oh-my-cassette@cassette-editor
 ```
 
-Then sign in once (`uvx oh-my-cassette==0.5.1 login`) if you have not. Or project scope:
-`claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.5.1`.
+Then sign in once (`uvx oh-my-cassette==0.6.0 login`) if you have not. Or project scope:
+`claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.6.0`.
 Health check: `claude mcp list` shows `cassette: … - ✓ Connected`.
 
 ## Codex
@@ -32,7 +32,7 @@ codex plugin add oh-my-cassette@cassette-editor
 ```
 
 The plugin passes `CASSETTE_*` variables through from the shell. Or:
-`codex mcp add cassette -- uvx oh-my-cassette==0.5.1`.
+`codex mcp add cassette -- uvx oh-my-cassette==0.6.0`.
 
 ## OpenCode
 
@@ -42,7 +42,7 @@ then copy `skills/cassette-video-edit/SKILL.md` to `~/.config/opencode/skills/ca
 ## Hermes
 
 ```bash
-hermes mcp add cassette --command uvx --args oh-my-cassette==0.5.1
+hermes mcp add cassette --command uvx --args oh-my-cassette==0.6.0
 
 ```
 
@@ -66,14 +66,14 @@ See README.md for defaults.
 
 ## Verify
 
-`uvx oh-my-cassette==0.5.1 --version` prints `oh-my-cassette 0.5.0`. In the host, the tool list should
+`uvx oh-my-cassette==0.6.0 --version` prints `oh-my-cassette 0.5.0`. In the host, the tool list should
 show the service's tools. If it shows only `cassette_bridge_status`, call it: it reports the endpoint
 URL, an `error_code` (`bridge.backend_unreachable`, `bridge.unauthorized` or `bridge.upgrade_required`)
 and the reason.
 
 ## Uninstalling
 
-Sign out first with `uvx oh-my-cassette==0.5.1 logout` (it revokes the grant and deletes the keyring
+Sign out first with `uvx oh-my-cassette==0.6.0 logout` (it revokes the grant and deletes the keyring
 entry), then remove the server from the host config (`claude plugin uninstall oh-my-cassette@cassette-editor`,
 `codex plugin remove oh-my-cassette`, delete the `opencode.json` block, `hermes mcp remove cassette`),
 delete `~/.config/oh-my-cassette` (connection metadata, no token) and run `uv cache clean oh-my-cassette`.
