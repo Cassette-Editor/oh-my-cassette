@@ -268,6 +268,66 @@ async def test_token_goes_to_same_origin_uploads_only(bridge_settings, workspace
     assert cross.put_headers[0]["x-upload-token"]  # the presigned headers are still sent
 
 
+async def test_a_project_a_mac_holds_takes_files_from_their_paths_and_the_originals_of_the_rest(
+    bridge_settings, workspace
+):
+    remote = ReferenceRemote(options=RemoteOptions(placement="device"))
+    slide, clip = (workspace / "media/slide.png").resolve(), (workspace / "media/clip.mp4").resolve()
+    remote.on_mac[str(slide)] = _sha(slide.read_bytes())
+    preparer = FakePreparer()
+    async with serve_remote(remote), bridge_host(bridge_settings(remote.url), preparer=preparer) as (_, host):
+        result = await host.call_tool(
+            "import_media", {"project_id": "p1", "paths": ["media/slide.png", "media/clip.mp4"]}
+        )
+    assert not result.is_error, result
+    found, sent = result.structured_content["refs"]
+    assert found.startswith("device:") and sent.startswith("media:")
+    # every file is placed as it is, before anything is prepared, by its absolute path and content
+    assert sorted((p["clientRef"], p["path"], p["sha256"]) for p in remote.placed) == [
+        ("f0", str(slide), _sha(slide.read_bytes())),
+        ("f1", str(clip), _sha(clip.read_bytes())),
+    ]
+    assert remote.placed[0]["arguments"] == {"project_id": "p1", "paths": ["f0", "f1"]}
+    assert remote.begun == [] and (preparer.transcodes, preparer.conversions) == (
+        0,
+        0,
+    )  # a Mac prepares its own
+    assert remote.blobs[sent] == {"original": clip.read_bytes()}
+    assert [h["content-type"] for h in remote.put_headers] == ["video/mp4"]
+
+
+async def test_a_cloud_project_placed_first_uploads_prepared_files_as_before(bridge_settings, workspace):
+    remote = ReferenceRemote(options=RemoteOptions(placement="cloud"))
+    async with serve_remote(remote), bridge_host(bridge_settings(remote.url)) as (_, host):
+        result = await host.call_tool("import_media", {"paths": ["media/slide.png"]})
+    assert not result.is_error, result
+    assert [p["clientRef"] for p in remote.placed] == ["f0"]
+    assert [b["clientRef"] for b in remote.begun] == ["f0"]
+
+
+async def test_an_original_sent_for_a_mac_goes_up_in_parts_named_by_no_whole_url(bridge_settings, workspace):
+    data = (FIXTURES / "tone.wav").read_bytes()
+    remote = ReferenceRemote(options=RemoteOptions(placement="device", part_size=1024))
+    async with serve_remote(remote), bridge_host(bridge_settings(remote.url)) as (_, host):
+        result = await host.call_tool("import_media", {"paths": ["media/tone.wav"]})
+    assert not result.is_error, result
+    (ref,) = result.structured_content["refs"]
+    assert remote.blobs[ref] == {"original": data}
+    assert remote.put_headers == [] and len(remote.part_headers) == -(-len(data) // 1024)
+
+
+async def test_a_typed_refusal_to_place_reaches_the_host_as_the_service_sent_it(bridge_settings, workspace):
+    refusal = {
+        "code": "device_offline",
+        "message": "The Mac that holds this project is not online.",
+        "retryable": True,
+    }
+    remote = ReferenceRemote(options=RemoteOptions(placement="device", place_refusal=refusal))
+    async with serve_remote(remote), bridge_host(bridge_settings(remote.url)) as (_, host):
+        result = await host.call_tool("import_media", {"paths": ["media/slide.png"]})
+    assert _error(result) == "device_offline"
+
+
 async def test_paths_outside_the_workspace_are_refused(remote, bridge_settings, workspace, tmp_path):
     outside = tmp_path / "elsewhere"
     outside.mkdir()

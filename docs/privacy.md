@@ -32,8 +32,8 @@ the sign-in service that endpoint names, and to the upload and download URLs the
 | Your editing requests and answers, as your agent passes them | the service | every tool call your agent makes |
 | The workspace: an opaque identifier for its directory and the directory's name (not its path) | the service | every tool call |
 | The host's name and version (e.g. Claude Code 2.x), as the host reports it or `CASSETTE_MCP_HOST` sets it | the service | every tool call |
-| For each file a call names: its name, its path relative to the workspace, its size and SHA-256, and its type | the service | when a tool call names it |
-| The files themselves, after local preparation | the upload URLs the service hands out | only when a tool call names them; nothing uploads on startup, in the background or on a schedule |
+| For each file a call names: its name, its path relative to the workspace and its absolute path, its size and SHA-256, and its type | the service | when a tool call names it |
+| The files themselves: prepared for a cloud project, as they are for a project a Mac elsewhere holds | the upload URLs the service hands out | only when a tool call names them; nothing uploads on startup, in the background or on a schedule |
 
 Before upload, video is transcoded on your machine with ffmpeg into the renditions the service
 declares, which drops the source's metadata (camera, location, timestamps). Audio and images the
@@ -41,6 +41,11 @@ service takes as they are upload **unchanged, with their embedded metadata** —
 EXIF GPS position or a song's ID3 tags; ones it does not take as they are get converted. Files come
 only from the workspace or `CASSETTE_ALLOWED_ROOTS`, and only media types unless you set
 `CASSETTE_UPLOAD_ANY_TYPE`.
+
+A project made in Cassette for Mac takes its media only into that Mac's library, so its files are not
+prepared here. When the bridge runs on that Mac, the app reads each file from its absolute path and
+nothing uploads. From any other machine each file uploads **unchanged, with its embedded metadata**,
+and Cassette deletes the cloud copy once the Mac has it.
 
 Sign-in happens in your browser on Cassette's own pages (an emailed code and a consent screen); the
 bridge never sees a password.
@@ -58,7 +63,7 @@ bridge never sees a password.
 
 ## What Cassette keeps
 
-A project the bridge starts is a cloud project. Cassette deletes it, with its media, after three idle
+A project the bridge starts is a cloud project unless you place it on one of your Macs. Cassette deletes it, with its media, after three idle
 days; every use pushes that back, and each answer says when it is due (`retention_expires_at`). A
 project made in Cassette for Mac stays on that Mac and is kept. For anything else Cassette stores,
 ask Cassette.

@@ -45,6 +45,7 @@ from oh_my_cassette.contract import (
     ROLE_UPLOAD_BEGIN,
     ROLE_UPLOAD_COMPLETE,
     ROLE_UPLOAD_PARTS,
+    ROLE_UPLOAD_PLACE,
     ContractError,
     Convert,
     LocalFilesSpec,
@@ -251,9 +252,10 @@ class LocalCall:
 
 @dataclass(frozen=True)
 class PutTarget:
-    """Where one artifact goes: one PUT to `url` with `headers`, or `parts` of (part size, part count)."""
+    """Where one artifact goes: one PUT to `url` with `headers`, or `parts` of (part size, part count), whose
+    URLs `upload.parts` signs; a target in parts may name no URL."""
 
-    url: str
+    url: str | None
     headers: dict[str, str]
     parts: tuple[int, int] | None
 
@@ -436,6 +438,9 @@ class LocalFiles:
         refs: dict[Path, str] = {}
         sends = anyio.CapacityLimiter(UPLOAD_CONCURRENCY)
         try:
+            place = self._upstream.tool_for_role(ROLE_UPLOAD_PLACE)
+            if place is not None and (placed := await self._place(place, call, job, sends)) is not None:
+                return placed
             # Files are prepared one at a time (a transcode keeps the cores busy); each one uploads as soon as it
             # is ready, while the next is prepared. A second file of the same content begins once the first has
             # uploaded, so the backend knows it rather than taking it for an unfinished upload of the first.
@@ -524,13 +529,65 @@ class LocalFiles:
             )
         return result
 
+    async def _place(
+        self, tool: types.Tool, call: LocalCall, job: LocalJob, sends: anyio.CapacityLimiter
+    ) -> dict[Path, str] | None:
+        """Ask where a call's files go before any is prepared: None when they upload as prepared files; otherwise
+        the refs of the files the backend took from their paths, with each other file's original sent as it is."""
+        files: list[UploadFile] = []
+        for index, source in enumerate(call.sources):
+            # A file sent as it is leaves the machine unprepared, so it is checked as an unprepared upload is.
+            unprepared = preparation_for(call.spec.prepare, source.mime, source.path.name) is None
+            if unprepared and not (self._settings.upload_any_type or looks_like(source.path, source.mime)):
+                raise BridgeError(
+                    "bridge.file_type_rejected", f"{source.relative} does not contain {source.mime} data"
+                )
+            digest = await sha256_file(source.path)
+            original = UploadArtifact(ARTIFACT_ORIGINAL, source.path, source.size, digest, source.mime)
+            files.append(
+                UploadFile(
+                    index,
+                    source.path.name,
+                    source.relative,
+                    source.size,
+                    digest,
+                    source.mime,
+                    (original,),
+                    None,
+                )
+            )
+        placed = await self._call(
+            tool,
+            {
+                "tool": call.tool,
+                "arguments": call.client_arguments(),
+                "files": [
+                    {
+                        "clientRef": file.client_ref,
+                        "name": file.name,
+                        "path": str(call.sources[file.index].path),
+                        "size": file.size,
+                        "sha256": file.sha256,
+                        "mimeType": file.mime,
+                    }
+                    for file in files
+                ],
+            },
+        )
+        data = placed.structured_content or {}
+        if data.get("placement") == "cloud":
+            return None
+        if data.get("placement") != "device" or not isinstance(data.get("files"), list):
+            raise BridgeError("bridge.contract_violation", f"{tool.name} returned no placement")
+        for file in files:
+            job.files[file.index].update(UPLOADING)
+        return await self._transfer(tool.name, call, files, data["files"], job, sends)
+
     async def _upload(
         self, call: LocalCall, files: list[UploadFile], job: LocalJob, sends: anyio.CapacityLimiter
     ) -> dict[Path, str]:
         begin = self._upstream.tool_for_role(ROLE_UPLOAD_BEGIN)
-        complete = self._upstream.tool_for_role(ROLE_UPLOAD_COMPLETE)
-        parts = self._upstream.tool_for_role(ROLE_UPLOAD_PARTS)
-        if begin is None or complete is None:
+        if begin is None:
             raise BridgeError("bridge.contract_violation", "the backend no longer offers its upload tools")
         for file in files:
             job.files[file.index].update(UPLOADING)
@@ -545,7 +602,22 @@ class LocalFiles:
         uploads = (started.structured_content or {}).get("uploads")
         if not isinstance(uploads, list):
             raise BridgeError("bridge.contract_violation", f"{begin.name} returned no uploads list")
+        return await self._transfer(begin.name, call, files, uploads, job, sends)
 
+    async def _transfer(
+        self,
+        source: str,
+        call: LocalCall,
+        files: list[UploadFile],
+        uploads: list[Any],
+        job: LocalJob,
+        sends: anyio.CapacityLimiter,
+    ) -> dict[Path, str]:
+        """Send what `source` (the tool that began the uploads) asked for and complete it: a ref per file."""
+        complete = self._upstream.tool_for_role(ROLE_UPLOAD_COMPLETE)
+        parts = self._upstream.tool_for_role(ROLE_UPLOAD_PARTS)
+        if complete is None:
+            raise BridgeError("bridge.contract_violation", "the backend no longer offers its upload tools")
         by_ref = {file.client_ref: file for file in files}
         refs: dict[Path, str] = {}
         pending: dict[str, tuple[UploadFile, dict[str, PutTarget]]] = {}
@@ -554,16 +626,16 @@ class LocalFiles:
             client_ref = entry.get("clientRef") if isinstance(entry, Mapping) else None
             if client_ref not in by_ref or client_ref in seen:
                 raise BridgeError(
-                    "bridge.contract_violation", f"{begin.name} returned an unknown or repeated upload entry"
+                    "bridge.contract_violation", f"{source} returned an unknown or repeated upload entry"
                 )
             seen.add(client_ref)
             file = by_ref[client_ref]
             if isinstance(entry.get("uploadId"), str):
-                targets = self._targets(begin.name, file, entry.get("puts"))
+                targets = self._targets(source, file, entry.get("puts"))
                 if parts is None and any(target.parts for target in targets.values()):
                     raise BridgeError(
                         "bridge.contract_violation",
-                        f"{begin.name} asked for {file.name} in parts but the backend offers no tool to sign them",
+                        f"{source} asked for {file.name} in parts but the backend offers no tool to sign them",
                     )
                 pending[entry["uploadId"]] = (file, targets)
             elif isinstance(entry.get("ref"), str):  # content the backend already has: nothing to send
@@ -572,10 +644,10 @@ class LocalFiles:
             else:
                 raise BridgeError(
                     "bridge.contract_violation",
-                    f"{begin.name} returned neither uploadId nor ref for {file.name}",
+                    f"{source} returned neither uploadId nor ref for {file.name}",
                 )
         if seen != set(by_ref):
-            raise BridgeError("bridge.contract_violation", f"{begin.name} did not return one entry per file")
+            raise BridgeError("bridge.contract_violation", f"{source} did not return one entry per file")
 
         async with _Tasks() as transfers:
             for upload_id, (file, targets) in pending.items():
@@ -613,7 +685,9 @@ class LocalFiles:
             if not isinstance(put, Mapping) or not isinstance(put.get("role"), str):
                 raise BridgeError("bridge.contract_violation", f"{tool_name} returned a malformed put target")
             url, headers, multipart = put.get("url"), put.get("headers") or {}, put.get("multipart")
-            if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            if (url is not None or multipart is None) and (
+                not isinstance(url, str) or not url.startswith(("http://", "https://"))
+            ):
                 raise BridgeError("bridge.contract_violation", f"{tool_name}: upload URLs must be http(s)")
             if not isinstance(headers, Mapping):
                 raise BridgeError("bridge.contract_violation", f"{tool_name}: put headers must be an object")
@@ -688,14 +762,16 @@ class LocalFiles:
         sends: anyio.CapacityLimiter,
     ) -> None:
         # The presigned URL is bound to the headers it was signed with, Content-Type included.
+        url = target.url
+        assert url is not None  # `_targets` refuses a whole PUT without a URL
         headers = {**target.headers, "Content-Length": str(artifact.size)}
-        if same_origin(target.url, self._settings.mcp_url):
-            headers.update(await self._upstream.credentials.headers(target.url))
+        if same_origin(url, self._settings.mcp_url):
+            headers.update(await self._upstream.credentials.headers(url))
         what = f"uploading {file.relative} ({artifact.role})"
         try:
             async with sends:
                 response = await self._http.put(
-                    target.url, content=_read(artifact.path, 0, artifact.size, sent), headers=headers
+                    url, content=_read(artifact.path, 0, artifact.size, sent), headers=headers
                 )
         except httpx.HTTPError as exc:
             raise BridgeError("bridge.upload_failed", f"{what}: {exc}", retryable=True) from exc

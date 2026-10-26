@@ -43,6 +43,7 @@ from oh_my_cassette.contract import (
     ROLE_UPLOAD_BEGIN,
     ROLE_UPLOAD_COMPLETE,
     ROLE_UPLOAD_PARTS,
+    ROLE_UPLOAD_PLACE,
 )
 
 MEDIA = ["video/*", "audio/*", "image/*"]
@@ -115,6 +116,10 @@ class RemoteOptions:
     bad_prepare: bool = False
     begin_without_puts: bool = False
     begin_refusal: dict[str, Any] | None = None  # upload begin answers this typed error instead
+    # Where the files of a call go, as `upload.place` answers: None offers no place tool, "cloud" uploads prepared
+    # files, "device" sends them as they are to the Mac holding the project, which takes those found at their paths.
+    placement: str | None = None
+    place_refusal: dict[str, Any] | None = None  # upload place answers this typed error instead
     token: str | None = REFERENCE_TOKEN
     handshake_only: bool = False
     instructions: str | None = "Reference Cassette backend: import local media with import_media."
@@ -141,6 +146,9 @@ class ReferenceRemote:
     base_url: str = ""
     url: str = ""
     begun: list[dict[str, Any]] = field(default_factory=list)
+    placed: list[dict[str, Any]] = field(default_factory=list)
+    # Paths the Mac holding the project finds a file at, with the content it has there.
+    on_mac: dict[str, str] = field(default_factory=dict)
     uploads: dict[str, dict[str, Any]] = field(default_factory=dict)
     refs_by_sha: dict[str, str] = field(default_factory=dict)
     blobs: dict[str, dict[str, bytes]] = field(default_factory=dict)
@@ -407,6 +415,65 @@ class ReferenceRemote:
                     content=[types.TextContent(type="text", text=json.dumps({"uploads": uploads}))],
                     structured_content={"uploads": uploads},
                 )
+
+            if opts.placement is not None:
+
+                @mcp.tool(
+                    name="cassette_upload_place",
+                    description="Used by the local oh-my-cassette bridge.",
+                    meta={META_BRIDGE_ROLE: ROLE_UPLOAD_PLACE},
+                )
+                async def upload_place(
+                    files: list[dict[str, Any]], tool: str = "", arguments: dict[str, Any] | None = None
+                ) -> types.CallToolResult:
+                    def answer(content: dict[str, Any], is_error: bool = False) -> types.CallToolResult:
+                        return types.CallToolResult(
+                            content=[types.TextContent(type="text", text=json.dumps(content))],
+                            structured_content=content,
+                            is_error=is_error,
+                        )
+
+                    if opts.place_refusal:
+                        return answer({"error": opts.place_refusal}, True)
+                    self.placed.extend({"tool": tool, "arguments": arguments, **item} for item in files)
+                    if opts.placement == "cloud":
+                        return answer({"placement": "cloud"})
+                    placed: list[dict[str, Any]] = []
+                    for item in files:
+                        if self.on_mac.get(item["path"]) == item["sha256"]:
+                            ref = f"device:{item['sha256'][:16]}"
+                            self.refs_by_sha[item["sha256"]] = ref
+                            placed.append({"clientRef": item["clientRef"], "ref": ref})
+                            continue
+                        # Anything else goes up as it is: its original, the one artifact a Mac takes.
+                        upload_id = uuid.uuid4().hex
+                        original = {
+                            "role": "original",
+                            "size": item["size"],
+                            "sha256": item["sha256"],
+                            "mimeType": item["mimeType"],
+                        }
+                        record: dict[str, Any] = {
+                            "file": {**item, "artifacts": [original], "preparation": None},
+                            "data": {},
+                            "plans": {},
+                            "parts": {},
+                            "sigs": {},
+                        }
+                        self.uploads[upload_id] = record
+                        put: dict[str, Any] = {"role": "original", "headers": {}}
+                        if opts.part_size and item["size"] > opts.part_size:
+                            plan = (opts.part_size, math.ceil(item["size"] / opts.part_size))
+                            record["plans"]["original"] = plan
+                            put["multipart"] = {"partSize": plan[0], "partCount": plan[1]}
+                        else:
+                            put["url"] = f"{self._upload_base()}/uploads/{upload_id}/original"
+                            put["headers"] = {
+                                "Content-Type": item["mimeType"],
+                                "X-Upload-Token": f"t-{upload_id}",
+                            }
+                        placed.append({"clientRef": item["clientRef"], "uploadId": upload_id, "puts": [put]})
+                    return answer({"placement": "device", "files": placed})
 
             if opts.parts_tool:
 
