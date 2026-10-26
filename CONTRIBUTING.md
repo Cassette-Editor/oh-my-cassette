@@ -61,8 +61,9 @@ claude mcp add cassette-dev -e OH_MY_CASSETTE_LOG=DEBUG -- uv run --directory "$
   RUN_CASSETTE_LIVE=1 uv run pytest tests/live -q -rs
   ```
 
-CI installs ffmpeg and runs lint and the suite on Linux only (Python 3.11, 3.13 and 3.14), builds the
-wheel and starts it once with `uvx`; the `ci-ok` job sums them up. Keep it credential-free and
+CI runs lint and the suite on Linux only (Python 3.11, 3.13 and 3.14), builds the wheel and starts it
+once with `uvx`; the `ci-ok` job sums them up. It installs no ffmpeg, whose package mirrors stalled its
+runs, so `tests/test_prepare.py` runs only locally: run the whole suite with ffmpeg before a release. Keep it credential-free and
 deterministic.
 
 ## Changing the contract
