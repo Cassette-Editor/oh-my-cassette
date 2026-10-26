@@ -2,7 +2,7 @@
 
 > Oh My Cassette is an open-source MCP server (PyPI: `oh-my-cassette`) that lets Claude Code, Codex, OpenCode and Hermes drive the Cassette video editor: import local media, send the user's editing requests to the Cassette agent one turn at a time, read the versioned timeline back, undo/redo, and export.
 
-Hosts start it with `uvx oh-my-cassette==0.5.1`. It is a generic bridge to the Cassette MCP service (`CASSETTE_MCP_URL`, Streamable HTTP, bearer token): the editing tools, their descriptions and the workflow instructions come from that service. The bridge adds only what needs the user's machine: it transcodes local video with ffmpeg and uploads local files before a call, downloads exported files after one, and answers a typed `preparing` status while local work continues in the background. MIT licensed.
+Hosts start it with `uvx oh-my-cassette==0.6.0`. It is a generic bridge to the Cassette MCP service (`CASSETTE_MCP_URL`, Streamable HTTP, bearer token): the editing tools, their descriptions and the workflow instructions come from that service. The bridge adds only what needs the user's machine: it transcodes local video with ffmpeg and uploads local files before a call, downloads exported files after one, and answers a typed `preparing` status while local work continues in the background. MIT licensed.
 
 ## Docs
 

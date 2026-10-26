@@ -43,7 +43,7 @@ rendering. Using the plugin therefore requires a Cassette account.
   [`SECURITY.md`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/SECURITY.md)
   describes the trust boundaries.
 - **Credentials.** Sign-in stores OAuth tokens in your operating-system keyring. Do not copy a
-  token into shared configuration, and run `uvx oh-my-cassette==0.5.1 logout` on a machine you stop using.
+  token into shared configuration, and run `uvx oh-my-cassette==0.6.0 logout` on a machine you stop using.
 
 ## No affiliation
 
