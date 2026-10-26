@@ -34,7 +34,12 @@ META_REQUEST_ID = f"{NAMESPACE}/requestId"
 ROLE_UPLOAD_BEGIN = "upload.begin"
 ROLE_UPLOAD_COMPLETE = "upload.complete"
 ROLE_UPLOAD_PARTS = "upload.parts"
-BRIDGE_ROLES: frozenset[str] = frozenset({ROLE_UPLOAD_BEGIN, ROLE_UPLOAD_COMPLETE, ROLE_UPLOAD_PARTS})
+# Asked before any file is prepared: whether the files upload as prepared files, or go as they are to where the
+# call's target keeps its media (the Mac that holds a project), which may take them from their paths.
+ROLE_UPLOAD_PLACE = "upload.place"
+BRIDGE_ROLES: frozenset[str] = frozenset(
+    {ROLE_UPLOAD_BEGIN, ROLE_UPLOAD_COMPLETE, ROLE_UPLOAD_PARTS, ROLE_UPLOAD_PLACE}
+)
 
 ARTIFACT_ORIGINAL = "original"
 DEFAULT_LOCAL_ACCEPT: tuple[str, ...] = ("video/*", "audio/*", "image/*")
