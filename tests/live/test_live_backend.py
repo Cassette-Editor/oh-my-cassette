@@ -80,7 +80,10 @@ async def test_open_import_turn_export_and_revert(settings):
     files = _samples(settings.workspace / "media")
     async with bridge_host(settings) as (_, host):
         with anyio.fail_after(STEP_LIMIT_SEC):
-            opened = await _call(host, "cassette_project_open", {"title": "oh-my-cassette live test"})
+            # An account with Macs names where a new project lives; this one keeps its media in the cloud.
+            opened = await _call(
+                host, "cassette_project_open", {"title": "oh-my-cassette live test", "place": "browser"}
+            )
         project_id = opened["project_id"]
         assert opened["created"] is True
 
