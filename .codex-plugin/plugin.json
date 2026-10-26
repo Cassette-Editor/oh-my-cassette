@@ -22,7 +22,7 @@
     "cassette": {
       "command": "uvx",
       "args": [
-        "oh-my-cassette==0.5.1"
+        "oh-my-cassette==0.6.0"
       ],
       "env": {},
       "env_vars": [
