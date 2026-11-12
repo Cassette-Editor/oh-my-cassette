@@ -60,15 +60,15 @@ codex plugin add oh-my-cassette@cassette-editor
 hermes mcp add cassette --command uvx --args oh-my-cassette==0.6.0
 ```
 
-OpenCode 与其它 MCP 宿主见下文[安装](#安装)。
+OpenCode 与其它 MCP 客户端见下文[安装](#安装)。
 
-**2. 登录**（所有宿主都需要）：
+**2. 登录**（所有客户端都需要）：
 
 ```bash
 uvx oh-my-cassette==0.6.0 login
 ```
 
-在浏览器里输入 Cassette 发到邮箱的验证码并授权。如果宿主不支持刷新工具列表，重启 agent，然后直接说：
+在浏览器里输入 Cassette 发到邮箱的验证码并授权。如果客户端不支持刷新工具列表，重启 agent，然后直接说：
 
 > *新建一个 Cassette 项目，导入 ./footage 里的素材，剪一个 30 秒的旅行短片，开头加标题。*
 
@@ -98,7 +98,7 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
   Mac 持有的项目则原样发送（见[项目保留期](#项目保留期)）。每个文件准备好就开始上传，
   同时准备下一个，分片上传、最多四路并发；上传中断的文件再次导入时会接上之前那次导入。导出的文件下载到
   `cassette-exports/`。每次调用附带工作区标识，服务可以据此记住一个目录对应的项目。
-- **长任务不会让宿主超时。** 每次调用只等一个有界窗口；本地预处理没做完时回答 `preparing`，工作在后台继续，
+- **长任务不会让客户端超时。** 每次调用只等一个有界窗口；本地预处理没做完时回答 `preparing`，工作在后台继续，
   用同样的参数再调用一次就能接上。
 - **重新部署也不怕。** bridge 会自动重连；带请求标识的调用在连接断开或被服务拒绝时由 bridge 自己重发；
   中断的下载会续传；自己的错误用 `bridge.*` 代码并带 `retryable` 标记（服务给出等待时间时还带
@@ -127,7 +127,7 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 | --- | --- | --- |
 | `CASSETTE_MCP_URL` | 已保存的连接，否则 `https://mcp.trycassette.online/mcp` | 显式覆盖 MCP 端点。 |
 | `CASSETTE_AUTH_TOKEN` | 未设置 | 高级兼容入口；默认使用 `login` 和系统钥匙串。仍受账号、scope 和 resource 校验。不要写入共享配置。 |
-| `CASSETTE_WORKSPACE` | 宿主启动 server 时的目录 | 相对路径从这里解析，本地文件只能来自这里，服务也可以据此记住这个目录对应的项目。宿主在整个磁盘根目录或主目录启动 server 时，不会读取任何文件，直到设置这一项或 `CASSETTE_ALLOWED_ROOTS`。 |
+| `CASSETTE_WORKSPACE` | 客户端启动 server 时的目录 | 相对路径从这里解析，本地文件只能来自这里，服务也可以据此记住这个目录对应的项目。客户端在整个磁盘根目录或主目录启动 server 时，不会读取任何文件，直到设置这一项或 `CASSETTE_ALLOWED_ROOTS`。 |
 | `CASSETTE_ALLOWED_ROOTS` | 未设置 | 额外允许读取本地文件的目录（用 `:` 分隔，Windows 上用 `;`）。 |
 | `CASSETTE_DOWNLOAD_DIR` | `<工作区>/cassette-exports` | 导出文件保存的位置。默认位置必须在工作区内：指向别处的 `cassette-exports` 符号链接会被拒绝。 |
 | `CASSETTE_MAX_UPLOAD_MB` / `CASSETTE_MAX_DOWNLOAD_MB` | `4096` / `16384` | 单个文件的大小上限。 |
@@ -136,7 +136,7 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 | `CASSETTE_FFMPEG` / `CASSETTE_FFPROBE` | 从 `PATH` 查找 | 预处理本地媒体用的 ffmpeg 和 ffprobe。 |
 | `CASSETTE_TEMP_DIR` | 系统临时目录 | 每次上传在这里新建自己的私有目录（`oh-my-cassette-job-*`），存放上传前的预处理产物。 |
 | `CASSETTE_CONNECT_TIMEOUT_SEC` | `10` | 连接服务时的最长等待时间。 |
-| `CASSETTE_MCP_HOST` | 未设置 | 宿主没有报出自己的名字时，发给服务的宿主名。 |
+| `CASSETTE_MCP_HOST` | 未设置 | 客户端没有报出自己的名字时，发给服务的客户端名。 |
 | `CASSETTE_AUTH_DIRECTORY` | `~/.config/oh-my-cassette` | 已保存连接的设置存放位置（令牌本身仍在钥匙串里）。 |
 | `OH_MY_CASSETTE_LOG` | `WARNING` | stderr 日志级别。 |
 
@@ -198,9 +198,9 @@ curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.6
   -o ~/.hermes/skills/cassette-video-edit/SKILL.md
 ```
 
-在 `~/.hermes/config.yaml` 里把 `mcp_servers.cassette.timeout` 设为 `600`，一次调用里的有界等待才放得下。Hermes 在这里只是普通 MCP 宿主：0.4 的 gateway/插件层已经删除。
+在 `~/.hermes/config.yaml` 里把 `mcp_servers.cassette.timeout` 设为 `600`，一次调用里的有界等待才放得下。Hermes 在这里只是普通 MCP 客户端：0.4 的 gateway/插件层已经删除。
 
-### 其它 MCP 宿主
+### 其它 MCP 客户端
 
 命令 `uvx`，参数 `["oh-my-cassette==0.6.0"]`，stdio 传输，工具超时 10 分钟，再加上面的环境变量。没有 uv 的机器可以用 `pipx run oh-my-cassette==0.6.0`。
 
@@ -237,13 +237,13 @@ bridge 也会以 `bridge.protocol_unsupported` 拒绝它。
 
 - **重新登录**：`uvx oh-my-cassette==0.6.0 login`。0.4 的密码和令牌不再使用。
 - **工具是新的。** 项目、剪辑对话、提问、计划、撤销、素材、分析和导出都由服务提供并自带说明；0.4 的工具名（`cassette_run_job`、
-  `cassette_ingest_media`、`cassette_match_bgm` 等）已删除。重新安装插件，或把宿主配置改为 `uvx oh-my-cassette==0.6.0`。
+  `cassette_ingest_media`、`cassette_match_bgm` 等）已删除。重新安装插件，或把客户端配置改为 `uvx oh-my-cassette==0.6.0`。
 - **项目在你的 Cassette 账号里**，和网页版、Cassette for Mac 里的是同一批；每次回答带的编辑器链接打开的就是当前项目。0.4 的会话不会迁移。
-- **Hermes** 现在是普通 MCP 宿主，请移除 0.4 的网关插件。
+- **Hermes** 现在是普通 MCP 客户端，请移除 0.4 的网关插件。
 
 ## 更新
 
-改宿主配置里的版本号（`oh-my-cassette==<新版本>`）或重装插件；`uvx` 下次启动时拉取新 wheel。版本记录见 [CHANGELOG.md](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md)。
+改客户端配置里的版本号（`oh-my-cassette==<新版本>`）或重装插件；`uvx` 下次启动时拉取新 wheel。版本记录见 [CHANGELOG.md](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/CHANGELOG.md)。
 
 ## 开发
 

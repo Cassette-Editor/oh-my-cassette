@@ -482,7 +482,7 @@ wheels = [
 
 [[package]]
 name = "oh-my-cassette"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "filelock" },
