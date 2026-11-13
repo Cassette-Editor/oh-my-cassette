@@ -66,10 +66,10 @@ See README.md for defaults.
 
 ## Verify
 
-`uvx oh-my-cassette==0.6.0 --version` prints `oh-my-cassette 0.5.0`. In the host, the tool list should
-show the service's tools. If it shows only `cassette_bridge_status`, call it: it reports the endpoint
-URL, an `error_code` (`bridge.backend_unreachable`, `bridge.unauthorized` or `bridge.upgrade_required`)
-and the reason.
+`uvx oh-my-cassette==0.6.0 --version` prints `oh-my-cassette` and the version you pinned. In the host, the
+tool list should show the service's tools. If it shows only `cassette_bridge_status`, call it: it reports the
+endpoint URL, an `error_code` (`bridge.backend_unreachable`, `bridge.unauthorized`, `bridge.forbidden`,
+`bridge.auth_unavailable`, `bridge.protocol_unsupported` or `bridge.upgrade_required`) and the reason.
 
 ## Uninstalling
 

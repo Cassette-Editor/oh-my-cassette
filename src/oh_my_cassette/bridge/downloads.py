@@ -4,6 +4,10 @@ A download writes to a `.part` file named after its URL, so one cut short resume
 in this call or a later one: a ranged request appends to it when the server answers 206 and starts
 over when it answers 200. Transient failures (network, 5xx, 429) are retried a few times and leave
 the part in place; anything else removes it.
+
+The files of one result download as one background job (`LocalJobs`): the call waits for them a bounded
+time, reporting progress, and answers with a note saying where each file will appear when the wait runs
+out. The download goes on and lands there; the same result coming back attaches to the same job.
 """
 
 from __future__ import annotations
@@ -12,6 +16,8 @@ import copy
 import hashlib
 import os
 import re
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -23,6 +29,7 @@ import mcp_types as types
 from oh_my_cassette.auth import Credentials
 from oh_my_cassette.bridge.errors import BridgeError, backoff_seconds, retry_after_seconds
 from oh_my_cassette.bridge.files import CHUNK, same_origin
+from oh_my_cassette.bridge.jobs import DONE, DOWNLOADING, FileProgress, LocalJob, LocalJobs, ReportFn
 from oh_my_cassette.bridge.settings import BridgeSettings
 from oh_my_cassette.contract import ContractError, DownloadSpec, download_specs, pointer_set
 
@@ -93,7 +100,10 @@ class Downloads:
         self._etags: dict[str, str] = {}  # a URL's strong ETag, as this process last saw it
         self._parts: dict[Path, anyio.Lock] = {}  # one download at a time per part file
 
-    async def apply(self, result: types.CallToolResult) -> types.CallToolResult:
+    async def apply(
+        self, result: types.CallToolResult, *, jobs: LocalJobs, window: float, report: ReportFn
+    ) -> types.CallToolResult:
+        """Download the files `result` declares, waiting at most `window` seconds for them."""
         try:
             specs = download_specs(result.meta)
         except ContractError as exc:
@@ -105,23 +115,62 @@ class Downloads:
         structured = copy.deepcopy(result.structured_content)
         for spec in specs[MAX_DOWNLOADS:]:
             content.append(_note(f"bridge: did not download {spec.file_name}; it is at {shown(spec.url)}"))
-        for spec in specs[:MAX_DOWNLOADS]:
-            try:
-                path = await self.fetch(spec)
-            except BridgeError as exc:
+        wanted = specs[:MAX_DOWNLOADS]
+        key = ("downloads", tuple(spec.url for spec in wanted))
+        job = jobs.attach(
+            key,
+            lambda: [FileProgress(spec.file_name, (DOWNLOADING,)) for spec in wanted],
+            partial(self._fetch_all, wanted),
+            label="Downloading exported files",
+        )
+        if not await jobs.wait(job, window, report):
+            directory = self._settings.downloads
+            for spec in wanted:
+                name = safe_file_name(spec.file_name)
                 content.append(
                     _note(
-                        f"Download of {spec.file_name} failed ({exc.message}); it is still at {shown(spec.url)}"
+                        f"Still downloading {spec.file_name}: the download goes on in the background and the file "
+                        f"appears in {directory} as {name} (or with a number added when that name is taken) "
+                        "once it is complete."
+                    )
+                )
+            return result.model_copy(update={"content": content, "structured_content": structured})
+        outcomes: list[Path | BridgeError] = jobs.settle(key, job)
+        jobs.forget(key, job)
+        for spec, outcome in zip(wanted, outcomes, strict=True):
+            if isinstance(outcome, BridgeError):
+                content.append(
+                    _note(
+                        f"Download of {spec.file_name} failed ({outcome.message}); it is still at {shown(spec.url)}"
                     )
                 )
                 continue
-            content.append(_note(f"Downloaded {spec.file_name} to {path}"))
+            content.append(_note(f"Downloaded {spec.file_name} to {outcome}"))
             if spec.pointer and isinstance(structured, dict):
                 try:
-                    pointer_set(structured, spec.pointer, str(path))
+                    pointer_set(structured, spec.pointer, str(outcome))
                 except ContractError:
                     pass
         return result.model_copy(update={"content": content, "structured_content": structured})
+
+    async def _fetch_all(self, specs: list[DownloadSpec], job: LocalJob) -> list[Path | BridgeError]:
+        """Each file in turn: where it landed, or why it did not."""
+        outcomes: list[Path | BridgeError] = []
+        for spec, progress in zip(specs, job.files, strict=True):
+
+            def received(total: int, spec: DownloadSpec = spec, progress: FileProgress = progress) -> None:
+                if spec.size:
+                    progress.update(DOWNLOADING, 100 * total / spec.size)
+
+            try:
+                outcomes.append(await self.fetch(spec, received))
+            except BridgeError as exc:
+                outcomes.append(exc)
+            except Exception as exc:  # a local write that failed: reported with the file, like any other
+                detail = str(exc) or type(exc).__name__
+                outcomes.append(BridgeError("bridge.download_failed", detail, retryable=True))
+            progress.update(DONE)
+        return outcomes
 
     def _directory(self) -> Path:
         """The downloads directory, which must stay inside the workspace unless CASSETTE_DOWNLOAD_DIR names it:
@@ -141,14 +190,17 @@ class Downloads:
             )
         return real
 
-    async def fetch(self, spec: DownloadSpec) -> Path:
+    async def fetch(self, spec: DownloadSpec, received: Callable[[int], None] | None = None) -> Path:
+        """Download one file; `received` is told how many of its bytes are here as they arrive."""
         directory = self._directory()
         name = safe_file_name(spec.file_name)
         part = directory / f".{name}.{hashlib.sha256(spec.url.encode()).hexdigest()[:12]}.part"
         async with self._parts.setdefault(part, anyio.Lock()):
-            return await self._fetch(spec, directory, name, part)
+            return await self._fetch(spec, directory, name, part, received or (lambda _total: None))
 
-    async def _fetch(self, spec: DownloadSpec, directory: Path, name: str, part: Path) -> Path:
+    async def _fetch(
+        self, spec: DownloadSpec, directory: Path, name: str, part: Path, received: Callable[[int], None]
+    ) -> Path:
         headers: dict[str, str] = {}
         if same_origin(spec.url, self._settings.mcp_url):
             headers.update(await self._credentials.headers(spec.url))
@@ -156,7 +208,7 @@ class Downloads:
         try:
             while True:
                 try:
-                    total, sha256 = await self._receive(spec, part, headers)
+                    total, sha256 = await self._receive(spec, part, headers, received)
                     break
                 except _Interrupted as exc:
                     if attempt + 1 >= DOWNLOAD_ATTEMPTS:
@@ -177,7 +229,9 @@ class Downloads:
                 part.unlink(missing_ok=True)
             raise
 
-    async def _receive(self, spec: DownloadSpec, part: Path, headers: dict[str, str]) -> tuple[int, str]:
+    async def _receive(
+        self, spec: DownloadSpec, part: Path, headers: dict[str, str], received: Callable[[int], None]
+    ) -> tuple[int, str]:
         """Bring `part` up to the whole file; its size and sha256. Raises `_Interrupted` when a transient
         failure stopped it."""
         if part.is_symlink():  # never resumed into, nor written through
@@ -229,6 +283,7 @@ class Downloads:
                             )
                         digest.update(chunk)
                         await handle.write(chunk)
+                        received(total)
                 return total, digest.hexdigest()
         except httpx.HTTPError as exc:
             raise _Interrupted(str(exc) or type(exc).__name__) from exc

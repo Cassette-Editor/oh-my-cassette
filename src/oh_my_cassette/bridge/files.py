@@ -437,9 +437,13 @@ class LocalFiles:
         workdir = Path(tempfile.mkdtemp(prefix="oh-my-cassette-job-", dir=root))
         refs: dict[Path, str] = {}
         sends = anyio.CapacityLimiter(UPLOAD_CONCURRENCY)
+        digests: dict[Path, str] = {}  # sources hashed for `upload.place`, so no file is read twice for it
         try:
             place = self._upstream.tool_for_role(ROLE_UPLOAD_PLACE)
-            if place is not None and (placed := await self._place(place, call, job, sends)) is not None:
+            if (
+                place is not None
+                and (placed := await self._place(place, call, job, sends, digests)) is not None
+            ):
                 return placed
             # Files are prepared one at a time (a transcode keeps the cores busy); each one uploads as soon as it
             # is ready, while the next is prepared. A second file of the same content begins once the first has
@@ -447,7 +451,9 @@ class LocalFiles:
             uploaded: dict[str, anyio.Event] = {}
             async with _Tasks() as uploads:
                 for index, source in enumerate(call.sources):
-                    file = await self._describe(index, source, call, workdir / f"f{index}", job.files[index])
+                    file = await self._describe(
+                        index, source, call, workdir / f"f{index}", job.files[index], digests.get(source.path)
+                    )
                     earlier = uploaded.get(file.sha256)
                     done = uploaded.setdefault(file.sha256, anyio.Event())
 
@@ -476,8 +482,16 @@ class LocalFiles:
                 await anyio.to_thread.run_sync(shutil.rmtree, workdir, True)
 
     async def _describe(
-        self, index: int, source: LocalSource, call: LocalCall, workdir: Path, progress: FileProgress
+        self,
+        index: int,
+        source: LocalSource,
+        call: LocalCall,
+        workdir: Path,
+        progress: FileProgress,
+        source_digest: str | None = None,
     ) -> UploadFile:
+        """The file as upload.begin describes it, prepared first when it needs to be. `source_digest` is the
+        source's SHA-256 when it is already known."""
         preparation = preparation_for(call.spec.prepare, source.mime, source.path.name)
 
         def transcoding(percent: float) -> None:
@@ -488,7 +502,7 @@ class LocalFiles:
                 raise BridgeError(
                     "bridge.file_type_rejected", f"{source.relative} does not contain {source.mime} data"
                 )
-            digest = await sha256_file(source.path)
+            digest = source_digest or await sha256_file(source.path)
             original = UploadArtifact(ARTIFACT_ORIGINAL, source.path, source.size, digest, source.mime)
             name = source.path.name
             return UploadFile(
@@ -505,7 +519,7 @@ class LocalFiles:
             return UploadFile(
                 index, name, source.relative, size, digest, conversion.mime_type, (converted,), None
             )
-        digest = await sha256_file(source.path)
+        digest = source_digest or await sha256_file(source.path)
         artifacts, report = await self._preparer.transcode(source.path, preparation, workdir, transcoding)
         renditions = tuple(
             [
@@ -530,10 +544,16 @@ class LocalFiles:
         return result
 
     async def _place(
-        self, tool: types.Tool, call: LocalCall, job: LocalJob, sends: anyio.CapacityLimiter
+        self,
+        tool: types.Tool,
+        call: LocalCall,
+        job: LocalJob,
+        sends: anyio.CapacityLimiter,
+        digests: dict[Path, str],
     ) -> dict[Path, str] | None:
         """Ask where a call's files go before any is prepared: None when they upload as prepared files; otherwise
-        the refs of the files the backend took from their paths, with each other file's original sent as it is."""
+        the refs of the files the backend took from their paths, with each other file's original sent as it is.
+        Each source's SHA-256 is left in `digests`."""
         files: list[UploadFile] = []
         for index, source in enumerate(call.sources):
             # A file sent as it is leaves the machine unprepared, so it is checked as an unprepared upload is.
@@ -542,7 +562,7 @@ class LocalFiles:
                 raise BridgeError(
                     "bridge.file_type_rejected", f"{source.relative} does not contain {source.mime} data"
                 )
-            digest = await sha256_file(source.path)
+            digest = digests[source.path] = await sha256_file(source.path)
             original = UploadArtifact(ARTIFACT_ORIGINAL, source.path, source.size, digest, source.mime)
             files.append(
                 UploadFile(

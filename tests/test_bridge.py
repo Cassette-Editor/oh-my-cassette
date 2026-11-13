@@ -13,6 +13,7 @@ from tests.bridge_support import bridge_host
 from tests.reference_remote import ReferenceRemote, RemoteOptions, free_port, serve_remote
 
 from oh_my_cassette.bridge import downloads
+from oh_my_cassette.bridge import server as bridge_server
 from oh_my_cassette.bridge.downloads import Downloads
 from oh_my_cassette.bridge.errors import BridgeError
 from oh_my_cassette.bridge.files import transfer_guard
@@ -122,6 +123,35 @@ async def test_downloads_declared_artifacts_into_the_workspace(remote, bridge_se
     assert (exports / "final.mp4").read_bytes() == b"FAKE-MP4-" * 4096
     assert "Downloaded final.mp4" in first.content[-1].text
     assert sorted(p.name for p in exports.iterdir()) == ["final (1).mp4", "final.mp4"]
+
+
+async def test_a_slow_download_goes_on_in_the_background_and_lands_in_the_exports(
+    remote, bridge_settings, monkeypatch
+):
+    monkeypatch.setattr(bridge_server, "MIN_DOWNLOAD_WAIT_SEC", 0.0)
+    remote.options.download_delay = 1.0
+    settings = bridge_settings(remote.url, local_wait_sec=0.3)
+    exports = settings.workspace / "cassette-exports"
+    seen: list[str | None] = []
+
+    async def on_progress(progress, total, message):
+        seen.append(message)
+
+    async with bridge_host(settings) as (_, host):
+        with anyio.fail_after(5):
+            result = await host.call_tool("export_video", {"name": "final"}, progress_callback=on_progress)
+        assert not result.is_error, result
+        assert result.structured_content["file"].startswith("http://127.0.0.1")  # not here yet: still the URL
+        note = result.content[-1].text
+        assert "Still downloading final.mp4" in note and f"in {exports} as final.mp4" in note
+        assert seen and seen[0].startswith("Downloading exported files, 0/1 done: final.mp4 downloading")
+        target = exports / "final.mp4"
+        with anyio.fail_after(10):  # the bridge goes on downloading after the call answered
+            while not (target.exists() and target.stat().st_size == len(b"FAKE-MP4-" * 4096)):
+                await anyio.sleep(0.05)
+    assert target.read_bytes() == b"FAKE-MP4-" * 4096
+    assert [p.name for p in exports.iterdir()] == ["final.mp4"]
+    assert len(remote.download_headers) == 1
 
 
 async def test_bad_download_keeps_the_url_and_leaves_no_file(remote, bridge_settings):
@@ -251,6 +281,28 @@ async def test_a_rate_limited_call_reports_the_wait_and_keeps_the_connection(rem
         assert not (await host.call_tool("slow_turn", {"steps": 1})).is_error
         assert bridge.upstream._attempts == attempts  # no reconnect
     assert remote.refused == [429] and len(remote.calls) == 1
+
+
+async def test_a_refusal_is_reported_to_the_call_it_answered_and_no_other(remote, bridge_settings):
+    """A call whose connection goes silent is told so, though another call was turned away meanwhile."""
+    settings = bridge_settings(remote.url, read_timeout_sec=1.0)
+    results = {}
+    async with bridge_host(settings) as (_, host):
+
+        async def silent() -> None:
+            results["silent"] = await host.call_tool("silent_turn", {"seconds": 3})
+
+        with anyio.fail_after(15):
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(silent)
+                while not remote.calls:
+                    await anyio.sleep(0.01)
+                remote.options.refusals = [(429, 7)]
+                results["refused"] = await host.call_tool("slow_turn", {"steps": 1})
+    assert results["refused"].structured_content["error"]["code"] == "bridge.rate_limited"
+    error = results["silent"].structured_content["error"]
+    assert error["code"] == "bridge.backend_unreachable", error
+    assert "may still be running" in error["message"]
 
 
 async def test_a_refused_call_says_cassette_did_not_take_it(remote, bridge_settings):

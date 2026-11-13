@@ -108,7 +108,9 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
   Exported files are downloaded into `cassette-exports/`. The workspace identity travels with each
   call so the service can remember a project per directory.
 - **Long work never times out the host.** Every call waits a bounded time; slow local preparation
-  answers `preparing` and keeps going in the background, and the next identical call picks it up.
+  answers `preparing` and keeps going in the background, and the next identical call picks it up. An
+  export download that outlasts the wait goes on in the background too, and the answer says where the
+  file will appear.
 - **It survives deploys.** It reconnects on its own, retries a call that carries a request id when
   the connection drops or the service turns it away, resumes interrupted downloads, reports `bridge.*`
   errors with a `retryable` flag (and `retry_after_seconds` when the service said when), and, while

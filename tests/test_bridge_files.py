@@ -296,13 +296,28 @@ async def test_a_project_a_mac_holds_takes_files_from_their_paths_and_the_origin
     assert [h["content-type"] for h in remote.put_headers] == ["video/mp4"]
 
 
-async def test_a_cloud_project_placed_first_uploads_prepared_files_as_before(bridge_settings, workspace):
+async def test_a_cloud_project_placed_first_uploads_prepared_files_as_before(
+    bridge_settings, workspace, monkeypatch
+):
+    hashed: list[str] = []
+    real_sha256_file = files.sha256_file
+
+    async def counting_sha256_file(path: Path) -> str:
+        hashed.append(path.name)
+        return await real_sha256_file(path)
+
+    monkeypatch.setattr(files, "sha256_file", counting_sha256_file)
     remote = ReferenceRemote(options=RemoteOptions(placement="cloud"))
-    async with serve_remote(remote), bridge_host(bridge_settings(remote.url)) as (_, host):
-        result = await host.call_tool("import_media", {"paths": ["media/slide.png"]})
+    async with (
+        serve_remote(remote),
+        bridge_host(bridge_settings(remote.url), preparer=FakePreparer()) as (_, host),
+    ):
+        result = await host.call_tool("import_media", {"paths": ["media/slide.png", "media/clip.mp4"]})
     assert not result.is_error, result
-    assert [p["clientRef"] for p in remote.placed] == ["f0"]
-    assert [b["clientRef"] for b in remote.begun] == ["f0"]
+    assert [p["clientRef"] for p in remote.placed] == ["f0", "f1"]
+    assert [b["clientRef"] for b in remote.begun] == ["f0", "f1"]
+    # each source is read once for its digest, though both the placement and the upload name it
+    assert hashed.count("slide.png") == 1 and hashed.count("clip.mp4") == 1
 
 
 async def test_an_original_sent_for_a_mac_goes_up_in_parts_named_by_no_whole_url(bridge_settings, workspace):

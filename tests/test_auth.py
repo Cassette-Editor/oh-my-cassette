@@ -146,6 +146,56 @@ def test_logout_handles_standard_empty_response_and_retains_grant_when_offline(e
     assert store.get_password(auth.SERVICE, c.key) is None
 
 
+@pytest.mark.parametrize("revocation", [400, 401, None])
+def test_logout_forgets_a_grant_the_service_no_longer_honors_or_none_at_all(
+    environment, monkeypatch, revocation
+):
+    root, store = environment
+    c = connection()
+    auth._write_public(root / "connection.json", asdict(c))
+    if revocation is not None:
+        grant = auth.Grant(access_token="a", refresh_token="dead", expires_at=0, subject=c.subject)
+        store.set_password(auth.SERVICE, c.key, grant.model_dump_json())
+    revoked = []
+
+    def handler(request):
+        revoked.append(request)
+        return httpx.Response(revocation or 500, json={"error": "invalid_grant"})
+
+    mock_http(monkeypatch, handler)
+    anyio.run(auth.Credentials(c.resource, connection=c).logout)
+    assert auth.saved_connection() is None
+    assert store.get_password(auth.SERVICE, c.key) is None
+    assert len(revoked) == (0 if revocation is None else 1)  # no grant: nothing to revoke
+
+
+def test_a_refused_refresh_asks_for_sign_in_and_is_not_sent_again(environment, monkeypatch):
+    root, store = environment
+    c = connection()
+    auth._write_public(root / "connection.json", asdict(c))
+    grant = auth.Grant(access_token="a", refresh_token="dead", expires_at=0, subject=c.subject)
+    store.set_password(auth.SERVICE, c.key, grant.model_dump_json())
+    refreshes = []
+
+    def handler(request):
+        refreshes.append(request)
+        return httpx.Response(400, json={"error": "invalid_grant"})
+
+    mock_http(monkeypatch, handler)
+    credentials = auth.Credentials(c.resource)
+    for _ in range(3):
+        with pytest.raises(auth.AuthenticationError) as caught:
+            anyio.run(credentials.token)
+        assert caught.value.status == 401 and caught.value.needs_sign_in
+        assert "oh-my-cassette login" in str(caught.value)
+    assert len(refreshes) == 1
+    renewed = auth.Grant(
+        access_token="b", refresh_token="fresh", expires_at=time.time() + 3600, subject=c.subject
+    )
+    store.set_password(auth.SERVICE, c.key, renewed.model_dump_json())  # as `login` saves it
+    assert anyio.run(credentials.token) == "b"
+
+
 @pytest.mark.parametrize("cancel", [False, True])
 def test_browser_callback_checks_state_and_pkce_and_finishes_cancel_without_another_browser(
     environment, monkeypatch, cancel

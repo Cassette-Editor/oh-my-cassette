@@ -38,11 +38,19 @@ SERVICE = "oh-my-cassette.oauth"
 
 
 class AuthenticationError(Exception):
-    """Public-safe authentication state, without provider bodies or secrets."""
+    """Public-safe authentication state, without provider bodies or secrets.
+
+    `status` is 401 when signing in again is the fix, 403 when the account or grant may not use Cassette,
+    and 503 when the authentication service or the credential store cannot be reached right now.
+    """
 
     def __init__(self, message: str, status: int = 401):
         super().__init__(message)
         self.status = status
+
+    @property
+    def needs_sign_in(self) -> bool:
+        return self.status not in (403, 503)
 
 
 def auth_directory() -> Path:
@@ -157,12 +165,12 @@ def _write_public(file: Path, value: object) -> None:
 
 def _answer(response: httpx.Response) -> dict:
     if not response.is_success:
-        status = 503 if response.status_code >= 500 else response.status_code
+        code = response.status_code
+        if code >= 500 or code in (408, 429):
+            raise AuthenticationError("Authentication service unavailable", 503)
+        # OAuth answers a refresh token or code it no longer honors with 400 (`invalid_grant`): sign in again.
         raise AuthenticationError(
-            "Authentication service unavailable"
-            if status == 503
-            else "Authorization rejected; run oh-my-cassette login",
-            status,
+            "Authorization rejected; run oh-my-cassette login", 403 if code == 403 else 401
         )
     try:
         value = response.json()
@@ -210,6 +218,9 @@ class Credentials:
         self.explicit_token = explicit_token
         self.connection = connection
         self._keyring = keyring
+        # A refresh token the service refused: it is never sent again, so a bridge waiting for `login` does not
+        # keep asking with it. A new sign-in saves another one.
+        self._refused_refresh: str | None = None
 
     @property
     def configured(self) -> bool:
@@ -245,6 +256,8 @@ class Credentials:
         with FileLock(root / f"{connection.key}.lock", timeout=30):
             grant = self._read(connection)
             if grant.expires_at <= time.time() + 60:
+                if grant.refresh_token == self._refused_refresh:
+                    raise AuthenticationError("Authorization rejected; run oh-my-cassette login")
                 try:
                     with auth_http() as http:
                         body = _answer(
@@ -260,6 +273,10 @@ class Credentials:
                         )
                 except httpx.HTTPError as exc:
                     raise AuthenticationError("Authentication service unavailable", 503) from exc
+                except AuthenticationError as exc:
+                    if exc.needs_sign_in:
+                        self._refused_refresh = grant.refresh_token
+                    raise
                 grant = Grant(
                     access_token=body["access_token"],
                     refresh_token=body["refresh_token"],
@@ -322,20 +339,30 @@ class Credentials:
             ) from exc
 
     def _logout(self, connection: Connection) -> None:
+        """Revoke the grant, then forget it. A grant the service no longer honors (or none at all) is only
+        forgotten; while the service cannot be reached, the grant is kept so logging out can be retried."""
         root = auth_directory()
         with FileLock(root / f"{connection.key}.lock", timeout=30):
-            grant = self._read(connection)
-            with auth_http() as http:
-                response = http.post(
-                    connection.revocation_endpoint,
-                    data={
-                        "client_id": CLIENT_ID,
-                        "token": grant.refresh_token,
-                        "token_type_hint": "refresh_token",
-                    },
-                )
-                if not response.is_success:
-                    _answer(response)
+            try:
+                grant: Grant | None = self._read(connection)
+            except AuthenticationError:
+                grant = None  # nothing of this connection's to revoke
+            if grant is not None:
+                try:
+                    with auth_http() as http:
+                        response = http.post(
+                            connection.revocation_endpoint,
+                            data={
+                                "client_id": CLIENT_ID,
+                                "token": grant.refresh_token,
+                                "token_type_hint": "refresh_token",
+                            },
+                        )
+                        if not response.is_success:
+                            _answer(response)
+                except AuthenticationError as exc:
+                    if exc.status == 503:
+                        raise
             try:
                 self._store().delete_password(SERVICE, connection.key)
             except PasswordDeleteError:

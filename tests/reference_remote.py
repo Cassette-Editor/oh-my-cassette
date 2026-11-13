@@ -138,6 +138,7 @@ class RemoteOptions:
     )  # next tools/call: (status, Retry-After)
     cut_downloads: int = 0  # the next downloads stop halfway through the body
     ignore_ranges: bool = False  # downloads always answer 200 with the whole file
+    download_delay: float = 0.0  # seconds each download waits before it answers
 
 
 @dataclass
@@ -588,6 +589,7 @@ class ReferenceRemote:
             self.download_headers.append({k.lower(): v for k, v in request.headers.items()})
             if data is None:
                 return Response(status_code=404)
+            await anyio.sleep(self.options.download_delay)
             etag = f'"{hashlib.sha256(data).hexdigest()[:16]}"'
             headers = {"ETag": etag, "Accept-Ranges": "bytes"}
             start, status = 0, 200

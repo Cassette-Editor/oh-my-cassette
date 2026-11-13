@@ -71,6 +71,7 @@ CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo"
 # Request ids the bridge chose for calls whose outcome it could not learn, kept so the host calling again
 # with the same arguments picks up that request instead of starting another.
 UNSETTLED_REQUESTS = 64
+MIN_DOWNLOAD_WAIT_SEC = 30.0
 
 CONNECTED_FALLBACK_INSTRUCTIONS = (
     "Oh My Cassette connects this host to the Cassette video editor. The tools below come from the "
@@ -164,6 +165,8 @@ class Bridge:
             return "bridge.unauthorized", self._unauthorized().message
         if self.upstream.forbidden:
             return "bridge.forbidden", "This account or grant cannot access Cassette (HTTP 403)."
+        if self.upstream.auth_unavailable:
+            return "bridge.auth_unavailable", self.upstream.last_error or "Authentication service unavailable"
         if self.upstream.protocol_unsupported:
             return "bridge.protocol_unsupported", protocol_unsupported(self.upstream.last_error or "").message
         return "bridge.backend_unreachable", self.upstream.last_error or "not connected yet"
@@ -258,17 +261,20 @@ class Bridge:
                 )
             else:
                 result = await self._call_named_request(name, pointer, arguments or {}, started, progress)
-            return await self.downloads.apply(result)
+            # Downloads get what is left of the call's wait, but never less than a short floor: the backend's own
+            # work may have used most of it.
+            window = max(
+                self.settings.local_wait_sec - (anyio.current_time() - started), MIN_DOWNLOAD_WAIT_SEC
+            )
+            return await self.downloads.apply(result, jobs=self.jobs, window=window, report=progress)
         except BridgeError as exc:
             return exc.result()
         except AuthenticationError as exc:
-            if exc.status == 401:
+            if exc.needs_sign_in:
                 return self._unauthorized().result()
-            return BridgeError(
-                "bridge.forbidden" if exc.status == 403 else "bridge.auth_unavailable",
-                str(exc),
-                retryable=exc.status == 503,
-            ).result()
+            if exc.status == 403:
+                return BridgeError("bridge.forbidden", str(exc)).result()
+            return BridgeError("bridge.auth_unavailable", str(exc), retryable=True).result()
         except Unauthorized:
             return self._unauthorized().result()
         except ProtocolUnsupported as exc:
@@ -362,8 +368,13 @@ class Bridge:
             "error": why,
             "error_code": code,
         }
-        if code in ("bridge.unauthorized", "bridge.protocol_unsupported"):
-            text = f"{code}: {why}."
+        if code in (
+            "bridge.unauthorized",
+            "bridge.forbidden",
+            "bridge.auth_unavailable",
+            "bridge.protocol_unsupported",
+        ):
+            text = f"{code}: {why.rstrip('.')}."
         elif not connected:
             text = f"Cassette backend at {self.settings.mcp_url} is not reachable: {why}."
         elif reason:

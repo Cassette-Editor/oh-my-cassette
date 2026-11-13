@@ -16,6 +16,10 @@ handshake-era protocol is refused.
 The service refuses a request it will not run with HTTP 429 (too many requests; the connection is
 fine) or 503 (it cannot take work now; reconnect), each with `Retry-After`. The tool never ran, so
 those refusals are reported apart from a connection that broke while a call was out.
+
+The MCP transport turns those HTTP answers into generic errors. Each call learns the status of its own
+requests through a context variable: the SDK sends a request's POST in the caller's context, so the
+response hook writes to the record of the call that sent it, never to another call running alongside.
 """
 
 from __future__ import annotations
@@ -23,6 +27,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any
 
 import anyio
@@ -48,6 +54,17 @@ MAX_SSE_EVENT_SIZE = 32 * 1024 * 1024
 GATEWAY_STATUSES = frozenset({502, 504})
 RATE_LIMITED = 429
 REFUSED = 503
+
+
+@dataclass
+class _CallAnswer:
+    """The HTTP status one call's requests ended on (only 401, 429, 503 and gateway errors are noted)."""
+
+    status: int | None = None
+    retry_after: float | None = None
+
+
+_CALL_ANSWER: ContextVar[_CallAnswer | None] = ContextVar("oh_my_cassette_call_answer", default=None)
 
 TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (
     httpx2.HTTPError,
@@ -150,10 +167,11 @@ class Upstream:
         self.last_error: str | None = None
         self.unauthorized = False
         self.forbidden = False
+        self.auth_unavailable = False  # the sign-in service or the credential store could not be reached
         self.protocol_unsupported = False
-        # Counts of HTTP answers the MCP transport turns into generic errors; compared around a call.
+        # Counts of HTTP answers the MCP transport turns into generic errors; compared around a connection
+        # attempt. A tool call reads its own answers from `_CALL_ANSWER` instead.
         self._rejections = 0
-        self._gateway_errors = 0
         self._refusals = 0
         self._refusal: tuple[int, float | None] = (REFUSED, None)  # the latest refusal's status and wait
 
@@ -170,15 +188,19 @@ class Upstream:
         request.headers.update(await self.credentials.headers(str(request.url)))
 
     async def _on_response(self, response: httpx2.Response) -> None:
-        if response.status_code == 401:
-            self._rejections += 1
-        elif response.status_code == 403:
+        status = response.status_code
+        if status == 403:
             raise AuthenticationError("This account or grant cannot access Cassette", 403)
-        elif response.status_code in GATEWAY_STATUSES:
-            self._gateway_errors += 1
-        elif response.status_code in (RATE_LIMITED, REFUSED):
+        if status not in (401, RATE_LIMITED, REFUSED, *GATEWAY_STATUSES):
+            return
+        retry_after = retry_after_seconds(response.headers.get("retry-after"))
+        if (answer := _CALL_ANSWER.get()) is not None:
+            answer.status, answer.retry_after = status, retry_after
+        if status == 401:
+            self._rejections += 1
+        elif status in (RATE_LIMITED, REFUSED):
             self._refusals += 1
-            self._refusal = (response.status_code, retry_after_seconds(response.headers.get("retry-after")))
+            self._refusal = (status, retry_after)
 
     async def run(self, *, task_status: TaskStatus[None] = anyio.TASK_STATUS_IGNORED) -> None:
         """Connect, serve until the connection breaks, reconnect with backoff; forever.
@@ -228,13 +250,16 @@ class Upstream:
             except Exception as exc:
                 auth_error = authentication_failure(exc)
                 self.unauthorized = self._rejections > rejections or (
-                    auth_error is not None and auth_error.status == 401
+                    auth_error is not None and auth_error.needs_sign_in
                 )
                 self.forbidden = auth_error is not None and auth_error.status == 403
+                self.auth_unavailable = auth_error is not None and auth_error.status == 503
                 refusal = protocol_refusal(exc)
                 self.protocol_unsupported = refusal is not None
-                if self.unauthorized:
-                    self.last_error = str(auth_error) if auth_error else "HTTP 401 Unauthorized"
+                if auth_error is not None:
+                    self.last_error = str(auth_error)
+                elif self.unauthorized:
+                    self.last_error = "HTTP 401 Unauthorized"
                 else:
                     self.last_error = str(refusal) if refusal else describe(exc)
                 log.warning(
@@ -272,6 +297,7 @@ class Upstream:
         self.last_error = None
         self.unauthorized = False
         self.forbidden = False
+        self.auth_unavailable = False
         self.protocol_unsupported = False
         self._client = client
         self._end_attempt()
@@ -347,6 +373,8 @@ class Upstream:
         if not await self.wait_connected(self.settings.connect_timeout_sec):
             if self.forbidden:
                 raise AuthenticationError("This account or grant cannot access Cassette", 403)
+            if self.auth_unavailable:
+                raise AuthenticationError(self.last_error or "Authentication service unavailable", 503)
             if self.unauthorized:
                 raise Unauthorized(self.last_error or "HTTP 401 Unauthorized")
             if self.protocol_unsupported and self.last_error:
@@ -373,7 +401,8 @@ class Upstream:
         progress: ProgressFnT | None = None,
     ) -> types.CallToolResult:
         client = await self.client()
-        rejections, gateway_errors, refusals = self._rejections, self._gateway_errors, self._refusals
+        answer = _CallAnswer()
+        token = _CALL_ANSWER.set(answer)
         try:
             return await client.call_tool(
                 name,
@@ -382,21 +411,21 @@ class Upstream:
                 meta=meta,  # type: ignore[arg-type]
             )
         except MCPError as exc:
-            if self._rejections > rejections:
+            if answer.status == 401:
                 self.mark_broken()
                 raise Unauthorized("HTTP 401 Unauthorized") from exc
-            if self._refusals > refusals:
-                status, retry_after = self._refusal
-                if status == RATE_LIMITED:
-                    raise RateLimited(retry_after) from exc
+            if answer.status == RATE_LIMITED:
+                raise RateLimited(answer.retry_after) from exc
+            if answer.status == REFUSED:
                 self.mark_broken()
                 raise BackendUnavailable(
                     "Cassette did not take the call (HTTP 503); it is not taking work right now",
                     refused=True,
-                    retry_after=retry_after,
+                    retry_after=answer.retry_after,
                 ) from exc
-            if exc.code in (types.CONNECTION_CLOSED, types.REQUEST_TIMEOUT) or (
-                self._gateway_errors > gateway_errors
+            if (
+                exc.code in (types.CONNECTION_CLOSED, types.REQUEST_TIMEOUT)
+                or answer.status in GATEWAY_STATUSES
             ):
                 self.mark_broken()
                 raise BackendUnavailable(exc.message, during_call=True) from exc
@@ -407,3 +436,5 @@ class Upstream:
         except AuthenticationError:
             self.mark_broken()
             raise
+        finally:
+            _CALL_ANSWER.reset(token)

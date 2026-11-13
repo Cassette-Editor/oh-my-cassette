@@ -1,4 +1,5 @@
-"""The local phase of a call that takes local files (preparation and upload), run in the background.
+"""Local work a call waits for a bounded time and that goes on in the background: preparing and uploading the
+files a call takes, and downloading the files a result declares.
 
 A host call waits for its local phase at most CASSETTE_LOCAL_WAIT_SEC. When the phase is not done
 by then, the call returns the non-error `preparing` result and the work goes on; calling again with
@@ -13,7 +14,6 @@ import logging
 import math
 from collections.abc import Awaitable, Callable, Hashable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import anyio
@@ -25,7 +25,7 @@ from oh_my_cassette.bridge.upstream import describe
 
 log = logging.getLogger(__name__)
 
-TRANSCODING, UPLOADING, DONE = "transcoding", "uploading", "done"
+TRANSCODING, UPLOADING, DOWNLOADING, DONE = "transcoding", "uploading", "downloading", "done"
 PROGRESS_INTERVAL_SEC = 1.0
 HEARTBEAT_SEC = 15.0
 
@@ -61,10 +61,11 @@ class FileProgress:
 
 
 class LocalJob:
-    def __init__(self, files: list[FileProgress]) -> None:
+    def __init__(self, files: list[FileProgress], label: str = "Preparing local files") -> None:
         self.files = files
+        self.label = label  # what progress messages call the work
         self.done = anyio.Event()
-        self.refs: dict[Path, str] | None = None
+        self.result: Any = None
         self.error: BridgeError | None = None
 
     def progress(self) -> dict[str, Any]:
@@ -80,9 +81,7 @@ class LocalJob:
         shown = ", ".join(f"{file.path} {file.stage} {file.percent:.0f}%" for file in open_files[:2])
         more = f" (+{len(open_files) - 2} more)" if len(open_files) > 2 else ""
         finished = len(self.files) - len(open_files)
-        return f"Preparing local files, {finished}/{len(self.files)} done" + (
-            f": {shown}{more}" if shown else ""
-        )
+        return f"{self.label}, {finished}/{len(self.files)} done" + (f": {shown}{more}" if shown else "")
 
 
 def preparing_result(tool_name: str, job: LocalJob) -> types.CallToolResult:
@@ -114,20 +113,22 @@ class LocalJobs:
         self,
         key: Hashable,
         files: Callable[[], list[FileProgress]],
-        work: Callable[[LocalJob], Awaitable[dict[Path, str]]],
+        work: Callable[[LocalJob], Awaitable[Any]],
+        *,
+        label: str = "Preparing local files",
     ) -> LocalJob:
         """The job for `key`: the running or finished one, else a new one started now."""
         job = self._jobs.get(key)
         if job is None:
             if self._tg is None:
                 raise RuntimeError("LocalJobs.run is not running")
-            job = self._jobs[key] = LocalJob(files())
+            job = self._jobs[key] = LocalJob(files(), label)
             self._tg.start_soon(self._execute, job, work)
         return job
 
-    async def _execute(self, job: LocalJob, work: Callable[[LocalJob], Awaitable[dict[Path, str]]]) -> None:
+    async def _execute(self, job: LocalJob, work: Callable[[LocalJob], Awaitable[Any]]) -> None:
         try:
-            job.refs = await work(job)
+            job.result = await work(job)
         except BridgeError as exc:
             job.error = exc
         except Exception as exc:
@@ -147,14 +148,18 @@ class LocalJobs:
             tg.cancel_scope.cancel()
         return job.done.is_set()
 
-    def settle(self, key: Hashable, job: LocalJob) -> dict[Path, str]:
-        """A finished job's refs, or its error, raised once: a failed job is forgotten here."""
+    def settle(self, key: Hashable, job: LocalJob) -> Any:
+        """A finished job's result, or its error, raised once: a failed job is forgotten here."""
         if job.error is not None:
-            if self._jobs.get(key) is job:
-                del self._jobs[key]
+            self.forget(key, job)
             raise job.error
-        assert job.refs is not None
-        return job.refs
+        assert job.result is not None
+        return job.result
+
+    def forget(self, key: Hashable, job: LocalJob) -> None:
+        """Drop a job, so the next call for `key` starts the work again."""
+        if self._jobs.get(key) is job:
+            del self._jobs[key]
 
     async def _report(self, job: LocalJob, report: ReportFn) -> None:
         """At most one notification a second, and one at least every heartbeat even without news.
