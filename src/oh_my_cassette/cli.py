@@ -106,12 +106,25 @@ def _key_command(args: argparse.Namespace) -> int:
                 "use your key until you switch back to Cassette's key in Cassette settings."
             )
         elif args.action == "remove":
+            # Cassette lets go of its copy first, while the saved sign-in can still ask it to.
+            released: str | None = None
+            try:
+                anyio.run(Credentials(connection.resource, connection=connection).release_provider_key)
+            except AuthenticationError as exc:
+                released = str(exc)
             removed = provider_key.remove_key(store, connection.key)
             print(
-                f"Removed the OpenAI key for {connection.email}. Cassette lets go of the copy it holds after 30 idle minutes."
+                f"Removed the OpenAI key for {connection.email}."
                 if removed
                 else f"No OpenAI key is saved for {connection.email}."
             )
+            print(
+                "Cassette no longer holds a key for the account; its agent turns wait for one until you set a key "
+                "again or switch back to Cassette's key in Cassette settings."
+                if released is None
+                else f"Cassette could not be asked to let go of the key it holds ({released}); it does so after 30 idle minutes."
+            )
+            return 0 if released is None else 1
         else:
             key = provider_key.read_key(store, connection.key)
             print(

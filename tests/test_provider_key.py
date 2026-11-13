@@ -67,11 +67,59 @@ def test_key_set_status_and_remove_keep_the_key_in_the_keyring_and_never_print_i
     assert code == 0
     assert '"saved": true' in output and "81f10b9a…a1B2" in output and KEY not in output
 
+    released: list[str] = []
+
+    async def release(credentials):
+        released.append(credentials.resource)
+
+    monkeypatch.setattr(auth.Credentials, "release_provider_key", release)
     code, output = run_key(monkeypatch, capsys, "remove")
     assert code == 0
+    assert released == [selected.resource]
     assert (provider_key.SERVICE, selected.key) not in store.values
     code, output = run_key(monkeypatch, capsys, "status")
     assert '"saved": false' in output
+
+
+def test_key_remove_forgets_the_key_here_even_when_cassette_cannot_be_asked_to_let_go(
+    keyring_home, monkeypatch, capsys
+):
+    root, store = keyring_home
+    selected = connection()
+    auth._write_public(root / "connection.json", asdict(selected))
+    run_key(monkeypatch, capsys, "set")
+
+    async def unreachable(_credentials):
+        raise auth.AuthenticationError("Cassette could not be reached", 503)
+
+    monkeypatch.setattr(auth.Credentials, "release_provider_key", unreachable)
+    code, output = run_key(monkeypatch, capsys, "remove")
+    assert code == 1 and "30 idle minutes" in output
+    assert (provider_key.SERVICE, selected.key) not in store.values
+
+
+@pytest.mark.anyio
+async def test_releasing_the_key_asks_the_mcp_service_with_the_saved_sign_in(monkeypatch):
+    sent: list[tuple[str, str, str | None]] = []
+
+    def answer(request):
+        sent.append((request.method, str(request.url), request.headers.get("authorization")))
+        return auth.httpx.Response(204)
+
+    real_client = auth.httpx.AsyncClient
+    monkeypatch.setattr(
+        auth.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=auth.httpx.MockTransport(answer), **kwargs),
+    )
+    credentials = auth.Credentials("https://mcp.example/mcp", explicit_token=REFERENCE_TOKEN)
+
+    async def token():
+        return REFERENCE_TOKEN
+
+    monkeypatch.setattr(credentials, "token", token)
+    await credentials.release_provider_key()
+    assert sent == [("DELETE", "https://mcp.example/mcp/provider-key", f"Bearer {REFERENCE_TOKEN}")]
 
 
 def test_key_set_refuses_what_is_no_openai_key_and_needs_a_sign_in(keyring_home, monkeypatch, capsys):
