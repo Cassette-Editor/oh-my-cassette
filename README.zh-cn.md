@@ -137,8 +137,20 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 | `CASSETTE_TEMP_DIR` | 系统临时目录 | 每次上传在这里新建自己的私有目录（`oh-my-cassette-job-*`），存放上传前的预处理产物。 |
 | `CASSETTE_CONNECT_TIMEOUT_SEC` | `10` | 连接服务时的最长等待时间。 |
 | `CASSETTE_MCP_HOST` | 未设置 | 客户端没有报出自己的名字时，发给服务的客户端名。 |
-| `CASSETTE_AUTH_DIRECTORY` | `~/.config/oh-my-cassette` | 已保存连接的设置存放位置（令牌本身仍在钥匙串里）。 |
+| `CASSETTE_AUTH_DIRECTORY` | `~/.config/oh-my-cassette` | 已保存连接的设置存放位置（令牌和你自己的 OpenAI key 仍在钥匙串里）。 |
 | `OH_MY_CASSETTE_LOG` | `WARNING` | stderr 日志级别。 |
+
+### 使用你自己的 OpenAI key
+
+账号可以用自己的 OpenAI key 支付 Cassette agent 的 turn，而不用 Cassette 的。`login` 之后保存一次：
+
+```bash
+uvx oh-my-cassette==0.6.1 key set      # 提示输入 key（sk-…），输入不回显
+uvx oh-my-cassette==0.6.1 key status   # 显示是否已保存及其指纹
+uvx oh-my-cassette==0.6.1 key remove
+```
+
+key 只存在操作系统钥匙串里（服务名 `oh-my-cassette.provider-key`），按你登录的账号保存，不写入任何文件。bridge 只在发往 Cassette MCP 服务的请求上用 `x-cassette-provider-key` 请求头带上它；服务把它交给 Cassette，Cassette 只在你的 turn 需要时把它放在内存里，并把账号切换为使用自己的 key。要切回 Cassette 的 key，请在 Cassette 设置里操作。等待 Cassette 未持有的 key 的 turn 会返回 `needs_credential`；保存 key 后继续该 turn 即可。设置了 `CASSETTE_AUTH_TOKEN` 时不发送 key。`status` 显示的指纹与 Cassette 显示的一致：key 的 SHA-256 前 8 位十六进制加末 4 位字符。
 
 ## 安装
 

@@ -31,6 +31,8 @@ from keyring.backend import KeyringBackend
 from keyring.errors import KeyringError, PasswordDeleteError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from oh_my_cassette import provider_key
+
 CLIENT_ID = "oh-my-cassette"
 SCOPE = "cassette:agent"
 DEFAULT_RESOURCE = "https://mcp.trycassette.online/mcp"
@@ -300,6 +302,21 @@ class Credentials:
         if _origin(url) != _origin(self.resource):
             return {}
         return {"Authorization": f"Bearer {await self.token()}"}
+
+    async def provider_key_headers(self, url: str) -> dict[str, str]:
+        """The account's own OpenAI key for a request to the MCP service, when `oh-my-cassette key set` saved one.
+
+        A token given in `CASSETTE_AUTH_TOKEN` may belong to another account than the saved connection, so it is
+        sent with no key. A keyring that cannot be read sends none either: the request is not held up for it.
+        """
+        if self.explicit_token or _origin(url) != _origin(self.resource):
+            return {}
+        try:
+            connection = self._connection()
+            key = await anyio.to_thread.run_sync(provider_key.read_key, self._store(), connection.key)
+        except (AuthenticationError, KeyringError):
+            return {}
+        return {provider_key.HEADER: key} if key else {}
 
     def workspace_id(self, directory: Path) -> str:
         connection = self.connection or saved_connection()

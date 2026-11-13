@@ -186,6 +186,7 @@ class Upstream:
 
     async def _authorize_request(self, request: httpx2.Request) -> None:
         request.headers.update(await self.credentials.headers(str(request.url)))
+        request.headers.update(await self.credentials.provider_key_headers(str(request.url)))
 
     async def _on_response(self, response: httpx2.Response) -> None:
         status = response.status_code

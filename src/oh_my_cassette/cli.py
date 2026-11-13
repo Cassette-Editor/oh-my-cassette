@@ -1,8 +1,10 @@
-"""Console entry point: `oh-my-cassette` runs the stdio bridge; `oh-my-cassette check` tests an endpoint."""
+"""Console entry point: `oh-my-cassette` runs the stdio bridge; `oh-my-cassette check` tests an endpoint;
+`oh-my-cassette key` keeps the account's own OpenAI key."""
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import logging
 import os
@@ -11,9 +13,10 @@ import threading
 
 import anyio
 import httpx
+from keyring.errors import KeyringError
 from mcp.server.stdio import stdio_server
 
-from oh_my_cassette import __version__
+from oh_my_cassette import __version__, auth, provider_key
 from oh_my_cassette.auth import AuthenticationError, Credentials, login, saved_connection
 from oh_my_cassette.bridge.files import transfer_guard
 from oh_my_cassette.bridge.server import Bridge
@@ -81,6 +84,53 @@ async def _account_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _key_command(args: argparse.Namespace) -> int:
+    """`key set|status|remove`: the account's own OpenAI key, kept in the keyring for the saved connection."""
+    connection = saved_connection()
+    if not connection:
+        print(
+            "Not signed in. Run oh-my-cassette login first; the key is kept for the account you sign in with."
+        )
+        return 1
+    try:
+        store = auth.native_keyring()
+        if args.action == "set":
+            key = getpass.getpass("OpenAI API key (input hidden): ").strip()
+            if not provider_key.valid_key(key):
+                print("That is not an OpenAI secret key (sk-…). Nothing was saved.", file=sys.stderr)
+                return 1
+            provider_key.save_key(store, connection.key, key)
+            print(
+                f"Saved the OpenAI key {provider_key.fingerprint(key)} for {connection.email}. "
+                "The bridge hands it to Cassette with its next request; from then on the account's agent turns "
+                "use your key until you switch back to Cassette's key in Cassette settings."
+            )
+        elif args.action == "remove":
+            removed = provider_key.remove_key(store, connection.key)
+            print(
+                f"Removed the OpenAI key for {connection.email}. Cassette lets go of the copy it holds after 30 idle minutes."
+                if removed
+                else f"No OpenAI key is saved for {connection.email}."
+            )
+        else:
+            key = provider_key.read_key(store, connection.key)
+            print(
+                json.dumps(
+                    {
+                        "saved": key is not None,
+                        "email": connection.email,
+                        "fingerprint": provider_key.fingerprint(key) if key else None,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+    except KeyringError as exc:
+        raise AuthenticationError(
+            "Secure credential storage unavailable; unlock your system keyring and retry", 503
+        ) from exc
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     if sys.platform == "win32":
         # Windows otherwise looks up ffmpeg in the working directory, the host's project, before PATH.
@@ -111,6 +161,12 @@ def main(argv: list[str] | None = None) -> None:
                 action="store_true",
                 help="print the browser URL without opening it automatically",
             )
+    key = commands.add_parser("key", help="save, show or remove your own OpenAI key for Cassette's agent")
+    key.add_argument(
+        "action",
+        choices=("set", "status", "remove"),
+        help="set prompts for the key and keeps it in the system keyring; status shows its fingerprint",
+    )
     check = commands.add_parser("check", help="check a Cassette MCP endpoint against the bridge contract")
     check.add_argument(
         "--url", help="MCP endpoint (default: CASSETTE_MCP_URL, the saved connection, or Cassette's)"
@@ -127,6 +183,8 @@ def main(argv: list[str] | None = None) -> None:
     try:
         if args.command in ("login", "status", "logout"):
             sys.exit(anyio.run(_account_command, args))
+        if args.command == "key":
+            sys.exit(_key_command(args))
         if args.command == "check":
             sys.exit(anyio.run(_check, args))
         anyio.run(serve_stdio, BridgeSettings.from_env())
