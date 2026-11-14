@@ -44,7 +44,7 @@ from mcp_types.version import LATEST_MODERN_VERSION, MODERN_PROTOCOL_VERSIONS
 
 from oh_my_cassette import __version__
 from oh_my_cassette.auth import DEFAULT_RESOURCE, AuthenticationError, Credentials
-from oh_my_cassette.bridge.errors import retry_after_seconds
+from oh_my_cassette.bridge.errors import connection_failure, retry_after_seconds
 from oh_my_cassette.bridge.settings import BridgeSettings
 from oh_my_cassette.contract import ServerContract, bridge_role, server_contract
 
@@ -129,6 +129,8 @@ def require_modern(client: Client, url: str) -> None:
 def describe(exc: BaseException) -> str:
     if isinstance(exc, BaseExceptionGroup):
         return "; ".join(describe(inner) for inner in exc.exceptions)
+    if (failure := connection_failure(exc)) is not None:
+        return failure
     text = str(exc).strip()
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
@@ -210,13 +212,11 @@ class Upstream:
         """Connect, serve until the connection breaks, reconnect with backoff; forever.
 
         `task_status.started()` fires after the first attempt either way, so the bridge can decide
-        its instructions before it starts serving the host.
+        its instructions before it starts serving the host. Without a sign-in for this endpoint the attempt
+        goes without a credential, so the instructions name what the endpoint answered (404, unreachable,
+        a handshake-era protocol, or 401), as the status tool does.
         """
-        started = not self.credentials.configured
-        if started:
-            self.unauthorized = True
-            self.last_error = "Not signed in"
-            task_status.started()
+        started = False
         delay = 1.0
         while True:
             self._wake = anyio.Event()

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import socket
 import uuid
 
 import anyio
 import httpx
+import httpx2
 import pytest
 from mcp.shared.exceptions import MCPError
 from tests.bridge_support import bridge_host
@@ -16,7 +18,7 @@ from tests.reference_remote import ReferenceRemote, RemoteOptions, free_port, se
 from oh_my_cassette.bridge import downloads
 from oh_my_cassette.bridge import server as bridge_server
 from oh_my_cassette.bridge.downloads import Downloads
-from oh_my_cassette.bridge.errors import BridgeError
+from oh_my_cassette.bridge.errors import BridgeError, connection_failure
 from oh_my_cassette.bridge.files import transfer_guard
 from oh_my_cassette.bridge.server import STATUS_TOOL
 from oh_my_cassette.contract import META_ELAPSED, META_HOST, META_WORKSPACE, DownloadSpec
@@ -507,3 +509,38 @@ async def test_a_download_redirected_into_the_local_network_is_refused(bridge_se
             await Downloads(settings, http).fetch(spec)
     assert sent == ["https://mcp.example.com/downloads/export/1"]
     assert list(settings.downloads.iterdir()) == []
+
+
+async def test_a_host_that_does_not_resolve_is_named_with_the_reason(bridge_settings, monkeypatch):
+    real = socket.getaddrinfo
+
+    def getaddrinfo(host, *args, **kwargs):
+        if host == "cassette.unresolvable.test":
+            raise socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided, or not known")
+        return real(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    async with bridge_host(bridge_settings("https://cassette.unresolvable.test/mcp")) as (_, host):
+        assert "cannot resolve the host name cassette.unresolvable.test" in host.instructions
+        status = await host.call_tool(STATUS_TOOL, {})
+        assert "cannot resolve the host name cassette.unresolvable.test" in status.structured_content["error"]
+        refused = await host.call_tool("slow_turn", {"steps": 1})
+        assert (
+            "cannot resolve the host name cassette.unresolvable.test"
+            in refused.structured_content["error"]["message"]
+        )
+
+
+async def test_a_refused_connection_names_the_host_and_port(bridge_settings):
+    port = free_port()
+    async with bridge_host(bridge_settings(f"http://127.0.0.1:{port}/mcp")) as (_, host):
+        status = await host.call_tool(STATUS_TOOL, {})
+        assert f"127.0.0.1:{port} refused the connection" in status.structured_content["error"]
+
+
+@pytest.mark.parametrize("library", [httpx, httpx2])
+def test_a_connect_timeout_names_the_host(library):
+    request = library.Request("GET", "https://mcp.example.test:8443/mcp")
+    failure = connection_failure(library.ConnectTimeout("", request=request))
+    assert failure == "mcp.example.test:8443 did not accept a connection in time (connect timeout)"
+    assert connection_failure(ValueError("not a request")) is None

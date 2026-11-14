@@ -33,6 +33,7 @@ from keyring.errors import KeyringError, PasswordDeleteError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from oh_my_cassette import provider_key
+from oh_my_cassette.bridge.errors import connection_failure
 
 CLIENT_ID = "oh-my-cassette"
 SCOPE = "cassette:agent"
@@ -127,13 +128,30 @@ def keyring_unavailable() -> AuthenticationError:
     return AuthenticationError(f"Secure credential storage unavailable: {hint}", 503)
 
 
+def require_keyring() -> None:
+    """Fail now, before a browser sign-in, when the keyring cannot keep the grant it would end with."""
+    probe = f"login-check-{secrets.token_hex(6)}"
+    try:
+        store = native_keyring()
+        store.set_password(SERVICE, probe, "ok")
+        store.delete_password(SERVICE, probe)
+    except KeyringError as exc:
+        raise keyring_unavailable() from exc
+
+
+def _unreachable(what: str, exc: httpx.HTTPError) -> AuthenticationError:
+    """`what` could not be reached, with the host and the reason when the request never got an answer."""
+    reason = connection_failure(exc)
+    return AuthenticationError(f"{what}: {reason}" if reason else what, 503)
+
+
 @contextmanager
 def auth_http():
     try:
         with httpx.Client(timeout=15, follow_redirects=False) as http:
             yield http
     except httpx.HTTPError as exc:
-        raise AuthenticationError("Authentication service unavailable", 503) from exc
+        raise _unreachable("Authentication service unavailable", exc) from exc
 
 
 class Grant(BaseModel):
@@ -309,7 +327,7 @@ class Credentials:
                             )
                         )
                 except httpx.HTTPError as exc:
-                    raise AuthenticationError("Authentication service unavailable", 503) from exc
+                    raise _unreachable("Authentication service unavailable", exc) from exc
                 except AuthenticationError as exc:
                     if exc.needs_sign_in:
                         self._refused_refresh = grant.refresh_token
@@ -372,7 +390,7 @@ class Credentials:
                     )
                 )
         except httpx.HTTPError as exc:
-            raise AuthenticationError("Authentication service unavailable", 503) from exc
+            raise _unreachable("Authentication service unavailable", exc) from exc
         if (
             principal.get("subject") != connection.subject
             or principal.get("resource") != self.resource
@@ -392,7 +410,7 @@ class Credentials:
                     headers={"Authorization": f"Bearer {token}"},
                 )
         except httpx.HTTPError as exc:
-            raise AuthenticationError("Cassette could not be reached", 503) from exc
+            raise _unreachable("Cassette could not be reached", exc) from exc
         if response.status_code in (401, 403):
             raise AuthenticationError(
                 "Cassette refused the saved sign-in; run oh-my-cassette login", response.status_code
@@ -482,6 +500,7 @@ def _revoke_replaced(current: Connection, previous: Connection, grant: Grant) ->
 def login(*, no_browser: bool = False, cancelled: threading.Event | None = None) -> Connection:
     """Signs in with the Cassette account in the browser and saves the one connection every project is reached through."""
     resource = resource_url()
+    require_keyring()
     metadata = discover(resource)
     state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(48)
     result: queue.Queue[str | AuthenticationError] = queue.Queue(maxsize=1)

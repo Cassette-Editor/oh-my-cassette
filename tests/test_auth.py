@@ -416,3 +416,47 @@ def test_device_name_names_the_host_and_its_system(monkeypatch):
     monkeypatch.setattr(auth.platform, "node", lambda: "")
     monkeypatch.setattr(auth.platform, "system", lambda: "Linux")
     assert auth.device_name() == "This computer (Linux)"
+
+
+class UnwritableKeyring(MemoryKeyring):
+    def set_password(self, service, username, password):
+        raise KeyringLocked("Failed to unlock the collection!")
+
+
+@pytest.mark.parametrize("no_browser", [False, True])
+def test_login_without_a_usable_keyring_stops_before_the_browser(
+    environment, monkeypatch, capsys, no_browser
+):
+    monkeypatch.setattr(auth, "native_keyring", UnwritableKeyring)
+    monkeypatch.setattr(auth.sys, "platform", "darwin")
+    discovered, opened = [], []
+    monkeypatch.setattr(auth, "discover", discovered.append)
+    monkeypatch.setattr(auth.webbrowser, "open", opened.append)
+    with pytest.raises(auth.AuthenticationError) as caught:
+        auth.login(no_browser=no_browser)
+    assert caught.value.status == 503 and "login keychain" in str(caught.value)
+    assert discovered == [] and opened == []
+    assert "Open this URL" not in capsys.readouterr().err
+
+
+def test_the_keyring_check_before_login_leaves_nothing_behind(environment, monkeypatch):
+    _, store = environment
+    monkeypatch.setattr(
+        auth, "discover", lambda resource: (_ for _ in ()).throw(auth.AuthenticationError("stop"))
+    )
+    with pytest.raises(auth.AuthenticationError, match="stop"):
+        auth.login()
+    assert store.values == {}
+
+
+def test_an_unresolvable_authentication_host_is_named(environment, monkeypatch):
+    def handler(request):
+        raise httpx.ConnectError(
+            "[Errno 8] nodename nor servname provided", request=request
+        ) from socket.gaierror(8, "nodename nor servname provided")
+
+    mock_http(monkeypatch, handler)
+    with pytest.raises(auth.AuthenticationError) as caught:
+        auth.discover("https://cassette.test/mcp")
+    assert caught.value.status == 503
+    assert "cassette.test" in str(caught.value) and "cannot resolve" in str(caught.value)
