@@ -12,7 +12,7 @@
       "source": {
         "source": "github",
         "repo": "Cassette-Editor/oh-my-cassette",
-        "ref": "v0.6.1"
+        "ref": "v0.7.0"
       },
       "version": "0.7.0",
       "category": "productivity",
