@@ -57,7 +57,7 @@ codex plugin add oh-my-cassette@cassette-editor
 
 ```bash
 # Hermes
-hermes mcp add cassette --command uvx --args oh-my-cassette==0.6.1
+hermes mcp add cassette --command uvx --args oh-my-cassette==0.7.0
 ```
 
 OpenCode 与其它 MCP 客户端见下文[安装](#安装)。
@@ -65,7 +65,7 @@ OpenCode 与其它 MCP 客户端见下文[安装](#安装)。
 **2. 登录**（所有客户端都需要）：
 
 ```bash
-uvx oh-my-cassette==0.6.1 login
+uvx oh-my-cassette==0.7.0 login
 ```
 
 在浏览器里输入 Cassette 发到邮箱的验证码并授权。如果客户端不支持刷新工具列表，重启 agent，然后直接说：
@@ -112,7 +112,7 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 
 - 一个受邀的 Cassette 账号。服务连不上或不接受你的登录时，工具列表里只有 `cassette_bridge_status`，
   调用它能看到原因。
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5+。`uvx oh-my-cassette==0.6.1` 会自行解析 Python 3.11 或更新版本。
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.5+。`uvx oh-my-cassette==0.7.0` 会自行解析 Python 3.11 或更新版本。
 - 往云端项目导入视频需要 [ffmpeg](https://ffmpeg.org/download.html)（含 ffprobe）：`brew install ffmpeg`、
   `sudo apt install ffmpeg` 或 `winget install ffmpeg`。视频在你的电脑上转码后再上传；带 `zscale` 的
   ffmpeg 还能正确地把 HDR 素材色调映射到 SDR。Cassette for Mac 持有的项目不需要 ffmpeg。
@@ -145,9 +145,9 @@ Claude Code / Codex / OpenCode / Hermes  ──stdio──▶  oh-my-cassette  �
 账号可以用自己的 OpenAI key 支付 Cassette agent 的 turn，而不用 Cassette 的。`login` 之后保存一次：
 
 ```bash
-uvx oh-my-cassette==0.6.1 key set      # 提示输入 key（sk-…），输入不回显
-uvx oh-my-cassette==0.6.1 key status   # 显示是否已保存及其指纹
-uvx oh-my-cassette==0.6.1 key remove
+uvx oh-my-cassette==0.7.0 key set      # 提示输入 key（sk-…），输入不回显
+uvx oh-my-cassette==0.7.0 key status   # 显示是否已保存及其指纹
+uvx oh-my-cassette==0.7.0 key remove
 ```
 
 key 只存在操作系统钥匙串里（服务名 `oh-my-cassette.provider-key`），按你登录的账号保存，不写入任何文件。bridge 只在发往 Cassette MCP 服务的请求上用 `x-cassette-provider-key` 请求头带上它；服务把它交给 Cassette，Cassette 只在你的 turn 需要时把它放在内存里，并把账号切换为使用自己的 key。`key remove` 先让 Cassette 立即放掉它持有的 key，再删掉本机这份；账号仍用自己的 key，所以之后的 turn 会等你重新设置 key。要切回 Cassette 的 key，请在 Cassette 设置里操作。等待 Cassette 未持有的 key 的 turn 会返回 `needs_credential`；保存 key 后继续该 turn 即可。设置了 `CASSETTE_AUTH_TOKEN` 时不发送 key。`status` 显示的指纹与 Cassette 显示的一致：key 的 SHA-256 前 8 位十六进制加末 4 位字符。
@@ -156,12 +156,12 @@ key 只存在操作系统钥匙串里（服务名 `oh-my-cassette.provider-key`�
 
 ### Claude Code
 
-推荐用顶部两条插件命令。先运行 `oh-my-cassette login` 完成浏览器登录，插件沿用已保存的目标，并以 10 分钟工具超时启动 `uvx oh-my-cassette==0.6.1`。
+推荐用顶部两条插件命令。先运行 `oh-my-cassette login` 完成浏览器登录，插件沿用已保存的目标，并以 10 分钟工具超时启动 `uvx oh-my-cassette==0.7.0`。
 
 不用插件、只在项目范围接入：把 [`.mcp.json`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/.mcp.json) 复制到你的项目，或者：
 
 ```bash
-claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.6.1
+claude mcp add --transport stdio cassette -- uvx oh-my-cassette==0.7.0
 ```
 
 skill 在 [`skills/cassette-video-edit/SKILL.md`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/skills/cassette-video-edit/SKILL.md)，随插件一起安装。
@@ -171,7 +171,7 @@ skill 在 [`skills/cassette-video-edit/SKILL.md`](https://github.com/Cassette-Ed
 顶部两条插件命令（[`.codex-plugin/plugin.json`](https://github.com/Cassette-Editor/oh-my-cassette/blob/main/.codex-plugin/plugin.json) 内联声明了 server，`tool_timeout_sec: 600`，并从你的 shell 透传 `CASSETTE_*` 变量）。或者直接加 server：
 
 ```bash
-codex mcp add cassette -- uvx oh-my-cassette==0.6.1
+codex mcp add cassette -- uvx oh-my-cassette==0.7.0
 ```
 
 ### OpenCode
@@ -183,7 +183,7 @@ codex mcp add cassette -- uvx oh-my-cassette==0.6.1
   "mcp": {
     "cassette": {
       "type": "local",
-      "command": ["uvx", "oh-my-cassette==0.6.1"],
+      "command": ["uvx", "oh-my-cassette==0.7.0"],
       "timeout": 600000
     }
   }
@@ -194,7 +194,7 @@ codex mcp add cassette -- uvx oh-my-cassette==0.6.1
 
 ```bash
 mkdir -p ~/.config/opencode/skills/cassette-video-edit
-curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.6.1/skills/cassette-video-edit/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.7.0/skills/cassette-video-edit/SKILL.md \
   -o ~/.config/opencode/skills/cassette-video-edit/SKILL.md
 ```
 
@@ -203,10 +203,10 @@ OpenCode 没有 MCP elicitation，没关系：剪辑 agent 的提问会作为普
 ### Hermes
 
 ```bash
-hermes mcp add cassette --command uvx --args oh-my-cassette==0.6.1
+hermes mcp add cassette --command uvx --args oh-my-cassette==0.7.0
 
 mkdir -p ~/.hermes/skills/cassette-video-edit
-curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.6.1/skills/cassette-video-edit/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.7.0/skills/cassette-video-edit/SKILL.md \
   -o ~/.hermes/skills/cassette-video-edit/SKILL.md
 ```
 
@@ -214,7 +214,7 @@ curl -fsSL https://raw.githubusercontent.com/Cassette-Editor/oh-my-cassette/v0.6
 
 ### 其它 MCP 客户端
 
-命令 `uvx`，参数 `["oh-my-cassette==0.6.1"]`，stdio 传输，工具超时 10 分钟，再加上面的环境变量。没有 uv 的机器可以用 `pipx run oh-my-cassette==0.6.1`。
+命令 `uvx`，参数 `["oh-my-cassette==0.7.0"]`，stdio 传输，工具超时 10 分钟，再加上面的环境变量。没有 uv 的机器可以用 `pipx run oh-my-cassette==0.7.0`。
 
 ## 一个 turn 长什么样
 
@@ -234,7 +234,7 @@ agent： （调用服务的导出工具）
 ## 检查服务
 
 ```bash
-uvx oh-my-cassette==0.6.1 check --url http://127.0.0.1:8790/mcp --upload \
+uvx oh-my-cassette==0.7.0 check --url http://127.0.0.1:8790/mcp --upload \
   --arguments '{"project_id": "<一个测试项目>"}'
 ```
 
@@ -247,9 +247,9 @@ bridge 也会以 `bridge.protocol_unsupported` 拒绝它。
 
 0.5 是重写。0.4 插件自带剪辑运行时、配乐搜索和 Hermes 网关；0.5 只是通往 Cassette MCP 服务的一层薄 bridge，你的 agent 看到的工具都来自服务。
 
-- **重新登录**：`uvx oh-my-cassette==0.6.1 login`。0.4 的密码和令牌不再使用。
+- **重新登录**：`uvx oh-my-cassette==0.7.0 login`。0.4 的密码和令牌不再使用。
 - **工具是新的。** 项目、剪辑对话、提问、计划、撤销、素材、分析和导出都由服务提供并自带说明；0.4 的工具名（`cassette_run_job`、
-  `cassette_ingest_media`、`cassette_match_bgm` 等）已删除。重新安装插件，或把客户端配置改为 `uvx oh-my-cassette==0.6.1`。
+  `cassette_ingest_media`、`cassette_match_bgm` 等）已删除。重新安装插件，或把客户端配置改为 `uvx oh-my-cassette==0.7.0`。
 - **项目在你的 Cassette 账号里**，和网页版、Cassette for Mac 里的是同一批；每次回答带的编辑器链接打开的就是当前项目。0.4 的会话不会迁移。
 - **Hermes** 现在是普通 MCP 客户端，请移除 0.4 的网关插件。
 
