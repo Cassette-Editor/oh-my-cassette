@@ -40,7 +40,11 @@ async def _check(args: argparse.Namespace) -> int:
     from oh_my_cassette.conformance import failed, render, run_checks, summary
 
     url = args.url or BridgeSettings.from_env().mcp_url
-    token = os.environ.get("CASSETTE_AUTH_TOKEN") or await Credentials(url).token()
+    credentials = Credentials(url)
+    # Without a sign-in for this address the checks run without a token: the endpoint then says whether it is there.
+    token = os.environ.get("CASSETTE_AUTH_TOKEN") or (
+        await credentials.token() if credentials.configured else None
+    )
     checks = await run_checks(url, token=token, upload=args.upload, arguments=json.loads(args.arguments))
     print(render(checks, as_json=args.json))
     if not args.json:
@@ -138,9 +142,7 @@ def _key_command(args: argparse.Namespace) -> int:
                 )
             )
     except KeyringError as exc:
-        raise AuthenticationError(
-            "Secure credential storage unavailable; unlock your system keyring and retry", 503
-        ) from exc
+        raise auth.keyring_unavailable() from exc
     return 0
 
 

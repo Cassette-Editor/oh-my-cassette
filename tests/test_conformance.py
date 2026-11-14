@@ -107,3 +107,21 @@ async def test_cli_exit_codes(remote):
     down = await anyio.to_thread.run_sync(_cli, "check", "--url", f"http://127.0.0.1:{free_port()}/mcp")
     assert down.returncode == 1
     assert down.stdout.startswith("FAIL") and "0 passed, 0 warnings, 1 failed" in down.stdout
+
+
+async def test_checking_an_address_without_a_sign_in_reports_the_endpoint_not_the_sign_in(remote, tmp_path):
+    def check(url: str) -> subprocess.CompletedProcess[str]:
+        env = {k: v for k, v in os.environ.items() if k not in ("CASSETTE_AUTH_TOKEN", "CASSETTE_MCP_URL")}
+        env |= {"PYTHONPATH": str(ROOT / "src"), "CASSETTE_AUTH_DIRECTORY": str(tmp_path)}
+        return subprocess.run(
+            [sys.executable, "-m", "oh_my_cassette", "check", "--url", url],
+            capture_output=True, text=True, env=env, timeout=60,
+        )  # fmt: skip
+
+    missing = await anyio.to_thread.run_sync(check, remote.url.rsplit("/", 1)[0] + "/nope")
+    assert missing.returncode == 1 and "Not connected" not in missing.stderr
+    assert "FAIL" in missing.stdout and "HTTP 404" in missing.stdout
+    unsigned = await anyio.to_thread.run_sync(check, remote.url)
+    assert (
+        unsigned.returncode == 1 and "HTTP 401" in unsigned.stdout and "token is required" in unsigned.stdout
+    )

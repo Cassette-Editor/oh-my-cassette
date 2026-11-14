@@ -30,7 +30,7 @@ from mcp.shared.exceptions import MCPError
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 from oh_my_cassette import __version__
-from oh_my_cassette.auth import AuthenticationError, Credentials
+from oh_my_cassette.auth import AuthenticationError, Credentials, mismatch_hint
 from oh_my_cassette.bridge.downloads import Downloads
 from oh_my_cassette.bridge.errors import (
     BridgeError,
@@ -153,7 +153,8 @@ class Bridge:
             if self.settings.auth_token
             else BridgeError(
                 "bridge.unauthorized",
-                "Sign in with oh-my-cassette login, using the Cassette account of your projects. Tools refresh after authorization; restart the MCP host if it cannot refresh its tool list.",
+                "Sign in with oh-my-cassette login, using the Cassette account of your projects. Tools refresh after authorization; restart the MCP host if it cannot refresh its tool list."
+                + mismatch_hint(self.upstream.credentials.saved_elsewhere(), self.settings.mcp_url),
             )
         )
 

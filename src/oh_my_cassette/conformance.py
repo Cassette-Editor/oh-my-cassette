@@ -262,9 +262,13 @@ async def run_checks(
         headers["Authorization"] = f"Bearer {token}"
     rejected: list[int] = []
 
+    missing: list[int] = []
+
     async def on_response(response: httpx2.Response) -> None:
         if response.status_code == 401:
             rejected.append(401)
+        elif response.status_code == 404:
+            missing.append(404)
 
     http = create_mcp_http_client(headers=headers, timeout=httpx2.Timeout(timeout, read=timeout * 4))
     http.event_hooks = {"response": [on_response]}
@@ -326,6 +330,8 @@ async def run_checks(
                 else "a token is required; run oh-my-cassette login or set CASSETTE_AUTH_TOKEN"
             )
             report.add("fail", "transport", f"HTTP 401 Unauthorized: {hint}")
+        elif missing:
+            report.add("fail", "transport", f"HTTP 404 Not Found: there is no MCP endpoint at {url}")
         else:
             report.add("fail", "transport", describe(exc))
     return report.checks

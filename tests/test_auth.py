@@ -10,6 +10,7 @@ import anyio
 import httpx
 import pytest
 from keyring.backend import KeyringBackend
+from keyring.errors import KeyringLocked
 
 from oh_my_cassette import auth
 
@@ -324,3 +325,84 @@ def test_the_auth_directory_is_kept_to_its_owner(environment):
     root, _ = environment
     root.chmod(0o755)
     assert auth.private_auth_directory() == root and root.stat().st_mode & 0o777 == 0o700
+
+
+class LockedKeyring(MemoryKeyring):
+    def get_password(self, service, username):
+        raise KeyringLocked("Failed to unlock the collection!")
+
+
+@pytest.mark.parametrize(
+    "platform, expected",
+    [
+        ("linux", ["gnome-keyring-daemon --unlock", "dbus-run-session", "oh-my-cassette login"]),
+        ("darwin", ["login keychain"]),
+    ],
+)
+def test_a_keyring_that_cannot_be_read_says_what_to_do_on_this_system(
+    environment, monkeypatch, platform, expected
+):
+    root, _ = environment
+    c = connection()
+    auth._write_public(root / "connection.json", asdict(c))
+    monkeypatch.setattr(auth, "native_keyring", LockedKeyring)
+    monkeypatch.setattr(auth.sys, "platform", platform)
+    with pytest.raises(auth.AuthenticationError) as caught:
+        anyio.run(auth.Credentials(c.resource, connection=c).token)
+    assert caught.value.status == 503
+    for text in expected:
+        assert text in str(caught.value)
+
+
+def test_signing_in_again_revokes_the_grant_it_replaces(environment, monkeypatch):
+    root, store = environment
+    c = connection()
+    auth._write_public(root / "connection.json", asdict(c))
+    store.set_password(
+        auth.SERVICE,
+        c.key,
+        auth.Grant(
+            access_token="old", refresh_token="old-refresh", expires_at=0, subject=c.subject
+        ).model_dump_json(),
+    )
+    monkeypatch.setattr(
+        auth,
+        "discover",
+        lambda resource: {
+            "issuer": c.issuer,
+            "authorization_endpoint": c.authorization_endpoint,
+            "token_endpoint": c.token_endpoint,
+            "revocation_endpoint": c.revocation_endpoint,
+        },
+    )
+    revoked: list[str] = []
+
+    def handler(request):
+        if request.url.path == "/token":
+            tokens = {"access_token": "new", "refresh_token": "new-refresh", "expires_in": 3600}
+            return httpx.Response(200, json={**tokens, "token_type": "Bearer"})
+        if request.url.path == "/revoke":
+            revoked.append(parse_qs(request.content.decode())["token"][0])
+            return httpx.Response(200)
+        principal = {
+            "subject": c.subject,
+            "email": c.email,
+            "resource": c.resource,
+            "clientId": auth.CLIENT_ID,
+        }
+        return httpx.Response(200, json={**principal, "capabilities": ["agent"]})
+
+    original = mock_http(monkeypatch, handler)
+
+    def browser(url):
+        params = parse_qs(urlsplit(url).query)
+        query = urlencode({"state": params["state"][0], "code": "one-time-code"})
+        with original(timeout=3) as http:
+            assert http.get(f"{params['redirect_uri'][0]}?{query}").status_code == 302
+
+    monkeypatch.setattr(auth.webbrowser, "open", browser)
+    assert auth.login() == c
+    assert revoked == ["old-refresh"]  # the grant this machine held before, so the account lists it once
+    assert (
+        auth.Grant.model_validate_json(store.get_password(auth.SERVICE, c.key)).refresh_token == "new-refresh"
+    )

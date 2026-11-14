@@ -61,3 +61,41 @@ async def test_a_refresh_the_service_turns_down_is_reported_for_what_it_is(
     assert remote.calls == []
     if answer == 400:
         assert len(refreshes) == 1  # a refresh token the service refused is never sent again
+
+
+def _signed_in_for(resource: str, directory, monkeypatch) -> None:
+    monkeypatch.setenv("CASSETTE_AUTH_DIRECTORY", str(directory))
+    monkeypatch.setattr(auth, "native_keyring", MemoryKeyring)
+    issuer = "https://auth.cassette.test"
+    saved = auth.Connection(
+        resource,
+        issuer,
+        "account-a",
+        "a@cassette.test",
+        f"{issuer}/auth",
+        f"{issuer}/token",
+        f"{issuer}/revoke",
+    )
+    auth._write_public(directory / "connection.json", asdict(saved))
+
+
+async def test_a_mistyped_endpoint_is_reported_as_not_found_not_as_signed_out(
+    remote, bridge_settings, monkeypatch, tmp_path
+):
+    _signed_in_for(remote.url, tmp_path / "auth", monkeypatch)
+    wrong = remote.url.rsplit("/", 1)[0] + "/nope"
+    async with bridge_host(bridge_settings(wrong, auth_token=None)) as (_, host):
+        status = await host.call_tool(STATUS_TOOL, {})
+        assert status.structured_content["error_code"] == "bridge.backend_unreachable"
+        assert "HTTP 404" in status.structured_content["error"]
+        assert "CASSETTE_MCP_URL" in status.structured_content["error"]
+
+
+async def test_a_sign_in_saved_for_another_endpoint_says_which(
+    remote, bridge_settings, monkeypatch, tmp_path
+):
+    _signed_in_for("https://mcp.elsewhere.test/mcp", tmp_path / "auth", monkeypatch)
+    async with bridge_host(bridge_settings(remote.url, auth_token=None)) as (_, host):
+        status = await host.call_tool(STATUS_TOOL, {})
+        assert status.structured_content["error_code"] == "bridge.unauthorized"
+        assert "https://mcp.elsewhere.test/mcp" in status.structured_content["error"]

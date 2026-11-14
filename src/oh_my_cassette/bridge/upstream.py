@@ -43,7 +43,7 @@ from mcp.shared.exceptions import MCPError
 from mcp_types.version import LATEST_MODERN_VERSION, MODERN_PROTOCOL_VERSIONS
 
 from oh_my_cassette import __version__
-from oh_my_cassette.auth import AuthenticationError, Credentials
+from oh_my_cassette.auth import DEFAULT_RESOURCE, AuthenticationError, Credentials
 from oh_my_cassette.bridge.errors import retry_after_seconds
 from oh_my_cassette.bridge.settings import BridgeSettings
 from oh_my_cassette.contract import ServerContract, bridge_role, server_contract
@@ -172,6 +172,7 @@ class Upstream:
         # Counts of HTTP answers the MCP transport turns into generic errors; compared around a connection
         # attempt. A tool call reads its own answers from `_CALL_ANSWER` instead.
         self._rejections = 0
+        self._missing = 0  # answers of HTTP 404: no MCP endpoint at the configured URL
         self._refusals = 0
         self._refusal: tuple[int, float | None] = (REFUSED, None)  # the latest refusal's status and wait
 
@@ -190,6 +191,8 @@ class Upstream:
 
     async def _on_response(self, response: httpx2.Response) -> None:
         status = response.status_code
+        if status == 404:
+            self._missing += 1
         if status == 403:
             raise AuthenticationError("This account or grant cannot access Cassette", 403)
         if status not in (401, RATE_LIMITED, REFUSED, *GATEWAY_STATUSES):
@@ -218,7 +221,7 @@ class Upstream:
         while True:
             self._wake = anyio.Event()
             self._attempting = True
-            rejections, refusals = self._rejections, self._refusals
+            rejections, refusals, missing = self._rejections, self._refusals, self._missing
             try:
                 async with AsyncExitStack() as stack:
                     http = await stack.enter_async_context(self._http_client())
@@ -259,6 +262,11 @@ class Upstream:
                 self.protocol_unsupported = refusal is not None
                 if auth_error is not None:
                     self.last_error = str(auth_error)
+                elif self._missing > missing and not self.unauthorized:
+                    self.last_error = (
+                        f"{self.settings.mcp_url} answered HTTP 404: there is no Cassette MCP endpoint at this address. "
+                        f"Check CASSETTE_MCP_URL (Cassette's own is {DEFAULT_RESOURCE})"
+                    )
                 elif self.unauthorized:
                     self.last_error = "HTTP 401 Unauthorized"
                 else:

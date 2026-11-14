@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import os
 import re
 from collections.abc import Callable
@@ -73,6 +74,25 @@ CONTENT_RANGE = re.compile(r"bytes (\d+)-\d+/(?:\d+|\*)")
 
 def _note(text: str) -> types.TextContent:
     return types.TextContent(type="text", text=text)
+
+
+def _restate(content: list[Any], original: Any, structured: Any) -> list[Any]:
+    """The content with each text block that states the original structured content as JSON written again from the
+    structured content the downloads changed, so a host that reads only text sees the local paths too."""
+    if structured == original:
+        return content
+
+    def restated(block: Any) -> Any:
+        if not isinstance(block, types.TextContent):
+            return block
+        try:
+            if json.loads(block.text) != original:
+                return block
+        except ValueError:
+            return block
+        return block.model_copy(update={"text": json.dumps(structured, indent=2, ensure_ascii=False)})
+
+    return [restated(block) for block in content]
 
 
 def _hash_into(digest: Any, path: Path) -> None:
@@ -151,6 +171,7 @@ class Downloads:
                     pointer_set(structured, spec.pointer, str(outcome))
                 except ContractError:
                     pass
+        content = _restate(content, result.structured_content, structured)
         return result.model_copy(update={"content": content, "structured_content": structured})
 
     async def _fetch_all(self, specs: list[DownloadSpec], job: LocalJob) -> list[Path | BridgeError]:

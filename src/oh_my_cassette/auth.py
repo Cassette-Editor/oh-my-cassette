@@ -98,6 +98,34 @@ def native_keyring() -> KeyringBackend:
     return Keyring()
 
 
+def mismatch_hint(saved: str | None, resource: str) -> str:
+    """What to say when the saved sign-in is for another endpoint than the one in use; empty when it is not."""
+    if not saved or saved == resource:
+        return ""
+    return (
+        f" The saved sign-in is for {saved}, not for {resource}: check CASSETTE_MCP_URL, or sign in to {resource} by "
+        "running oh-my-cassette login with CASSETTE_MCP_URL set to it."
+    )
+
+
+def keyring_unavailable() -> AuthenticationError:
+    """The keyring could not be read or written, with what to do about it on this system."""
+    if sys.platform == "darwin":
+        hint = "unlock your login keychain (Keychain Access) and retry"
+    elif sys.platform == "win32":
+        hint = "make sure Windows Credential Manager is available to your account and retry"
+    else:
+        hint = (
+            "oh-my-cassette keeps its sign-in in a Secret Service keyring (GNOME Keyring or KWallet), and none is "
+            "unlocked in this session. On a desktop, unlock the login keyring (Passwords and Keys) and retry. Over SSH "
+            "or without a desktop, install gnome-keyring and dbus-user-session, start a shell with its own session bus "
+            "with `dbus-run-session -- bash`, unlock a keyring in it with "
+            "`printf '%s' 'a keyring password' | gnome-keyring-daemon --unlock --components=secrets`, then run "
+            "oh-my-cassette login and start the MCP host from that same shell"
+        )
+    return AuthenticationError(f"Secure credential storage unavailable: {hint}", 503)
+
+
 @contextmanager
 def auth_http():
     try:
@@ -229,6 +257,11 @@ class Credentials:
         connection = self.connection or saved_connection()
         return bool(self.explicit_token or (connection and connection.resource == self.resource))
 
+    def saved_elsewhere(self) -> str | None:
+        """The endpoint of the saved sign-in when it is for another endpoint than this one."""
+        connection = self.connection or saved_connection()
+        return connection.resource if connection and connection.resource != self.resource else None
+
     def _store(self) -> KeyringBackend:
         self._keyring = self._keyring or native_keyring()
         return self._keyring
@@ -238,6 +271,7 @@ class Credentials:
         if not connection or connection.resource != self.resource:
             raise AuthenticationError(
                 "Not connected. Run oh-my-cassette login and sign in with your Cassette account. Restart the MCP host if it cannot refresh tools."
+                + mismatch_hint(connection.resource if connection else None, self.resource)
             )
         return connection
 
@@ -294,12 +328,12 @@ class Credentials:
         try:
             return await anyio.to_thread.run_sync(self._token)
         except (KeyringError, ValidationError, LockTimeout) as exc:
-            raise AuthenticationError(
-                "Secure credential storage unavailable; unlock your system keyring and retry", 503
-            ) from exc
+            raise keyring_unavailable() from exc
 
     async def headers(self, url: str) -> dict[str, str]:
-        if _origin(url) != _origin(self.resource):
+        # Without a sign-in for this endpoint the request goes without a credential, so the endpoint itself says
+        # whether it is there (404, unreachable) or wants one (401).
+        if _origin(url) != _origin(self.resource) or not self.configured:
             return {}
         return {"Authorization": f"Bearer {await self.token()}"}
 
@@ -370,9 +404,7 @@ class Credentials:
         try:
             await anyio.to_thread.run_sync(self._logout, connection)
         except (KeyringError, ValidationError, LockTimeout) as exc:
-            raise AuthenticationError(
-                "Secure credential storage unavailable; unlock your system keyring and retry", 503
-            ) from exc
+            raise keyring_unavailable() from exc
 
     def _logout(self, connection: Connection) -> None:
         """Revoke the grant, then forget it. A grant the service no longer honors (or none at all) is only
@@ -404,6 +436,38 @@ class Credentials:
             except PasswordDeleteError:
                 pass
             (root / "connection.json").unlink(missing_ok=True)
+
+
+def _saved_grant() -> tuple[Connection, Grant] | None:
+    """The sign-in this machine holds now, which a new one replaces; None when there is none to read."""
+    try:
+        previous = saved_connection()
+        value = native_keyring().get_password(SERVICE, previous.key) if previous else None
+        return (previous, Grant.model_validate_json(value)) if previous and value else None
+    except (AuthenticationError, KeyringError, ValidationError):
+        return None
+
+
+def _revoke_replaced(current: Connection, previous: Connection, grant: Grant) -> None:
+    """Revoke the grant a new sign-in replaced, so the account's connected apps list this machine once; a grant
+    the service no longer honors, or a service that cannot be reached, is left alone: it ends when it expires."""
+    try:
+        with auth_http() as http:
+            http.post(
+                previous.revocation_endpoint,
+                data={
+                    "client_id": CLIENT_ID,
+                    "token": grant.refresh_token,
+                    "token_type_hint": "refresh_token",
+                },
+            )
+    except AuthenticationError:
+        pass
+    if previous.key != current.key:
+        try:
+            native_keyring().delete_password(SERVICE, previous.key)
+        except KeyringError:
+            pass
 
 
 def login(*, no_browser: bool = False, cancelled: threading.Event | None = None) -> Connection:
@@ -536,14 +600,15 @@ def login(*, no_browser: bool = False, cancelled: threading.Event | None = None)
             expires_at=time.time() + float(tokens["expires_in"]),
         )
         root = private_auth_directory()
+        replaced = _saved_grant()
         with FileLock(root / f"{connection.key}.lock", timeout=30):
             native_keyring().set_password(SERVICE, connection.key, grant.model_dump_json())
             _write_public(root / "connection.json", asdict(connection))
+        if replaced is not None:
+            _revoke_replaced(connection, *replaced)
         return connection
     except (KeyringError, ValidationError, LockTimeout) as exc:
-        raise AuthenticationError(
-            "Secure credential storage unavailable; unlock your system keyring and retry", 503
-        ) from exc
+        raise keyring_unavailable() from exc
     finally:
         server.shutdown()
         server.server_close()

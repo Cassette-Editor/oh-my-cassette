@@ -131,11 +131,23 @@ def _loopback(host: str | None) -> bool:
         return False
 
 
+# RFC 2544 sets 198.18.0.0/15 aside for benchmarking networks, so no public host and no ordinary local network
+# has an address in it. Proxies running in fake-ip mode (Clash, Mihomo, Surge and others) answer every DNS query
+# with an address from it and send the connection on to the name it was asked for; refusing it would refuse every
+# transfer on such a network, while letting it through reaches no host of this machine's own network.
+FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+
+
+def _public(address: str) -> bool:
+    ip = ipaddress.ip_address(address.split("%")[0])
+    return ip.is_global or ip in FAKE_IP_NETWORK
+
+
 def transfer_guard(endpoint: str) -> Callable[[httpx.Request], Awaitable[None]]:
     """A request hook for the client that uploads and downloads: every request, redirects included, goes to
-    the endpoint's origin or to HTTPS on a host whose every address is public, so the URLs a backend hands out
-    cannot point this machine at its own network. A loopback endpoint (a local backend) is trusted with
-    loopback storage too."""
+    the endpoint's origin or to HTTPS on a host whose every address is public (or a proxy's fake-ip address), so
+    the URLs a backend hands out cannot point this machine at its own network. A loopback endpoint (a local
+    backend) is trusted with loopback storage too."""
     local = _loopback(urlsplit(endpoint).hostname)
 
     async def check(request: httpx.Request) -> None:
@@ -151,8 +163,14 @@ def transfer_guard(endpoint: str) -> Callable[[httpx.Request], Awaitable[None]]:
             )
         except OSError:
             return  # unresolvable: the request itself fails as a network error
-        if not all(ipaddress.ip_address(str(info[4][0]).split("%")[0]).is_global for info in infos):
-            raise BridgeError("bridge.contract_violation", f"refused {where}: not a public address")
+        private = sorted({str(info[4][0]) for info in infos if not _public(str(info[4][0]))})
+        if private:
+            raise BridgeError(
+                "bridge.private_address",
+                f"refused {where}: on this machine's network it resolves to {', '.join(private)}, which is not a "
+                "public address. A VPN, proxy or DNS setting on this machine sends it there; let it resolve the "
+                "host to its public address (for a proxy, leave the host out of its DNS rewriting), then retry",
+            )
 
     return check
 
@@ -379,6 +397,10 @@ class LocalFiles:
                 "(add its directory to CASSETTE_ALLOWED_ROOTS to allow it)",
             )
         stat = real.stat()
+        if stat.st_size == 0:
+            raise BridgeError(
+                "bridge.file_empty", f"{raw} is empty (0 bytes); there is nothing in it to import"
+            )
         if stat.st_size > self._settings.max_upload_bytes:
             limit = self._settings.max_upload_bytes // (1024 * 1024)
             raise BridgeError("bridge.file_too_large", f"{raw} is larger than CASSETTE_MAX_UPLOAD_MB={limit}")
