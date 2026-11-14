@@ -1,6 +1,6 @@
 # Build used by Glama (glama.ai) to inspect the server in its sandbox. Hosts do not
 # use this image: they run `uvx oh-my-cassette==X.Y.Z` directly.
-FROM python:3.13-slim@sha256:cf50a4f6ac4f026458b08d5222023d700ac806410dff5e9ca8728fa44f2b850f
+FROM python:3.15-slim@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
