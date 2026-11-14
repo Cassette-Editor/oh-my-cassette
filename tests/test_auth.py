@@ -254,6 +254,7 @@ def test_browser_callback_checks_state_and_pkce_and_finishes_cancel_without_anot
         params = parse_qs(urlsplit(url).query)
         opened.append(params)
         assert params["code_challenge_method"] == ["S256"]
+        assert params["device_name"] == [auth.device_name()]
         callback = params["redirect_uri"][0]
         with original(timeout=3) as http:
             assert http.get(callback, params={"state": "wrong", "code": "bad"}).status_code == 400
@@ -406,3 +407,12 @@ def test_signing_in_again_revokes_the_grant_it_replaces(environment, monkeypatch
     assert (
         auth.Grant.model_validate_json(store.get_password(auth.SERVICE, c.key)).refresh_token == "new-refresh"
     )
+
+
+def test_device_name_names_the_host_and_its_system(monkeypatch):
+    monkeypatch.setattr(auth.platform, "node", lambda: "studio-mac.local")
+    monkeypatch.setattr(auth.platform, "system", lambda: "Darwin")
+    assert auth.device_name() == "studio-mac (macOS)"
+    monkeypatch.setattr(auth.platform, "node", lambda: "")
+    monkeypatch.setattr(auth.platform, "system", lambda: "Linux")
+    assert auth.device_name() == "This computer (Linux)"

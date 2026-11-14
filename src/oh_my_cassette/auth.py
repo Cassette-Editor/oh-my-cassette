@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import platform
 import queue
 import secrets
 import sys
@@ -448,6 +449,14 @@ def _saved_grant() -> tuple[Connection, Grant] | None:
         return None
 
 
+def device_name() -> str:
+    """How the account's connected apps name this machine: its host name and system, e.g. `studio-mac (macOS)`.
+    Cassette only shows it, so the user can tell sign-ins on different machines apart."""
+    system = {"Darwin": "macOS"}.get(platform.system(), platform.system()) or "unknown system"
+    host = platform.node().removesuffix(".local") or "This computer"
+    return f"{host} ({system})"
+
+
 def _revoke_replaced(current: Connection, previous: Connection, grant: Grant) -> None:
     """Revoke the grant a new sign-in replaced, so the account's connected apps list this machine once; a grant
     the service no longer honors, or a service that cannot be reached, is left alone: it ends when it expires."""
@@ -534,6 +543,7 @@ def login(*, no_browser: bool = False, cancelled: threading.Event | None = None)
                 "state": state,
                 "code_challenge": challenge,
                 "code_challenge_method": "S256",
+                "device_name": device_name(),
             }
         )
     )
