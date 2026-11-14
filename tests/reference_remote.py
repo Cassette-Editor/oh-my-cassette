@@ -328,9 +328,11 @@ class ReferenceRemote:
                 "sha256": "0" * 64 if corrupt else hashlib.sha256(data).hexdigest(),
                 "pointer": "/file",
             }
+            structured = {"status": "exported", "file": url}
+            # The text block carries the structured content as JSON, as Cassette writes every result.
             return types.CallToolResult(
-                content=[types.TextContent(type="text", text=f"exported {name}.mp4")],
-                structured_content={"status": "exported", "file": url},
+                content=[types.TextContent(type="text", text=json.dumps(structured, indent=2))],
+                structured_content=structured,
                 _meta={META_DOWNLOADS: [declared]},
             )
 

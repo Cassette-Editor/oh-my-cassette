@@ -423,14 +423,29 @@ async def test_a_missing_ffmpeg_says_how_to_install_it(tmp_path):
     assert "CASSETTE_FFMPEG" in caught.value.message and "install ffmpeg" in caught.value.message
 
 
-async def test_an_unreadable_file_fails_with_the_stderr_tail(preparer, tmp_path):
+async def test_a_truncated_video_is_reported_as_incomplete_before_it_uploads(preparer, tmp_path):
+    whole = tmp_path / "whole.mp4"
+    # The index first, as a camera or `-movflags +faststart` writes it, so the cut file still opens and claims 6 s.
+    _ffmpeg(*_video(duration="6"), "-c:v", "libx264", "-movflags", "+faststart", str(whole))
+    cut = tmp_path / "cut.mp4"
+    cut.write_bytes(whole.read_bytes()[: whole.stat().st_size // 4])
+    with pytest.raises(BridgeError) as caught:
+        await preparer.transcode(cut, PLAN, tmp_path / "out", lambda _: None)
+    assert caught.value.code == "bridge.prepare_failed" and caught.value.retryable is False
+    assert caught.value.message.startswith("cut.mp4 is incomplete or damaged")
+
+
+async def test_an_unreadable_file_says_why_in_words_without_ffprobe_output(preparer, tmp_path):
     broken = tmp_path / "broken.mp4"
     broken.write_bytes(b"not a video " * 1000)
     with pytest.raises(BridgeError) as caught:
         await preparer.transcode(broken, PLAN, tmp_path / "out", lambda _: None)
     assert caught.value.code == "bridge.prepare_failed" and caught.value.retryable is False
-    assert "broken.mp4" in caught.value.message
-    assert len(caught.value.message.partition(": ")[2]) <= STDERR_TAIL
+    message = caught.value.message
+    assert message.startswith("broken.mp4 could not be read as audio, video or an image")
+    assert "incomplete or damaged" in message
+    assert "\n" not in message and "moov atom" not in message and str(tmp_path) not in message
+    assert len(message) <= STDERR_TAIL
 
 
 async def test_the_bridge_prepares_real_files_before_the_handshake(remote, bridge_settings):

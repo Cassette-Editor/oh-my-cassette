@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import socket
 from pathlib import Path
 
 import httpx
@@ -390,6 +391,10 @@ async def test_missing_large_and_malformed_arguments(remote, bridge_settings, wo
             == "bridge.file_too_large"
         )
         assert _error(await host.call_tool("import_media", {"paths": [7]})) == "bridge.invalid_argument"
+        (workspace / "media" / "zero.mp4").write_bytes(b"")
+        empty = await host.call_tool("import_media", {"paths": ["media/zero.mp4"]})
+        assert _error(empty) == "bridge.file_empty"
+        assert "media/zero.mp4 is empty (0 bytes)" in empty.structured_content["error"]["message"]
     assert remote.uploads == {} and remote.calls == []
 
 
@@ -486,6 +491,8 @@ async def test_a_host_started_in_the_home_folder_reads_only_the_folders_named_fo
         ("https://10.1.2.3/object", "public"),
         ("https://169.254.169.254/latest/meta-data", "public"),
         ("https://localhost/object", "public"),
+        ("https://198.18.0.7/object", None),  # a fake-ip proxy's answer (the RFC 2544 benchmarking range)
+        ("https://198.19.255.254/object", None),
     ],
 )
 async def test_transfers_go_to_the_endpoint_or_public_https_hosts_only(url, refusal):
@@ -495,7 +502,22 @@ async def test_transfers_go_to_the_endpoint_or_public_https_hosts_only(url, refu
     else:
         with pytest.raises(BridgeError, match=refusal) as caught:
             await check(httpx.Request("GET", url))
-        assert caught.value.code == "bridge.contract_violation" and "object" not in caught.value.message
+        code = "bridge.contract_violation" if refusal == "HTTPS" else "bridge.private_address"
+        assert caught.value.code == code and "object" not in caught.value.message
+
+
+async def test_a_fake_ip_answer_passes_but_not_beside_a_private_address(monkeypatch):
+    answers = {"store.example": ["198.18.0.42"], "mixed.example": ["198.18.0.42", "192.168.1.10"]}
+
+    async def resolve(host, port, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port)) for address in answers[host]]
+
+    monkeypatch.setattr(files.anyio, "getaddrinfo", resolve)
+    check = transfer_guard("https://mcp.example.com/mcp")
+    await check(httpx.Request("PUT", "https://store.example/bucket/key"))
+    with pytest.raises(BridgeError, match="192.168.1.10") as caught:
+        await check(httpx.Request("PUT", "https://mixed.example/bucket/key"))
+    assert caught.value.code == "bridge.private_address" and not caught.value.retryable
 
 
 async def test_a_local_backend_may_hand_out_loopback_storage_only():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 
 import anyio
@@ -122,6 +123,8 @@ async def test_downloads_declared_artifacts_into_the_workspace(remote, bridge_se
     assert second.structured_content["file"] == str(exports / "final (1).mp4")
     assert (exports / "final.mp4").read_bytes() == b"FAKE-MP4-" * 4096
     assert "Downloaded final.mp4" in first.content[-1].text
+    # A host that reads only the text sees the local path too, never the URL that needs the bridge's credential.
+    assert json.loads(first.content[0].text) == first.structured_content
     assert sorted(p.name for p in exports.iterdir()) == ["final (1).mp4", "final.mp4"]
 
 

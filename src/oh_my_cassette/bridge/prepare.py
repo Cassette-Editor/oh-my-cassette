@@ -40,6 +40,8 @@ HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67"})
 # A source is read as a local file only: a playlist or reference inside it cannot reach the network or a pipe.
 LOCAL_INPUT = ["-protocol_whitelist", "file"]
 STDERR_TAIL = 1000
+# How far a prepared video's duration may stray from its source's, as Cassette checks every prepared upload.
+DURATION_TOLERANCE_SEC = 1.0
 INSTALL_HINT = (
     "install ffmpeg (for example `brew install ffmpeg`, `sudo apt install ffmpeg` or `winget install ffmpeg`), "
     "or set CASSETTE_FFMPEG and CASSETTE_FFPROBE to the two programs"
@@ -338,6 +340,32 @@ def _failed(what: str, detail: str) -> BridgeError:
     return BridgeError("bridge.prepare_failed", f"{what}: {tail}")
 
 
+def _check_complete(source: Path, declared: float, prepared: float) -> None:
+    """A source whose header claims more than its data holds (a copy cut short) transcodes to a shorter file without
+    an ffmpeg error; it is refused here, before anything is uploaded, rather than by the backend afterwards."""
+    if abs(declared - prepared) > DURATION_TOLERANCE_SEC:
+        raise BridgeError(
+            "bridge.prepare_failed",
+            f"{source.name} is incomplete or damaged: it says it lasts {declared:.1f} s, but only {prepared:.1f} s "
+            "of it could be read. Copy or export the file again and import the complete one",
+        )
+
+
+def _unreadable(path: Path, stderr: str) -> BridgeError:
+    """A file ffprobe cannot open, said in words, with only ffprobe's closing verdict (without the local path it
+    names or the demuxer's internals) as the detail."""
+    last = next((line for line in reversed(stderr.strip().splitlines()) if line.strip()), "")
+    verdict = last.removeprefix(f"{path}: ").strip()
+    if verdict.startswith("[") or str(path) in verdict:
+        verdict = ""
+    detail = f" (ffprobe: {verdict[:200]})" if verdict else ""
+    return BridgeError(
+        "bridge.prepare_failed",
+        f"{path.name} could not be read as audio, video or an image: the file may be incomplete or damaged, "
+        f"or not the kind of file its name says{detail}",
+    )
+
+
 class FFmpegPreparer:
     def __init__(self, settings: BridgeSettings) -> None:
         self._settings = settings
@@ -389,7 +417,7 @@ class FFmpegPreparer:
             check=False,
         )
         if result.returncode != 0:
-            raise _failed(f"ffprobe could not read {path.name}", result.stderr.decode(errors="replace"))
+            raise _unreadable(path, result.stderr.decode(errors="replace"))
         return json.loads(result.stdout or b"{}")
 
     async def _run(self, what: str, args: list[str], duration: float | None, progress: ProgressFn) -> None:
@@ -457,6 +485,9 @@ class FFmpegPreparer:
                 report[rendition.role] = media_profile(await self.probe(output), rendition.container)
             except ValueError as exc:
                 raise BridgeError("bridge.prepare_failed", f"{source.name} {rendition.role}: {exc}") from exc
+            _check_complete(
+                source, source_profile["durationSeconds"], report[rendition.role]["durationSeconds"]
+            )
         report |= {
             "canonicalWasTranscoded": True,
             "preparedAt": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
