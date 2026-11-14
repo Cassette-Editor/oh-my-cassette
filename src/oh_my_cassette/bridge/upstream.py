@@ -262,6 +262,9 @@ class Upstream:
                 self.protocol_unsupported = refusal is not None
                 if auth_error is not None:
                     self.last_error = str(auth_error)
+                elif refusal is not None:
+                    # A handshake-era server answers 404 to the requests that follow its refusal too.
+                    self.last_error = str(refusal)
                 elif self._missing > missing and not self.unauthorized:
                     self.last_error = (
                         f"{self.settings.mcp_url} answered HTTP 404: there is no Cassette MCP endpoint at this address. "
@@ -270,7 +273,7 @@ class Upstream:
                 elif self.unauthorized:
                     self.last_error = "HTTP 401 Unauthorized"
                 else:
-                    self.last_error = str(refusal) if refusal else describe(exc)
+                    self.last_error = describe(exc)
                 log.warning(
                     "Cassette MCP endpoint %s unavailable: %s", self.settings.mcp_url, self.last_error
                 )
