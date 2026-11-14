@@ -28,7 +28,7 @@ import httpx
 import mcp_types as types
 
 from oh_my_cassette.auth import Credentials
-from oh_my_cassette.bridge.errors import BridgeError, backoff_seconds, retry_after_seconds
+from oh_my_cassette.bridge.errors import BridgeError, backoff_seconds, connection_failure, retry_after_seconds
 from oh_my_cassette.bridge.files import CHUNK, same_origin
 from oh_my_cassette.bridge.jobs import DONE, DOWNLOADING, FileProgress, LocalJob, LocalJobs, ReportFn
 from oh_my_cassette.bridge.settings import BridgeSettings
@@ -307,4 +307,4 @@ class Downloads:
                         received(total)
                 return total, digest.hexdigest()
         except httpx.HTTPError as exc:
-            raise _Interrupted(str(exc) or type(exc).__name__) from exc
+            raise _Interrupted(connection_failure(exc) or str(exc) or type(exc).__name__) from exc

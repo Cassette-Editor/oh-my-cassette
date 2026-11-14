@@ -7,6 +7,7 @@ from dataclasses import asdict
 import httpx
 import pytest
 from tests.bridge_support import bridge_host
+from tests.reference_remote import free_port
 from tests.test_auth import MemoryKeyring, mock_http
 
 from oh_my_cassette import auth
@@ -99,3 +100,36 @@ async def test_a_sign_in_saved_for_another_endpoint_says_which(
         status = await host.call_tool(STATUS_TOOL, {})
         assert status.structured_content["error_code"] == "bridge.unauthorized"
         assert "https://mcp.elsewhere.test/mcp" in status.structured_content["error"]
+
+
+async def _status_and_instructions(settings) -> tuple[dict, str]:
+    async with bridge_host(settings) as (_, host):
+        status = await host.call_tool(STATUS_TOOL, {})
+        return status.structured_content, host.instructions
+
+
+@pytest.mark.parametrize("saved_for", [None, "https://mcp.trycassette.online/mcp"])
+async def test_without_a_sign_in_the_instructions_give_the_reason_the_status_tool_gives(
+    remote, bridge_settings, monkeypatch, tmp_path, saved_for
+):
+    directory = tmp_path / "auth"
+    monkeypatch.setenv("CASSETTE_AUTH_DIRECTORY", str(directory))
+    monkeypatch.setattr(auth, "native_keyring", MemoryKeyring)
+    if saved_for:
+        _signed_in_for(saved_for, directory, monkeypatch)
+    endpoints = {
+        "missing": remote.url.rsplit("/", 1)[0] + "/nope",
+        "unreachable": f"http://127.0.0.1:{free_port()}/mcp",
+        "signed_out": remote.url,
+    }
+    expected = {
+        "missing": ("bridge.backend_unreachable", "HTTP 404"),
+        "unreachable": ("bridge.backend_unreachable", "refused the connection"),
+        "signed_out": ("bridge.unauthorized", "oh-my-cassette login"),
+    }
+    for case, url in endpoints.items():
+        status, instructions = await _status_and_instructions(bridge_settings(url, auth_token=None))
+        code, phrase = expected[case]
+        assert status["error_code"] == code, case
+        assert phrase in status["error"], case
+        assert f"{code}: {status['error']}" in instructions, case

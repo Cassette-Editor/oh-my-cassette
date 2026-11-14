@@ -30,6 +30,7 @@ from mcp.shared.exceptions import MCPError
 from oh_my_cassette.bridge.errors import (
     BridgeError,
     backoff_seconds,
+    connection_failure,
     rate_limited,
     retry_after_seconds,
     unauthorized,
@@ -816,7 +817,8 @@ class LocalFiles:
                     url, content=_read(artifact.path, 0, artifact.size, sent), headers=headers
                 )
         except httpx.HTTPError as exc:
-            raise BridgeError("bridge.upload_failed", f"{what}: {exc}", retryable=True) from exc
+            detail = connection_failure(exc) or str(exc) or type(exc).__name__
+            raise BridgeError("bridge.upload_failed", f"{what}: {detail}", retryable=True) from exc
         if response.status_code >= 300:
             raise BridgeError(
                 "bridge.upload_failed",
@@ -952,7 +954,7 @@ class LocalFiles:
                 )
                 detail = f"storage answered HTTP {status}"
             except httpx.HTTPError as exc:
-                detail = str(exc) or type(exc).__name__
+                detail = connection_failure(exc) or str(exc) or type(exc).__name__
             if status is not None and status < 300:
                 return
             sent(-moved)

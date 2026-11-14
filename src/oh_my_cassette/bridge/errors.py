@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import math
+import socket
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
+import httpx
+import httpx2
 import mcp_types as types
+
+# The bridge's own HTTP client (uploads, downloads, sign-in) and the MCP SDK's each raise their own classes.
+_TRANSPORT_ERRORS = (httpx.TransportError, httpx2.TransportError)
+_CONNECTS = (httpx.ConnectError, httpx2.ConnectError)
+_CONNECT_TIMEOUTS = (httpx.ConnectTimeout, httpx2.ConnectTimeout)
+_TIMEOUTS = (httpx.TimeoutException, httpx2.TimeoutException)
 
 
 def retry_after_seconds(value: str | None) -> float | None:
@@ -25,6 +34,38 @@ def retry_after_seconds(value: str | None) -> float | None:
     if when.tzinfo is None:
         when = when.replace(tzinfo=UTC)
     return max(0.0, (when - datetime.now(UTC)).total_seconds())
+
+
+def connection_failure(exc: BaseException) -> str | None:
+    """Why an HTTP request could not reach its host, naming the host, e.g. `cannot resolve the host name
+    mcp.example.com`; None when `exc` is not a transport failure of a request."""
+    if not isinstance(exc, _TRANSPORT_ERRORS):
+        return None
+    try:
+        url = exc.request.url
+    except RuntimeError:  # raised without the request it belongs to
+        return None
+    host = url.host if url.port is None else f"{url.host}:{url.port}"
+    causes: list[BaseException] = []
+    cause: BaseException | None = exc
+    while cause is not None and len(causes) < 16:
+        causes.append(cause)
+        cause = cause.__cause__ or cause.__context__
+    if any(isinstance(item, socket.gaierror) for item in causes):
+        return (
+            f"cannot resolve the host name {url.host} (DNS lookup failed); check the address and the network"
+        )
+    if any(isinstance(item, ConnectionRefusedError) for item in causes):
+        return f"{host} refused the connection; nothing is listening there"
+    if isinstance(exc, _CONNECT_TIMEOUTS):
+        return f"{host} did not accept a connection in time (connect timeout)"
+    if isinstance(exc, _TIMEOUTS):
+        return f"{host} stopped answering ({type(exc).__name__})"
+    text = str(exc).strip()
+    detail = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+    if isinstance(exc, _CONNECTS):
+        return f"cannot connect to {host} ({detail})"
+    return f"the connection to {host} failed ({detail})"
 
 
 def backoff_seconds(attempt: int, retry_after: float | None) -> float:
