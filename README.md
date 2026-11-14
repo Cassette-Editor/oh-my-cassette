@@ -152,8 +152,20 @@ Sign in once with `oh-my-cassette login`, using the Cassette account that holds 
 | `CASSETTE_TEMP_DIR` | the system temp directory | Where each upload makes its own private directory (`oh-my-cassette-job-*`) for prepared files until they are uploaded. |
 | `CASSETTE_CONNECT_TIMEOUT_SEC` | `10` | How long to wait for the service when connecting. |
 | `CASSETTE_MCP_HOST` | unset | The host name sent to the service when the host does not identify itself. |
-| `CASSETTE_AUTH_DIRECTORY` | `~/.config/oh-my-cassette` | Where the saved connection's settings are kept (the token itself stays in the keyring). |
+| `CASSETTE_AUTH_DIRECTORY` | `~/.config/oh-my-cassette` | Where the saved connection's settings are kept (the token and your own OpenAI key stay in the keyring). |
 | `OH_MY_CASSETTE_LOG` | `WARNING` | Log level on stderr. |
+
+### Your own OpenAI key
+
+An account can pay for its Cassette agent turns with its own OpenAI key instead of Cassette's. Save it once, after `login`:
+
+```bash
+uvx oh-my-cassette==0.6.1 key set      # prompts for the key (sk-…) without echoing it
+uvx oh-my-cassette==0.6.1 key status   # shows whether one is saved, and its fingerprint
+uvx oh-my-cassette==0.6.1 key remove
+```
+
+The key stays in your operating-system keyring (service `oh-my-cassette.provider-key`), kept for the account you signed in with, and is never written to a file. The bridge sends it in the `x-cassette-provider-key` header on its requests to the Cassette MCP service only; the service hands it to Cassette, which holds it in memory while your turns need it and switches the account to its own key. `key remove` first has Cassette let go of the key it holds at once, then forgets it here; the account stays on its own key, so its turns wait for one until you set a key again. Switch back to Cassette's key in Cassette settings. A turn that waits for a key Cassette does not hold answers `needs_credential`; save the key and continue the turn. With `CASSETTE_AUTH_TOKEN` set, no key is sent. `status` shows the fingerprint Cassette shows: the first 8 hex digits of the key's SHA-256 and its last four characters.
 
 ## Install
 

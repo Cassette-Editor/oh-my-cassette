@@ -31,6 +31,8 @@ from keyring.backend import KeyringBackend
 from keyring.errors import KeyringError, PasswordDeleteError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from oh_my_cassette import provider_key
+
 CLIENT_ID = "oh-my-cassette"
 SCOPE = "cassette:agent"
 DEFAULT_RESOURCE = "https://mcp.trycassette.online/mcp"
@@ -301,6 +303,21 @@ class Credentials:
             return {}
         return {"Authorization": f"Bearer {await self.token()}"}
 
+    async def provider_key_headers(self, url: str) -> dict[str, str]:
+        """The account's own OpenAI key for a request to the MCP service, when `oh-my-cassette key set` saved one.
+
+        A token given in `CASSETTE_AUTH_TOKEN` may belong to another account than the saved connection, so it is
+        sent with no key. A keyring that cannot be read sends none either: the request is not held up for it.
+        """
+        if self.explicit_token or _origin(url) != _origin(self.resource):
+            return {}
+        try:
+            connection = self._connection()
+            key = await anyio.to_thread.run_sync(provider_key.read_key, self._store(), connection.key)
+        except (AuthenticationError, KeyringError):
+            return {}
+        return {provider_key.HEADER: key} if key else {}
+
     def workspace_id(self, directory: Path) -> str:
         connection = self.connection or saved_connection()
         subject = connection.subject if connection and connection.resource == self.resource else "explicit"
@@ -328,6 +345,25 @@ class Credentials:
         ):
             raise AuthenticationError("Saved identity does not match this connection", 403)
         return principal
+
+    async def release_provider_key(self) -> None:
+        """Ask Cassette to let go of the OpenAI key it holds for the account now, rather than after 30 idle
+        minutes. The account stays on its own key, so a run that needs one waits until a key arrives again."""
+        token = await self.token()
+        try:
+            async with httpx.AsyncClient(timeout=15) as http:
+                response = await http.delete(
+                    f"{self.resource.rstrip('/')}/provider-key",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+        except httpx.HTTPError as exc:
+            raise AuthenticationError("Cassette could not be reached", 503) from exc
+        if response.status_code in (401, 403):
+            raise AuthenticationError(
+                "Cassette refused the saved sign-in; run oh-my-cassette login", response.status_code
+            )
+        if response.status_code != 204:
+            raise AuthenticationError(f"Cassette answered {response.status_code}", 503)
 
     async def logout(self) -> None:
         connection = self._connection()
