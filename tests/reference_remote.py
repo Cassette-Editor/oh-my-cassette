@@ -131,6 +131,7 @@ class RemoteOptions:
     fail_part_once: int | None = None  # that part's first PUT answers 503
     expire_part_once: int | None = None  # that part's first URL answers 403, as an expired signature does
     put_delay: float = 0.0  # seconds each upload PUT takes before it answers
+    refuse_puts: bool = False  # every upload PUT answers 403, as storage that turns the bridge away does
     # Misbehaviour a test switches on mid-session.
     drop_turn_once: bool = False  # the first turn acted on loses its connection before it answers
     refusals: list[tuple[int, int | None]] = field(
@@ -160,6 +161,7 @@ class ReferenceRemote:
     part_headers: list[dict[str, str]] = field(default_factory=list)
     signed: list[dict[str, Any]] = field(default_factory=list)
     events: list[str] = field(default_factory=list)  # "begin:<name>" and "complete:<name>", in order
+    abandoned: list[str] = field(default_factory=list)  # the upload ids the bridge said it could not send
     puts_in_flight: int = 0
     most_puts_in_flight: int = 0
     request_headers: list[dict[str, str]] = field(default_factory=list)
@@ -514,7 +516,13 @@ class ReferenceRemote:
                 description="Used by the local oh-my-cassette bridge.",
                 meta={META_BRIDGE_ROLE: ROLE_UPLOAD_COMPLETE},
             )
-            async def upload_complete(uploadIds: list[str]) -> dict[str, Any]:  # noqa: N803 (wire name)
+            async def upload_complete(
+                uploadIds: list[str],  # noqa: N803 (wire name)
+                abandoned: bool = False,
+            ) -> dict[str, Any]:
+                if abandoned:
+                    self.abandoned.extend(uploadIds)
+                    return {"files": []}
                 results: list[dict[str, Any]] = []
                 for upload_id in uploadIds:
                     record = self.uploads.get(upload_id)
@@ -553,6 +561,8 @@ class ReferenceRemote:
             upload_id, role = request.path_params["upload_id"], request.path_params["role"]
             record = self.uploads.get(upload_id)
             self.put_headers.append({k.lower(): v for k, v in request.headers.items()})
+            if self.options.refuse_puts:
+                return Response(status_code=403)
             if record is None or request.headers.get("x-upload-token") != f"t-{upload_id}":
                 return Response(status_code=403)
             artifact = next((a for a in record["file"]["artifacts"] if a["role"] == role), None)

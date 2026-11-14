@@ -258,6 +258,15 @@ async def test_parts_without_a_tool_to_sign_them_are_a_contract_violation(bridge
     assert remote.put_headers == [] and remote.part_headers == []
 
 
+async def test_an_upload_that_could_not_be_sent_is_abandoned_and_never_completed(bridge_settings, workspace):
+    remote = ReferenceRemote(options=RemoteOptions(refuse_puts=True))
+    async with serve_remote(remote), bridge_host(bridge_settings(remote.url)) as (_, host):
+        result = await host.call_tool("set_cover", {"image": "media/slide.png"})
+    assert result.is_error
+    assert remote.abandoned == list(remote.uploads)
+    assert not any(event.startswith("complete:") for event in remote.events)
+
+
 async def test_token_goes_to_same_origin_uploads_only(bridge_settings, workspace):
     same = ReferenceRemote()
     cross = ReferenceRemote(options=RemoteOptions(cross_origin_uploads=True))
