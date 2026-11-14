@@ -61,6 +61,7 @@ CHUNK = 1024 * 1024
 UPLOAD_CONCURRENCY = 4  # PUTs a call keeps in flight across its files, artifacts and parts
 PART_ATTEMPTS = 4  # sends of one part before a transient failure is reported
 PART_URL_MAX_AGE_SEC = 600.0  # a part URL signed longer ago than this is signed again before use
+ABANDON_TIMEOUT_S = 15.0  # how long telling the backend of unsent uploads may hold up the failure
 
 # Media types the platform tables often miss.
 for _ext, _mime in {
@@ -692,13 +693,18 @@ class LocalFiles:
         if seen != set(by_ref):
             raise BridgeError("bridge.contract_violation", f"{source} did not return one entry per file")
 
-        async with _Tasks() as transfers:
-            for upload_id, (file, targets) in pending.items():
-                transfers.start(
-                    lambda upload_id=upload_id, file=file, targets=targets: self._send(
-                        parts, upload_id, file, targets, job.files[file.index], sends
+        try:
+            async with _Tasks() as transfers:
+                for upload_id, (file, targets) in pending.items():
+                    transfers.start(
+                        lambda upload_id=upload_id, file=file, targets=targets: self._send(
+                            parts, upload_id, file, targets, job.files[file.index], sends
+                        )
                     )
-                )
+        except BaseException:
+            with anyio.CancelScope(shield=True):
+                await self._abandon(complete, list(pending))
+            raise
         if pending:
             finished = await self._call(complete, {"uploadIds": list(pending)})
             for entry in (finished.structured_content or {}).get("files") or []:
@@ -717,6 +723,18 @@ class LocalFiles:
                 "bridge.contract_violation", f"{complete.name} returned no ref for {', '.join(missing)}"
             )
         return refs
+
+    async def _abandon(self, complete: types.Tool, upload_ids: list[str]) -> None:
+        """Tells a backend whose complete tool takes `abandoned` that these uploads will not be sent, so the entries
+        they reserved leave the project's media; the failure that stopped them is what the call reports."""
+        properties = (complete.input_schema or {}).get("properties") or {}
+        if not upload_ids or "abandoned" not in properties:
+            return
+        with anyio.move_on_after(ABANDON_TIMEOUT_S):
+            try:
+                await self._upstream.call_tool(complete.name, {"uploadIds": upload_ids, "abandoned": True})
+            except Exception:  # noqa: BLE001 (best effort: the transfer's own failure is reported)
+                pass
 
     @staticmethod
     def _targets(tool_name: str, file: UploadFile, puts: Any) -> dict[str, PutTarget]:
