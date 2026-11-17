@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
 
+import anyio
 import httpx
 import pytest
 from tests.bridge_support import bridge_host
@@ -133,3 +135,77 @@ async def test_without_a_sign_in_the_instructions_give_the_reason_the_status_too
         assert status["error_code"] == code, case
         assert phrase in status["error"], case
         assert f"{code}: {status['error']}" in instructions, case
+
+
+async def test_a_saved_token_the_endpoint_stops_honoring_is_renewed_and_the_call_goes_through(
+    remote, bridge_settings, monkeypatch, tmp_path
+):
+    directory = tmp_path / "auth"
+    _signed_in_for(remote.url, directory, monkeypatch)
+    store = MemoryKeyring()
+    monkeypatch.setattr(auth, "native_keyring", lambda: store)
+    saved = auth.saved_connection()
+    store.set_password(
+        auth.SERVICE,
+        saved.key,
+        auth.Grant(
+            access_token="first",
+            refresh_token="refresh",
+            expires_at=time.time() + 3600,
+            subject=saved.subject,
+        ).model_dump_json(),
+    )
+    remote.options.token = "first"
+    refreshes: list[httpx.Request] = []
+
+    def token_endpoint(request: httpx.Request) -> httpx.Response:
+        refreshes.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "second",
+                "refresh_token": "rotated",
+                "expires_in": 3600,
+                "token_type": "Bearer",
+            },
+        )
+
+    mock_http(monkeypatch, token_endpoint)
+    async with bridge_host(bridge_settings(remote.url, auth_token=None)) as (_, host):
+        assert not (await host.call_tool("slow_turn", {"steps": 1})).is_error
+        remote.options.token = "second"  # the first token was revoked (a new sign-in elsewhere) or expired
+        renewed = await host.call_tool("slow_turn", {"steps": 1})
+        assert not renewed.is_error, renewed.structured_content
+    assert len(refreshes) == 1
+    assert [call["tool"] for call in remote.calls] == ["slow_turn", "slow_turn"]
+
+
+async def test_a_credential_that_cannot_be_read_fails_only_its_own_call(remote, bridge_settings):
+    async with bridge_host(bridge_settings(remote.url)) as (bridge, host):
+        credentials = bridge.upstream.credentials
+        original = credentials.headers
+        failing = False
+
+        async def headers(url: str) -> dict[str, str]:
+            if failing:
+                raise auth.AuthenticationError(
+                    "Secure credential storage did not answer (InitError); retry", 503
+                )
+            return await original(url)
+
+        credentials.headers = headers
+        results = {}
+
+        async def long_call():
+            results["long"] = await host.call_tool("slow_turn", {"steps": 5, "delay": 0.1})
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(long_call)
+            await anyio.sleep(0.15)
+            failing = True
+            results["short"] = await host.call_tool("slow_turn", {"steps": 1})
+            failing = False
+        assert results["short"].structured_content["error"]["code"] == "bridge.auth_unavailable"
+        assert results["short"].structured_content["error"]["retryable"] is True
+        assert not results["long"].is_error, results["long"].structured_content
+        assert not (await host.call_tool("slow_turn", {"steps": 1})).is_error
