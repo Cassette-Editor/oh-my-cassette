@@ -62,6 +62,7 @@ class _CallAnswer:
 
     status: int | None = None
     retry_after: float | None = None
+    authorization: str | None = None  # the bearer token the call's latest request carried
 
 
 _CALL_ANSWER: ContextVar[_CallAnswer | None] = ContextVar("oh_my_cassette_call_answer", default=None)
@@ -102,6 +103,14 @@ class RateLimited(Exception):
 
 class Unauthorized(Exception):
     """The backend's MCP endpoint answered HTTP 401: the token is missing or not accepted."""
+
+
+class _Rejected(Exception):
+    """One attempt of a call was answered HTTP 401; `token` is the one it carried, None without a saved sign-in."""
+
+    def __init__(self, token: str | None) -> None:
+        super().__init__("HTTP 401 Unauthorized")
+        self.token = token
 
 
 class ProtocolUnsupported(Exception):
@@ -188,7 +197,10 @@ class Upstream:
         return http
 
     async def _authorize_request(self, request: httpx2.Request) -> None:
-        request.headers.update(await self.credentials.headers(str(request.url)))
+        headers = await self.credentials.headers(str(request.url))
+        if (answer := _CALL_ANSWER.get()) is not None and (bearer := headers.get("Authorization")):
+            answer.authorization = bearer.removeprefix("Bearer ")
+        request.headers.update(headers)
         request.headers.update(await self.credentials.provider_key_headers(str(request.url)))
 
     async def _on_response(self, response: httpx2.Response) -> None:
@@ -412,6 +424,33 @@ class Upstream:
         meta: dict[str, Any] | None = None,
         progress: ProgressFnT | None = None,
     ) -> types.CallToolResult:
+        try:
+            return await self._call_tool_once(name, arguments, meta=meta, progress=progress)
+        except _Rejected as rejected:
+            # The endpoint turned the token down before running the tool (it may have been revoked by a new
+            # sign-in, or expired on the way): renew it and send the call once more.
+            if rejected.token is None or not self.credentials.reject(rejected.token):
+                self.mark_broken()
+                raise Unauthorized("HTTP 401 Unauthorized") from rejected
+        try:
+            return await self._call_tool_once(name, arguments, meta=meta, progress=progress)
+        except _Rejected as rejected:
+            self.mark_broken()
+            raise Unauthorized("HTTP 401 Unauthorized") from rejected
+
+    async def _call_tool_once(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None,
+        *,
+        meta: dict[str, Any] | None,
+        progress: ProgressFnT | None,
+    ) -> types.CallToolResult:
+        # Read the credential first, where a failure is this call's alone: raised from inside the transport's
+        # request hook it closes the connection, and every call sharing it, waiting turns included, fails with it.
+        # The hook then finds the token already read. The connection is taken after it, with no wait in between,
+        # so a connection torn down meanwhile is never the one the call is sent on.
+        await self.credentials.headers(self.settings.mcp_url)
         client = await self.client()
         answer = _CallAnswer()
         token = _CALL_ANSWER.set(answer)
@@ -424,8 +463,7 @@ class Upstream:
             )
         except MCPError as exc:
             if answer.status == 401:
-                self.mark_broken()
-                raise Unauthorized("HTTP 401 Unauthorized") from exc
+                raise _Rejected(answer.authorization) from exc
             if answer.status == RATE_LIMITED:
                 raise RateLimited(answer.retry_after) from exc
             if answer.status == REFUSED:
@@ -445,8 +483,7 @@ class Upstream:
         except TRANSPORT_ERRORS as exc:
             self.mark_broken()
             raise BackendUnavailable(describe(exc), during_call=True) from exc
-        except AuthenticationError:
-            self.mark_broken()
-            raise
+        # A credential that could not be read or renewed (AuthenticationError) failed before the request went out:
+        # the connection is fine and the calls sharing it keep going.
         finally:
             _CALL_ANSWER.reset(token)

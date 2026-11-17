@@ -10,7 +10,7 @@ import anyio
 import httpx
 import pytest
 from keyring.backend import KeyringBackend
-from keyring.errors import KeyringLocked
+from keyring.errors import InitError, KeyringLocked
 
 from oh_my_cassette import auth
 
@@ -353,6 +353,108 @@ def test_a_keyring_that_cannot_be_read_says_what_to_do_on_this_system(
     assert caught.value.status == 503
     for text in expected:
         assert text in str(caught.value)
+
+
+class CountingKeyring(MemoryKeyring):
+    def __init__(self):
+        super().__init__()
+        self.reads = 0
+
+    def get_password(self, service, username):
+        self.reads += 1
+        time.sleep(0.001)  # a Secret Service read takes a D-Bus round trip
+        return super().get_password(service, username)
+
+
+def _saved_grant(root, store, *, access="secret", expires_in=3600.0):
+    c = connection()
+    auth._write_public(root / "connection.json", asdict(c))
+    grant = auth.Grant(
+        access_token=access, refresh_token="refresh", expires_at=time.time() + expires_in, subject=c.subject
+    )
+    store.set_password(auth.SERVICE, c.key, grant.model_dump_json())
+    return c
+
+
+def _renewing(monkeypatch, refreshes, access="renewed"):
+    def handler(request):
+        refreshes.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": access,
+                "refresh_token": "rotated",
+                "expires_in": 3600,
+                "token_type": "Bearer",
+            },
+        )
+
+    mock_http(monkeypatch, handler)
+
+
+def test_a_token_is_renewed_while_it_still_outlives_the_longest_call(environment, monkeypatch):
+    root, store = environment
+    c = _saved_grant(root, store, access="expiring", expires_in=200)  # would expire during a 290 s wait
+    refreshes = []
+    _renewing(monkeypatch, refreshes)
+    assert anyio.run(auth.Credentials(c.resource).token) == "renewed"
+    assert len(refreshes) == 1
+
+
+def test_a_burst_of_calls_reads_the_keyring_once(environment, monkeypatch):
+    root, _ = environment
+    store = CountingKeyring()
+    monkeypatch.setattr(auth, "native_keyring", lambda: store)
+    c = _saved_grant(root, store)
+    credentials = auth.Credentials(c.resource)
+
+    async def burst():
+        tokens = []
+
+        async def one():
+            tokens.append(await credentials.token())
+            await credentials.provider_key_headers(c.resource)
+
+        async with anyio.create_task_group() as tg:
+            for _ in range(240):
+                tg.start_soon(one)
+        return tokens
+
+    assert anyio.run(burst) == ["secret"] * 240
+    assert store.reads == 2  # the grant once, the OpenAI key once
+
+
+def test_a_token_the_endpoint_refused_is_renewed_on_the_next_request(environment, monkeypatch):
+    root, store = environment
+    c = _saved_grant(root, store, access="revoked")
+    refreshes = []
+    _renewing(monkeypatch, refreshes)
+    credentials = auth.Credentials(c.resource)
+    assert anyio.run(credentials.token) == "revoked"
+    assert credentials.reject("revoked")
+    assert anyio.run(credentials.token) == "renewed"
+    credentials.reject("revoked")  # a call that sent the old token answered late: the renewed one stays
+    assert anyio.run(credentials.token) == "renewed"
+    assert len(refreshes) == 1
+    assert not auth.Credentials(c.resource, explicit_token="given").reject("given")
+
+
+class FlakyKeyring(MemoryKeyring):
+    def get_password(self, service, username):
+        raise InitError("Failed to create the collection: D-Bus connection timed out")
+
+
+def test_a_keyring_that_fails_for_a_moment_asks_for_a_retry_not_an_unlock(environment, monkeypatch):
+    root, _ = environment
+    c = connection()
+    auth._write_public(root / "connection.json", asdict(c))
+    monkeypatch.setattr(auth, "native_keyring", FlakyKeyring)
+    monkeypatch.setattr(auth.sys, "platform", "linux")
+    with pytest.raises(auth.AuthenticationError) as caught:
+        anyio.run(auth.Credentials(c.resource, connection=c).token)
+    assert caught.value.status == 503
+    assert "retry" in str(caught.value) and "InitError" in str(caught.value)
+    assert "unlocked" not in str(caught.value) and "gnome-keyring" not in str(caught.value)
 
 
 def test_signing_in_again_revokes_the_grant_it_replaces(environment, monkeypatch):

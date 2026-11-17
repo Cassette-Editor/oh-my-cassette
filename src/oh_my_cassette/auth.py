@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import platform
 import queue
@@ -29,7 +30,7 @@ import httpx
 from filelock import FileLock
 from filelock import Timeout as LockTimeout
 from keyring.backend import KeyringBackend
-from keyring.errors import KeyringError, PasswordDeleteError
+from keyring.errors import KeyringError, KeyringLocked, PasswordDeleteError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from oh_my_cassette import provider_key
@@ -39,6 +40,15 @@ CLIENT_ID = "oh-my-cassette"
 SCOPE = "cassette:agent"
 DEFAULT_RESOURCE = "https://mcp.trycassette.online/mcp"
 SERVICE = "oh-my-cassette.oauth"
+
+# A token is renewed this long before it expires. One call can hold a token for the backend's longest wait
+# (under five minutes) and the bridge sends a waiting call again for a few more, so a token handed to a call
+# must outlive both: renewing a minute ahead let a token expire while a call was still waiting on it.
+REFRESH_MARGIN_SEC = 600.0
+# How long the account's own OpenAI key read from the keyring is reused before it is read again.
+PROVIDER_KEY_TTL_SEC = 10.0
+
+log = logging.getLogger(__name__)
 
 
 class AuthenticationError(Exception):
@@ -111,21 +121,43 @@ def mismatch_hint(saved: str | None, resource: str) -> str:
 
 
 def keyring_unavailable() -> AuthenticationError:
-    """The keyring could not be read or written, with what to do about it on this system."""
+    """The keyring is locked or missing, with what to do about it on this system."""
+    return AuthenticationError(f"Secure credential storage unavailable: {_keyring_hint()}", 503)
+
+
+def _keyring_hint() -> str:
     if sys.platform == "darwin":
-        hint = "unlock your login keychain (Keychain Access) and retry"
-    elif sys.platform == "win32":
-        hint = "make sure Windows Credential Manager is available to your account and retry"
-    else:
-        hint = (
-            "oh-my-cassette keeps its sign-in in a Secret Service keyring (GNOME Keyring or KWallet), and none is "
-            "unlocked in this session. On a desktop, unlock the login keyring (Passwords and Keys) and retry. Over SSH "
-            "or without a desktop, install gnome-keyring and dbus-user-session, start a shell with its own session bus "
-            "with `dbus-run-session -- bash`, unlock a keyring in it with "
-            "`printf '%s' 'a keyring password' | gnome-keyring-daemon --unlock --components=secrets`, then run "
-            "oh-my-cassette login and start the MCP host from that same shell"
-        )
-    return AuthenticationError(f"Secure credential storage unavailable: {hint}", 503)
+        return "unlock your login keychain (Keychain Access) and retry"
+    if sys.platform == "win32":
+        return "make sure Windows Credential Manager is available to your account and retry"
+    return (
+        "oh-my-cassette keeps its sign-in in a Secret Service keyring (GNOME Keyring or KWallet), and none is "
+        "unlocked in this session. On a desktop, unlock the login keyring (Passwords and Keys) and retry. Over SSH "
+        "or without a desktop, install gnome-keyring and dbus-user-session, start a shell with its own session bus "
+        "with `dbus-run-session -- bash`, unlock a keyring in it with "
+        "`printf '%s' 'a keyring password' | gnome-keyring-daemon --unlock --components=secrets`, then run "
+        "oh-my-cassette login and start the MCP host from that same shell"
+    )
+
+
+def credential_store_failure(exc: BaseException) -> AuthenticationError:
+    """What a failed read of the saved sign-in means for the caller.
+
+    Only a locked keyring gets the unlock instructions. Anything else (the store not answering in time, a lock
+    another process holds too long, a D-Bus error) can pass, so it asks for a retry and names what failed; the
+    error's text is logged, never shown.
+    """
+    if isinstance(exc, KeyringLocked):
+        return keyring_unavailable()
+    if isinstance(exc, ValidationError):
+        return AuthenticationError("The saved sign-in cannot be read; run oh-my-cassette login")
+    log.warning("credential store read failed: %s: %s", type(exc).__name__, exc)
+    what = (
+        "another oh-my-cassette process held the sign-in"
+        if isinstance(exc, LockTimeout)
+        else type(exc).__name__
+    )
+    return AuthenticationError(f"Secure credential storage did not answer ({what}); retry", 503)
 
 
 def require_keyring() -> None:
@@ -270,6 +302,16 @@ class Credentials:
         # A refresh token the service refused: it is never sent again, so a bridge waiting for `login` does not
         # keep asking with it. A new sign-in saves another one.
         self._refused_refresh: str | None = None
+        # The grant last read or renewed, reused until it is within `REFRESH_MARGIN_SEC` of expiring, so a burst of
+        # calls reads the keyring once rather than per request. One thread at a time reads or renews it; the file
+        # lock inside covers other processes sharing the sign-in.
+        self._grant: tuple[str, Grant] | None = None
+        self._rejected: str | None = (
+            None  # an access token the endpoint answered 401: renewed even if not expiring
+        )
+        self._grant_lock = threading.Lock()
+        self._provider_key: tuple[str, str | None, float] | None = None
+        self._provider_key_lock = threading.Lock()
 
     @property
     def configured(self) -> bool:
@@ -307,47 +349,73 @@ class Credentials:
         if self.explicit_token:
             return self.explicit_token
         connection = self._connection()
+        with self._grant_lock:
+            cached = self._grant
+            if cached is not None and cached[0] == connection.key and self._fresh(cached[1]):
+                return cached[1].access_token
+            grant = self._renewed(connection)
+            self._grant = (connection.key, grant)
+            return grant.access_token
+
+    def _fresh(self, grant: Grant) -> bool:
+        return grant.expires_at > time.time() + REFRESH_MARGIN_SEC and grant.access_token != self._rejected
+
+    def _renewed(self, connection: Connection) -> Grant:
         root = private_auth_directory()
         with FileLock(root / f"{connection.key}.lock", timeout=30):
-            grant = self._read(connection)
-            if grant.expires_at <= time.time() + 60:
-                if grant.refresh_token == self._refused_refresh:
-                    raise AuthenticationError("Authorization rejected; run oh-my-cassette login")
-                try:
-                    with auth_http() as http:
-                        body = _answer(
-                            http.post(
-                                connection.token_endpoint,
-                                data={
-                                    "grant_type": "refresh_token",
-                                    "refresh_token": grant.refresh_token,
-                                    "client_id": CLIENT_ID,
-                                    "resource": self.resource,
-                                },
-                            )
+            grant = self._read(connection)  # another process may have renewed it already
+            if self._fresh(grant):
+                return grant
+            if grant.refresh_token == self._refused_refresh:
+                raise AuthenticationError("Authorization rejected; run oh-my-cassette login")
+            try:
+                with auth_http() as http:
+                    body = _answer(
+                        http.post(
+                            connection.token_endpoint,
+                            data={
+                                "grant_type": "refresh_token",
+                                "refresh_token": grant.refresh_token,
+                                "client_id": CLIENT_ID,
+                                "resource": self.resource,
+                            },
                         )
-                except httpx.HTTPError as exc:
-                    raise _unreachable("Authentication service unavailable", exc) from exc
-                except AuthenticationError as exc:
-                    if exc.needs_sign_in:
-                        self._refused_refresh = grant.refresh_token
-                    raise
-                grant = Grant(
-                    access_token=body["access_token"],
-                    refresh_token=body["refresh_token"],
-                    subject=grant.subject,
-                    expires_at=time.time() + float(body["expires_in"]),
-                )
-                if body.get("token_type", "").lower() != "bearer":
-                    raise AuthenticationError("Unsupported token type")
-                self._store().set_password(SERVICE, connection.key, grant.model_dump_json())
-            return grant.access_token
+                    )
+            except httpx.HTTPError as exc:
+                raise _unreachable("Authentication service unavailable", exc) from exc
+            except AuthenticationError as exc:
+                if exc.needs_sign_in:
+                    self._refused_refresh = grant.refresh_token
+                raise
+            grant = Grant(
+                access_token=body["access_token"],
+                refresh_token=body["refresh_token"],
+                subject=grant.subject,
+                expires_at=time.time() + float(body["expires_in"]),
+            )
+            if body.get("token_type", "").lower() != "bearer":
+                raise AuthenticationError("Unsupported token type")
+            self._store().set_password(SERVICE, connection.key, grant.model_dump_json())
+            self._rejected = None
+            return grant
+
+    def reject(self, token: str) -> bool:
+        """The endpoint answered 401 to `token`: the next request renews the grant rather than reuse it.
+
+        False when there is nothing to renew (a token given in `CASSETTE_AUTH_TOKEN`), so the 401 stands."""
+        if self.explicit_token:
+            return False
+        with self._grant_lock:
+            self._rejected = token
+            if self._grant is not None and self._grant[1].access_token == token:
+                self._grant = None
+        return True
 
     async def token(self) -> str:
         try:
             return await anyio.to_thread.run_sync(self._token)
-        except (KeyringError, ValidationError, LockTimeout) as exc:
-            raise keyring_unavailable() from exc
+        except (KeyringError, ValidationError, LockTimeout, OSError) as exc:
+            raise credential_store_failure(exc) from exc
 
     async def headers(self, url: str) -> dict[str, str]:
         # Without a sign-in for this endpoint the request goes without a credential, so the endpoint itself says
@@ -366,10 +434,19 @@ class Credentials:
             return {}
         try:
             connection = self._connection()
-            key = await anyio.to_thread.run_sync(provider_key.read_key, self._store(), connection.key)
-        except (AuthenticationError, KeyringError):
+            key = await anyio.to_thread.run_sync(self._read_provider_key, connection.key)
+        except (AuthenticationError, KeyringError, OSError):
             return {}
         return {provider_key.HEADER: key} if key else {}
+
+    def _read_provider_key(self, account: str) -> str | None:
+        with self._provider_key_lock:
+            cached = self._provider_key
+            if cached is not None and cached[0] == account and cached[2] > time.monotonic():
+                return cached[1]
+            key = provider_key.read_key(self._store(), account)
+            self._provider_key = (account, key, time.monotonic() + PROVIDER_KEY_TTL_SEC)
+            return key
 
     def workspace_id(self, directory: Path) -> str:
         connection = self.connection or saved_connection()
