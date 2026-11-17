@@ -446,11 +446,12 @@ class Upstream:
         meta: dict[str, Any] | None,
         progress: ProgressFnT | None,
     ) -> types.CallToolResult:
-        client = await self.client()
-        # Read the credential here, where a failure is this call's alone: raised from inside the transport's
+        # Read the credential first, where a failure is this call's alone: raised from inside the transport's
         # request hook it closes the connection, and every call sharing it, waiting turns included, fails with it.
-        # The hook then finds the token already read.
+        # The hook then finds the token already read. The connection is taken after it, with no wait in between,
+        # so a connection torn down meanwhile is never the one the call is sent on.
         await self.credentials.headers(self.settings.mcp_url)
+        client = await self.client()
         answer = _CallAnswer()
         token = _CALL_ANSWER.set(answer)
         try:
