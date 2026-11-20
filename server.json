@@ -40,8 +40,23 @@
           "isSecret": true
         },
         {
+          "name": "CASSETTE_WORKSPACE",
+          "description": "Project workspace directory local media may come from (default: the host's working directory).",
+          "isRequired": false
+        },
+        {
+          "name": "CASSETTE_ALLOWED_ROOTS",
+          "description": "Extra directories local media may come from, separated by os.pathsep.",
+          "isRequired": false
+        },
+        {
           "name": "CASSETTE_FFMPEG",
           "description": "Path to ffmpeg, used to prepare local video before upload (default: from PATH)",
+          "isRequired": false
+        },
+        {
+          "name": "CASSETTE_FFPROBE",
+          "description": "Path to ffprobe, used to inspect local media before upload (default: from PATH)",
           "isRequired": false
         }
       ]

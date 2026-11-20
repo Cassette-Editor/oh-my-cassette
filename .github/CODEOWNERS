@@ -18,7 +18,9 @@
 
 # Security-sensitive surfaces: credentials, what may be read and sent, what is written.
 /src/oh_my_cassette/auth.py              @epc314 @Crimson725
+/src/oh_my_cassette/provider_key.py      @epc314 @Crimson725
 /src/oh_my_cassette/contract.py          @epc314 @Crimson725
+/src/oh_my_cassette/bridge/settings.py   @epc314 @Crimson725
 /src/oh_my_cassette/bridge/files.py      @epc314 @Crimson725
 /src/oh_my_cassette/bridge/downloads.py  @epc314 @Crimson725
 /src/oh_my_cassette/bridge/prepare.py    @epc314 @Crimson725

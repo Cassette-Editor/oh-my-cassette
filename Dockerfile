@@ -8,7 +8,10 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY . .
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . \
+    && useradd --create-home --uid 1000 cassette
+
+USER cassette
 
 # The bridge starts without a reachable service and lists cassette_bridge_status,
 # which reports why it is not connected. ffmpeg prepares local video before upload.

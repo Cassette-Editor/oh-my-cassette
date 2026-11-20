@@ -488,9 +488,9 @@ class ReferenceRemote:
                     meta={META_BRIDGE_ROLE: ROLE_UPLOAD_PARTS},
                 )
                 async def upload_parts(
-                    uploadId: str,  # noqa: N803 (wire name)
+                    uploadId: str,
                     role: str,
-                    partNumbers: list[int] | None = None,  # noqa: N803 (wire name)
+                    partNumbers: list[int] | None = None,
                 ) -> dict[str, Any]:
                     record = self.uploads[uploadId]
                     size, count = record["plans"][role]
@@ -517,7 +517,7 @@ class ReferenceRemote:
                 meta={META_BRIDGE_ROLE: ROLE_UPLOAD_COMPLETE},
             )
             async def upload_complete(
-                uploadIds: list[str],  # noqa: N803 (wire name)
+                uploadIds: list[str],
                 abandoned: bool = False,
             ) -> dict[str, Any]:
                 if abandoned:
@@ -587,7 +587,7 @@ class ReferenceRemote:
                 if once[kind] == number and key not in self._failed_parts:
                     self._failed_parts.add(key)
                     return Response(status_code=status, headers={"Retry-After": "0"})
-            size, count = record["plans"][role]
+            size, _count = record["plans"][role]
             artifact = next(a for a in record["file"]["artifacts"] if a["role"] == role)
             if len(body) != min(size, artifact["size"] - (number - 1) * size):
                 return Response(status_code=400)

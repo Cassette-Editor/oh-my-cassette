@@ -106,6 +106,11 @@ def test_opencode_and_registry_manifests():
     variables = {v["name"]: v for v in package["environmentVariables"]}
     assert not variables["CASSETTE_MCP_URL"].get("default")
     assert not variables["CASSETTE_AUTH_TOKEN"].get("isRequired")
+    assert {"CASSETTE_FFMPEG", "CASSETTE_FFPROBE", "CASSETTE_WORKSPACE"} <= set(variables)
+    dockerfile = (ROOT / "Dockerfile").read_text("utf-8")
+    assert re.search(r"^USER\s+(?!root\b)\S+", dockerfile, re.M)
+    security = (ROOT / "SECURITY.md").read_text("utf-8")
+    assert "0.5.x" not in security and "provider-key" in security
 
 
 def test_no_manifest_or_guide_points_at_the_retired_settings():

@@ -4,7 +4,7 @@ title: Privacy
 
 # Privacy notice — Oh My Cassette plugin
 
-_Last reviewed: 2026-10-21, for 0.5.0. This file is versioned; `git log docs/privacy.md` is the change history._
+_Last reviewed: 2026-11-20, for 0.7.x. This file is versioned; `git log docs/privacy.md` is the change history._
 
 This notice covers the **Oh My Cassette plugin** — the local MCP bridge and the skill in
 [this repository](https://github.com/Cassette-Editor/oh-my-cassette).
@@ -27,6 +27,7 @@ the sign-in service that endpoint names, and to the upload and download URLs the
 | What | To | When |
 |---|---|---|
 | An OAuth access token, as a bearer token | the service | every call to the service, and to upload or download URLs on the service's own origin; presigned URLs on other origins get no credential |
+| Your own OpenAI API key, when saved with `oh-my-cassette key set` | the service (`x-cassette-provider-key`) | every request to the signed-in service while saved (held in memory by Cassette while your turns need it); never sent to upload/download origins or when `CASSETTE_AUTH_TOKEN` is set |
 | The refresh token, and the grant to revoke | the sign-in service | when an expiring access token is renewed, and on `logout` |
 | `oh-my-cassette/<version>` as the User-Agent | the service | every request |
 | Your editing requests and answers, as your agent passes them | the service | every tool call your agent makes |
@@ -52,8 +53,9 @@ bridge never sees a password.
 
 ## What stays on your machine
 
-- **Tokens.** OAuth access and refresh tokens live only in the operating-system keyring (macOS
-  Keychain, Windows Credential Vault or Linux Secret Service).
+- **Tokens and optional OpenAI key.** OAuth access and refresh tokens, and any OpenAI key saved with
+  `oh-my-cassette key set`, live only in the operating-system keyring (macOS Keychain, Windows
+  Credential Vault or Linux Secret Service).
 - **Connection metadata.** The endpoint and account you signed in to, in `~/.config/oh-my-cassette`.
   It contains no token.
 - **Prepared media.** Transcoded files sit in a private directory under `CASSETTE_TEMP_DIR`
@@ -73,7 +75,8 @@ ask Cassette.
 | You want to | Do this |
 |---|---|
 | Limit what can be read | Keep media in the workspace, or grant narrow `CASSETTE_ALLOWED_ROOTS` — never your whole home directory |
-| Sign this machine out | `uvx oh-my-cassette==0.7.4 logout` — revokes the grant, then deletes the keyring entry |
+| Remove your own OpenAI key | `uvx oh-my-cassette==0.7.4 key remove` — asks Cassette to release its in-memory copy, then deletes the keyring entry |
+| Sign this machine out | `uvx oh-my-cassette==0.7.4 logout` — releases any saved OpenAI key, revokes the grant, and deletes the keyring entries |
 | Remove everything local | Sign out, delete `~/.config/oh-my-cassette`, and uninstall the plugin |
 | Delete a cloud project now | Delete it in Cassette, or leave it idle for three days |
 

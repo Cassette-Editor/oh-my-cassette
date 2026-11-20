@@ -58,12 +58,22 @@ jobs:
   test:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.13", "3.14"]
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: ubuntu-latest
+            python: "3.14"
+          - os: macos-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.13"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
@@ -75,6 +85,7 @@ jobs:
       - name: Build the distribution the hosts will install
         run: uv build
       - name: Smoke-run the built wheel the way hosts do (uvx)
+        shell: bash
         run: |
           set -eu
           wheel="$(ls dist/oh_my_cassette-*.whl)"
