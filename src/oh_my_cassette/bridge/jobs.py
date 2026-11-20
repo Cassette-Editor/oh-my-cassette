@@ -28,6 +28,8 @@ log = logging.getLogger(__name__)
 TRANSCODING, UPLOADING, DOWNLOADING, DONE = "transcoding", "uploading", "downloading", "done"
 PROGRESS_INTERVAL_SEC = 1.0
 HEARTBEAT_SEC = 15.0
+JOB_CACHE_TTL_SEC = 1800.0
+MAX_CACHED_JOBS = 128
 
 ReportFn = Callable[[float, float | None, str | None], Awaitable[None]]
 
@@ -67,6 +69,7 @@ class LocalJob:
         self.done = anyio.Event()
         self.result: Any = None
         self.error: BridgeError | None = None
+        self.finished_at: float | None = None
 
     def progress(self) -> dict[str, Any]:
         finished = sum(1 for file in self.files if file.stage == DONE)
@@ -97,8 +100,16 @@ def preparing_result(tool_name: str, job: LocalJob) -> types.CallToolResult:
 
 
 class LocalJobs:
-    def __init__(self, *, heartbeat_sec: float = HEARTBEAT_SEC) -> None:
+    def __init__(
+        self,
+        *,
+        heartbeat_sec: float = HEARTBEAT_SEC,
+        cache_ttl_sec: float = JOB_CACHE_TTL_SEC,
+        max_cached: int = MAX_CACHED_JOBS,
+    ) -> None:
         self._heartbeat_sec = heartbeat_sec
+        self._cache_ttl_sec = cache_ttl_sec
+        self._max_cached = max_cached
         self._jobs: dict[Hashable, LocalJob] = {}
         self._tg: TaskGroup | None = None
 
@@ -109,6 +120,22 @@ class LocalJobs:
             task_status.started()
             await anyio.sleep_forever()
 
+    def _evict_stale(self) -> None:
+        now = anyio.current_time()
+        expired = [
+            k
+            for k, j in self._jobs.items()
+            if j.done.is_set()
+            and j.error is None
+            and j.finished_at is not None
+            and now - j.finished_at >= self._cache_ttl_sec
+        ]
+        for k in expired:
+            del self._jobs[k]
+        cached = [k for k, j in self._jobs.items() if j.done.is_set() and j.error is None]
+        for k in cached[: max(0, len(cached) - self._max_cached)]:
+            del self._jobs[k]
+
     def attach(
         self,
         key: Hashable,
@@ -117,7 +144,8 @@ class LocalJobs:
         *,
         label: str = "Preparing local files",
     ) -> LocalJob:
-        """The job for `key`: the running or finished one, else a new one started now."""
+        """The job for `key`: the running or fresh finished one, else a new one started now."""
+        self._evict_stale()
         job = self._jobs.get(key)
         if job is None:
             if self._tg is None:
@@ -129,6 +157,7 @@ class LocalJobs:
     async def _execute(self, job: LocalJob, work: Callable[[LocalJob], Awaitable[Any]]) -> None:
         try:
             job.result = await work(job)
+            job.finished_at = anyio.current_time()
         except BridgeError as exc:
             job.error = exc
         except Exception as exc:

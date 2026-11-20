@@ -371,6 +371,7 @@ async def test_offline_start_exposes_only_the_status_tool_then_recovers(bridge_s
             assert up.structured_content["server"] == {"name": "reference-cassette", "version": "9.9.9"}
             assert "import_media" in [tool.name for tool in (await host.list_tools()).tools]
             assert bridge.serving
+            assert bridge.build_server().instructions == remote.options.instructions
 
 
 async def test_reconnects_after_a_backend_restart(bridge_settings):

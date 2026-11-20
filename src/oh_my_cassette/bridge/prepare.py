@@ -40,6 +40,7 @@ HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67"})
 # A source is read as a local file only: a playlist or reference inside it cannot reach the network or a pipe.
 LOCAL_INPUT = ["-protocol_whitelist", "file"]
 STDERR_TAIL = 1000
+PROBE_TIMEOUT_SEC = 30.0
 # How far a prepared video's duration may stray from its source's, as Cassette checks every prepared upload.
 DURATION_TOLERANCE_SEC = 1.0
 INSTALL_HINT = (
@@ -48,6 +49,9 @@ INSTALL_HINT = (
 )
 # ffprobe prints these as `color_range`; zscale names them differently.
 ZSCALE_RANGES = {"tv": "limited", "pc": "full"}
+ZSCALE_TRANSFERS = frozenset({"smpte2084", "arib-std-b67", "bt709", "bt2020-10", "bt2020-12", "linear"})
+ZSCALE_PRIMARIES = frozenset({"bt2020", "bt709", "smpte170m", "smpte240m", "smpte431", "smpte432"})
+ZSCALE_MATRICES = frozenset({"bt2020nc", "bt2020c", "bt709", "smpte170m", "smpte240m", "bt470bg", "fcc"})
 # Whether samples use the full 0–255 range, by ffprobe's `color_range`; any other value says nothing.
 FULL_RANGES = {"pc": True, "tv": False}
 TIMECODE = re.compile(r"^(\d{1,2}):(\d{2}):(\d{2})([:;])(\d{2,3})$")
@@ -257,6 +261,11 @@ def fit(width: int, height: int, max_long: int, max_short: int) -> tuple[int, in
     return min(even(width * scale), w_limit // 2 * 2), min(even(height * scale), h_limit // 2 * 2)
 
 
+def _zscale_color(value: Any, allowed: frozenset[str], default: str) -> str:
+    name = str(value or "").strip().lower()
+    return name if name in allowed else default
+
+
 def video_filtergraph(
     source: Mapping[str, Any],
     renditions: tuple[Rendition, ...],
@@ -272,9 +281,9 @@ def video_filtergraph(
     head = "[0:v:0]"
     if tonemap:
         width, height = max(sizes, key=lambda size: size[0] * size[1])
-        transfer = str(source.get("color_transfer") or "smpte2084")
-        primaries = str(source.get("color_primaries") or "bt2020")
-        matrix = str(source.get("color_space") or "bt2020nc")
+        transfer = _zscale_color(source.get("color_transfer"), ZSCALE_TRANSFERS, "smpte2084")
+        primaries = _zscale_color(source.get("color_primaries"), ZSCALE_PRIMARIES, "bt2020")
+        matrix = _zscale_color(source.get("color_space"), ZSCALE_MATRICES, "bt2020nc")
         value_range = ZSCALE_RANGES.get(str(source.get("color_range") or "tv"), "limited")
         head += (
             f"zscale=w={width}:h={height}:tin={transfer}:pin={primaries}:min={matrix}:rin={value_range}"
@@ -389,9 +398,17 @@ class FFmpegPreparer:
         """(ffmpeg version, whether this build can tone-map HDR with zscale)."""
         if self._capabilities is None:
             ffmpeg, _ = self.programs()
-            version = await anyio.run_process([ffmpeg, "-hide_banner", "-version"], check=False)
+            try:
+                with anyio.fail_after(PROBE_TIMEOUT_SEC):
+                    version = await anyio.run_process([ffmpeg, "-hide_banner", "-version"], check=False)
+                    filters = await anyio.run_process([ffmpeg, "-hide_banner", "-filters"], check=False)
+            except TimeoutError as exc:
+                raise BridgeError(
+                    "bridge.prepare_failed",
+                    "ffmpeg did not answer while checking its capabilities",
+                    retryable=True,
+                ) from exc
             match = re.match(r"ffmpeg version (\S+)", version.stdout.decode(errors="replace"))
-            filters = await anyio.run_process([ffmpeg, "-hide_banner", "-filters"], check=False)
             names = {
                 parts[1]
                 for line in filters.stdout.decode(errors="replace").splitlines()
@@ -402,20 +419,26 @@ class FFmpegPreparer:
 
     async def probe(self, path: Path) -> dict[str, Any]:
         _, ffprobe = self.programs()
-        result = await anyio.run_process(
-            [
-                ffprobe,
-                "-v",
-                "error",
-                *LOCAL_INPUT,
-                "-print_format",
-                "json",
-                "-show_format",
-                "-show_streams",
-                str(path),
-            ],
-            check=False,
-        )
+        try:
+            with anyio.fail_after(PROBE_TIMEOUT_SEC):
+                result = await anyio.run_process(
+                    [
+                        ffprobe,
+                        "-v",
+                        "error",
+                        *LOCAL_INPUT,
+                        "-print_format",
+                        "json",
+                        "-show_format",
+                        "-show_streams",
+                        str(path),
+                    ],
+                    check=False,
+                )
+        except TimeoutError as exc:
+            raise BridgeError(
+                "bridge.prepare_failed", f"{path.name}: timed out reading media metadata", retryable=True
+            ) from exc
         if result.returncode != 0:
             raise _unreadable(path, result.stderr.decode(errors="replace"))
         return json.loads(result.stdout or b"{}")

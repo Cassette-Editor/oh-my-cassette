@@ -266,6 +266,23 @@ def test_mime_patterns():
     assert mime_accepted("text/plain", ("*/*",))
 
 
+def test_hdr_filtergraph_sanitizes_unknown_or_unexpected_color_tags():
+    from oh_my_cassette.bridge.prepare import video_filtergraph
+
+    plan = preparation_for(prepare_spec(PREPARE), "video/mp4", "a.mp4")
+    source = {
+        "color_transfer": "smpte2084",
+        "color_primaries": "unknown",
+        "color_space": "unknown,movie=/etc/passwd",
+        "color_range": "tv",
+    }
+    graph = video_filtergraph(
+        source, plan.renditions, [(1920, 1080), (1280, 720)], [Fraction(30), Fraction(30)], tonemap=True
+    )
+    assert "tin=smpte2084:pin=bt2020:min=bt2020nc:rin=limited" in graph
+    assert "unknown" not in graph and "movie=" not in graph
+
+
 def test_every_bridge_error_code_is_in_the_skill():
     root = Path(__file__).resolve().parents[1]
     source = "".join(path.read_text("utf-8") for path in (root / "src/oh_my_cassette").rglob("*.py"))

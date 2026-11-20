@@ -43,14 +43,22 @@ from mcp.shared.exceptions import MCPError
 from mcp_types.version import LATEST_MODERN_VERSION, MODERN_PROTOCOL_VERSIONS
 
 from oh_my_cassette import __version__
-from oh_my_cassette.auth import DEFAULT_RESOURCE, AuthenticationError, Credentials
+from oh_my_cassette.auth import (
+    DEFAULT_RESOURCE,
+    AuthenticationError,
+    Credentials,
+    connection_stamp,
+    secure_url,
+)
 from oh_my_cassette.bridge.errors import connection_failure, retry_after_seconds
 from oh_my_cassette.bridge.settings import BridgeSettings
-from oh_my_cassette.contract import ServerContract, bridge_role, server_contract
+from oh_my_cassette.contract import ContractError, ServerContract, bridge_role, server_contract
 
 log = logging.getLogger(__name__)
 
 MAX_SSE_EVENT_SIZE = 32 * 1024 * 1024
+MAX_TOOL_PAGES = 100
+AUTH_WATCH_SEC = 1.0
 GATEWAY_STATUSES = frozenset({502, 504})
 RATE_LIMITED = 429
 REFUSED = 503
@@ -183,6 +191,7 @@ class Upstream:
         # Counts of HTTP answers the MCP transport turns into generic errors; compared around a connection
         # attempt. A tool call reads its own answers from `_CALL_ANSWER` instead.
         self._rejections = 0
+        self._forbiddens = 0
         self._missing = 0  # answers of HTTP 404: no MCP endpoint at the configured URL
         self._refusals = 0
         self._refusal: tuple[int, float | None] = (REFUSED, None)  # the latest refusal's status and wait
@@ -207,15 +216,15 @@ class Upstream:
         status = response.status_code
         if status == 404:
             self._missing += 1
-        if status == 403:
-            raise AuthenticationError("This account or grant cannot access Cassette", 403)
-        if status not in (401, RATE_LIMITED, REFUSED, *GATEWAY_STATUSES):
+        if status not in (401, 403, RATE_LIMITED, REFUSED, *GATEWAY_STATUSES):
             return
         retry_after = retry_after_seconds(response.headers.get("retry-after"))
         if (answer := _CALL_ANSWER.get()) is not None:
             answer.status, answer.retry_after = status, retry_after
         if status == 401:
             self._rejections += 1
+        elif status == 403:
+            self._forbiddens += 1
         elif status in (RATE_LIMITED, REFUSED):
             self._refusals += 1
             self._refusal = (status, retry_after)
@@ -233,8 +242,15 @@ class Upstream:
         while True:
             self._wake = anyio.Event()
             self._attempting = True
-            rejections, refusals, missing = self._rejections, self._refusals, self._missing
+            stamp = connection_stamp()
+            rejections, forbiddens, refusals, missing = (
+                self._rejections,
+                self._forbiddens,
+                self._refusals,
+                self._missing,
+            )
             try:
+                secure_url(self.settings.mcp_url)
                 async with AsyncExitStack() as stack:
                     http = await stack.enter_async_context(self._http_client())
                     client = await stack.enter_async_context(
@@ -268,12 +284,16 @@ class Upstream:
                 self.unauthorized = self._rejections > rejections or (
                     auth_error is not None and auth_error.needs_sign_in
                 )
-                self.forbidden = auth_error is not None and auth_error.status == 403
+                self.forbidden = self._forbiddens > forbiddens or (
+                    auth_error is not None and auth_error.status == 403
+                )
                 self.auth_unavailable = auth_error is not None and auth_error.status == 503
                 refusal = protocol_refusal(exc)
                 self.protocol_unsupported = refusal is not None
                 if auth_error is not None:
                     self.last_error = str(auth_error)
+                elif self._forbiddens > forbiddens:
+                    self.last_error = "This account or grant cannot access Cassette (HTTP 403)."
                 elif refusal is not None:
                     # A handshake-era server answers 404 to the requests that follow its refusal too.
                     self.last_error = str(refusal)
@@ -296,12 +316,27 @@ class Upstream:
             if not started:
                 started = True
                 task_status.started()
+            if self.unauthorized or self.forbidden or self.protocol_unsupported:
+                await self._wait_quiescent(stamp)
+                delay = 1.0
+                continue
             wait = delay
             if self._refusals > refusals and self._refusal[1] is not None:
                 wait = max(delay, self._refusal[1])  # the service said when it takes requests again
             with anyio.move_on_after(wait):
                 await self._wake.wait()
+            if connection_stamp() != stamp:
+                self.credentials.reload()
             delay = min(delay * 2, 30.0)
+
+    async def _wait_quiescent(self, stamp: tuple[int, int] | None) -> None:
+        """Pause background reconnects until a call asks for one or `connection.json` changes on disk."""
+        while not self._wake.is_set():
+            if connection_stamp() != stamp:
+                self.credentials.reload()
+                return
+            with anyio.move_on_after(AUTH_WATCH_SEC):
+                await self._wake.wait()
 
     def _end_attempt(self) -> None:
         if self._attempting:
@@ -331,12 +366,17 @@ class Upstream:
     async def _fetch_tools(client: Client) -> list[types.Tool]:
         tools: list[types.Tool] = []
         cursor: str | None = None
-        while True:
+        seen: set[str] = set()
+        for _ in range(MAX_TOOL_PAGES):
             page = await client.list_tools(cursor=cursor)
             tools.extend(page.tools)
             cursor = page.next_cursor
             if not cursor:
                 return tools
+            if cursor in seen:
+                raise ContractError("tools/list pagination cursor repeated")
+            seen.add(cursor)
+        raise ContractError(f"tools/list exceeded {MAX_TOOL_PAGES} pages")
 
     async def _on_message(self, message: Any) -> None:
         # Runs inside the client's receive loop. Tool-list changes arrive on the listen stream.
@@ -396,7 +436,9 @@ class Upstream:
     async def client(self) -> Client:
         if not await self.wait_connected(self.settings.connect_timeout_sec):
             if self.forbidden:
-                raise AuthenticationError("This account or grant cannot access Cassette", 403)
+                raise AuthenticationError(
+                    self.last_error or "This account or grant cannot access Cassette (HTTP 403).", 403
+                )
             if self.auth_unavailable:
                 raise AuthenticationError(self.last_error or "Authentication service unavailable", 503)
             if self.unauthorized:
@@ -464,6 +506,10 @@ class Upstream:
         except MCPError as exc:
             if answer.status == 401:
                 raise _Rejected(answer.authorization) from exc
+            if answer.status == 403:
+                raise AuthenticationError(
+                    "This account or grant cannot access Cassette (HTTP 403).", 403
+                ) from exc
             if answer.status == RATE_LIMITED:
                 raise RateLimited(answer.retry_after) from exc
             if answer.status == REFUSED:
@@ -481,6 +527,12 @@ class Upstream:
                 raise BackendUnavailable(exc.message, during_call=True) from exc
             raise
         except TRANSPORT_ERRORS as exc:
+            if answer.status == 401:
+                raise _Rejected(answer.authorization) from exc
+            if answer.status == 403:
+                raise AuthenticationError(
+                    "This account or grant cannot access Cassette (HTTP 403).", 403
+                ) from exc
             self.mark_broken()
             raise BackendUnavailable(describe(exc), during_call=True) from exc
         # A credential that could not be read or renewed (AuthenticationError) failed before the request went out:

@@ -13,6 +13,7 @@ import copy
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from functools import partial
 from typing import Any
 
@@ -95,7 +96,19 @@ STATUS_TOOL_DEF = types.Tool(
 
 
 class _BridgeServer(Server[Any]):
-    """Advertises tool-list changes on every run path (stdio, in-process, tests)."""
+    """Advertises tool-list changes and live instructions on every run path (stdio, in-process, tests)."""
+
+    def __init__(self, *args: Any, instructions_fn: Callable[[], str], **kwargs: Any) -> None:
+        self._instructions_fn = instructions_fn
+        super().__init__(*args, **kwargs)
+
+    @property
+    def instructions(self) -> str | None:
+        return self._instructions_fn()
+
+    @instructions.setter
+    def instructions(self, _value: str | None) -> None:
+        pass
 
     def create_initialization_options(
         self,
@@ -165,7 +178,10 @@ class Bridge:
         if self.upstream.unauthorized:
             return "bridge.unauthorized", self._unauthorized().message
         if self.upstream.forbidden:
-            return "bridge.forbidden", "This account or grant cannot access Cassette (HTTP 403)."
+            return (
+                "bridge.forbidden",
+                self.upstream.last_error or "This account or grant cannot access Cassette (HTTP 403).",
+            )
         if self.upstream.auth_unavailable:
             return "bridge.auth_unavailable", self.upstream.last_error or "Authentication service unavailable"
         if self.upstream.protocol_unsupported:
@@ -177,7 +193,7 @@ class Bridge:
             return self.upstream.instructions or CONNECTED_FALLBACK_INSTRUCTIONS
         code, reason = self.offline_reason()
         return OFFLINE_INSTRUCTIONS.format(
-            url=self.settings.mcp_url, reason=f"{code}: {reason}", status=STATUS_TOOL
+            url=self.settings.mcp_url, reason=f"{code}: {reason.rstrip('.')}", status=STATUS_TOOL
         )
 
     def visible_tools(self) -> list[types.Tool]:
@@ -195,6 +211,7 @@ class Bridge:
             version=__version__,
             title="Oh My Cassette",
             instructions=self.instructions(),
+            instructions_fn=self.instructions,
             website_url="https://github.com/Cassette-Editor/oh-my-cassette",
             on_list_tools=self._list_tools,
             on_call_tool=self._call_tool,

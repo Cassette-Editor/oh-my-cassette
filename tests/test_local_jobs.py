@@ -110,3 +110,14 @@ async def test_a_failure_nobody_waited_for_is_reported_once_then_forgotten(
         done = await _until_settled(host, CLIP)
     assert not done.is_error and preparer.transcodes == 2
     assert list(settings.temp_root.iterdir()) == []
+
+
+async def test_cached_upload_refs_expire_so_deleted_media_uploads_again(remote, bridge_settings, workspace):
+    preparer = FakePreparer()
+    async with bridge_host(bridge_settings(remote.url), preparer=preparer) as (bridge, host):
+        bridge.jobs._cache_ttl_sec = 0.05
+        first = await host.call_tool("import_media", CLIP)
+        assert not first.is_error and len(remote.begun) == 1
+        await anyio.sleep(0.08)
+        second = await host.call_tool("import_media", CLIP)
+        assert not second.is_error and len(remote.begun) == 2

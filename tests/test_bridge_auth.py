@@ -209,3 +209,72 @@ async def test_a_credential_that_cannot_be_read_fails_only_its_own_call(remote, 
         assert results["short"].structured_content["error"]["retryable"] is True
         assert not results["long"].is_error, results["long"].structured_content
         assert not (await host.call_tool("slow_turn", {"steps": 1})).is_error
+
+
+async def test_an_unsigned_bridge_stays_quiet_until_sign_in_happens(
+    remote, bridge_settings, monkeypatch, tmp_path
+):
+    from tests.reference_remote import REFERENCE_TOKEN
+
+    from oh_my_cassette.bridge import upstream as upstream_mod
+
+    monkeypatch.setattr(upstream_mod, "AUTH_WATCH_SEC", 0.05)
+    directory = tmp_path / "auth"
+    monkeypatch.setenv("CASSETTE_AUTH_DIRECTORY", str(directory))
+    store = MemoryKeyring()
+    monkeypatch.setattr(auth, "native_keyring", lambda: store)
+
+    async with bridge_host(bridge_settings(remote.url, auth_token=None)) as (bridge, host):
+        assert ".." not in host.instructions
+        assert bridge.upstream._attempts == 1
+        await anyio.sleep(1.3)  # longer than the initial 1 s reconnect delay
+        assert bridge.upstream._attempts == 1  # idle while unauthorized: no background polling
+
+        # Signing in from another process writes connection.json and wakes the bridge automatically.
+        issuer = "https://auth.cassette.test"
+        saved = auth.Connection(
+            remote.url,
+            issuer,
+            "account-a",
+            "a@cassette.test",
+            f"{issuer}/auth",
+            f"{issuer}/token",
+            f"{issuer}/revoke",
+        )
+        grant = auth.Grant(
+            access_token=REFERENCE_TOKEN,
+            refresh_token="r",
+            expires_at=time.time() + 3600,
+            subject="account-a",
+        )
+        store.set_password(auth.SERVICE, saved.key, grant.model_dump_json())
+        auth._write_public(directory / "connection.json", asdict(saved))
+        with anyio.fail_after(5):
+            while not bridge.serving:
+                await anyio.sleep(0.05)
+        assert "import_media" in [t.name for t in (await host.list_tools()).tools]
+
+
+async def test_a_forbidden_call_is_isolated_to_its_own_call(remote, bridge_settings):
+    results = {}
+    async with bridge_host(bridge_settings(remote.url)) as (_, host):
+
+        async def long_call():
+            results["long"] = await host.call_tool("slow_turn", {"steps": 5, "delay": 0.1})
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(long_call)
+            while not remote.calls:
+                await anyio.sleep(0.01)
+            remote.options.refusals = [(403, None)]
+            results["forbidden"] = await host.call_tool("slow_turn", {"steps": 1})
+    assert results["forbidden"].structured_content["error"]["code"] == "bridge.forbidden"
+    assert results["forbidden"].structured_content["error"]["retryable"] is False
+    assert not results["long"].is_error, results["long"].structured_content
+
+
+async def test_cleartext_non_loopback_mcp_url_is_refused_without_connecting(bridge_settings):
+    async with bridge_host(bridge_settings("http://cassette.example.test/mcp")) as (_, host):
+        status = await host.call_tool(STATUS_TOOL, {})
+        assert status.structured_content["error_code"] == "bridge.forbidden"
+        assert "HTTPS" in status.structured_content["error"]

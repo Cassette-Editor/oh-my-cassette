@@ -69,6 +69,7 @@ def _open_part(path: Path, append: bool):
 
 DOWNLOAD_ATTEMPTS = 4
 MAX_DOWNLOADS = 16  # files one result may declare; any further ones are left at their URLs
+MAX_CACHE_ENTRIES = 256
 CONTENT_RANGE = re.compile(r"bytes (\d+)-\d+/(?:\d+|\*)")
 
 
@@ -216,6 +217,10 @@ class Downloads:
         directory = self._directory()
         name = safe_file_name(spec.file_name)
         part = directory / f".{name}.{hashlib.sha256(spec.url.encode()).hexdigest()[:12]}.part"
+        if len(self._parts) >= MAX_CACHE_ENTRIES:
+            for candidate, existing in list(self._parts.items()):
+                if candidate != part and not existing.statistics().locked:
+                    del self._parts[candidate]
         async with self._parts.setdefault(part, anyio.Lock()):
             return await self._fetch(spec, directory, name, part, received or (lambda _total: None))
 
@@ -294,6 +299,8 @@ class Downloads:
                 etag = response.headers.get("etag")
                 if etag and not etag.startswith("W/"):
                     self._etags[spec.url] = etag
+                    while len(self._etags) > MAX_CACHE_ENTRIES:
+                        del self._etags[next(iter(self._etags))]
                 total = have
                 async with anyio.wrap_file(_open_part(part, append=bool(have))) as handle:
                     async for chunk in response.aiter_raw():  # as it arrives: a cut keeps what came

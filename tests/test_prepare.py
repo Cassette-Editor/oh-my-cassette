@@ -80,6 +80,11 @@ def _make_hdr(path: Path) -> None:
     _ffmpeg(*_video(), "-vf", f"format=yuv420p10le,{tags}", "-c:v", "ffv1", str(path))
 
 
+def _make_hdr_untagged_primaries(path: Path) -> None:
+    tags = "setparams=color_primaries=unknown:color_trc=smpte2084:colorspace=unknown:range=tv"
+    _ffmpeg(*_video(), "-vf", f"format=yuv420p10le,{tags}", "-c:v", "ffv1", str(path))
+
+
 def _make_rotated(path: Path) -> None:
     plain = path.with_name("unrotated.mp4")
     _ffmpeg(*_video(), *_tone(), "-c:v", "libx264", "-c:a", "aac", "-shortest", str(plain))
@@ -121,6 +126,7 @@ def _make_timecode(path: Path) -> None:
 SAMPLES = {
     "hevc.mkv": _make_hevc,
     "hdr-pq.mkv": _make_hdr,
+    "hdr-untagged.mkv": _make_hdr_untagged_primaries,
     "rotated.mp4": _make_rotated,
     "odd-641x359.mkv": _make_odd,
     "silent.mp4": _make_silent,
