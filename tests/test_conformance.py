@@ -92,6 +92,12 @@ async def test_unreachable_endpoint_fails_fast():
     assert [(check.status, check.name) for check in checks] == [("fail", "transport")]
 
 
+async def test_cleartext_non_loopback_endpoint_fails_without_connecting():
+    checks = await run_checks("http://cassette.example.test/mcp", token="secret", timeout=3)
+    assert [(check.status, check.name) for check in checks] == [("fail", "transport")]
+    assert "HTTPS" in checks[0].detail
+
+
 def _cli(*args: str) -> subprocess.CompletedProcess[str]:
     env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "CASSETTE_AUTH_TOKEN": REFERENCE_TOKEN}
     return subprocess.run(

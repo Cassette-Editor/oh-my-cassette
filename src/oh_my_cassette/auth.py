@@ -82,13 +82,19 @@ def private_auth_directory() -> Path:
     return root
 
 
-def _secure_url(value: str) -> str:
+def secure_url(value: str) -> str:
     url = urlsplit(value)
-    if url.username or url.password or url.fragment:
-        raise AuthenticationError("Invalid authentication URL")
-    if url.scheme != "https" and not (url.scheme == "http" and url.hostname == "127.0.0.1"):
-        raise AuthenticationError("Authentication requires HTTPS or an explicit loopback address")
+    if not url.scheme or not url.hostname or url.username or url.password or url.fragment:
+        raise AuthenticationError("Invalid authentication URL", 403)
+    if url.scheme != "https" and not (url.scheme == "http" and url.hostname in ("127.0.0.1", "::1")):
+        raise AuthenticationError(
+            f"Refused {url.scheme}://{url.hostname}: endpoint URLs must use HTTPS or http://127.0.0.1",
+            403,
+        )
     return value
+
+
+_secure_url = secure_url
 
 
 def _origin(value: str) -> tuple[str, str | None, int | None]:
@@ -214,6 +220,15 @@ class Connection:
 def resource_url() -> str:
     """The Cassette MCP endpoint a new sign-in authorizes: `CASSETTE_MCP_URL`, else Cassette's own."""
     return os.environ.get("CASSETTE_MCP_URL") or DEFAULT_RESOURCE
+
+
+def connection_stamp() -> tuple[int, int] | None:
+    """`(mtime_ns, size)` of `connection.json`, or None when absent; lets a bridge notice `login` or `logout`."""
+    try:
+        stat = (auth_directory() / "connection.json").stat()
+        return (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        return None
 
 
 def saved_connection() -> Connection | None:
@@ -411,6 +426,15 @@ class Credentials:
                 self._grant = None
         return True
 
+    def reload(self) -> None:
+        """Drop in-memory caches when the saved connection on disk has changed."""
+        with self._grant_lock:
+            self._grant = None
+            self._rejected = None
+            self._refused_refresh = None
+        with self._provider_key_lock:
+            self._provider_key = None
+
     async def token(self) -> str:
         try:
             return await anyio.to_thread.run_sync(self._token)
@@ -422,6 +446,8 @@ class Credentials:
         # whether it is there (404, unreachable) or wants one (401).
         if _origin(url) != _origin(self.resource) or not self.configured:
             return {}
+        secure_url(self.resource)
+        secure_url(url)
         return {"Authorization": f"Bearer {await self.token()}"}
 
     async def provider_key_headers(self, url: str) -> dict[str, str]:
@@ -433,6 +459,8 @@ class Credentials:
         if self.explicit_token or _origin(url) != _origin(self.resource):
             return {}
         try:
+            secure_url(self.resource)
+            secure_url(url)
             connection = self._connection()
             key = await anyio.to_thread.run_sync(self._read_provider_key, connection.key)
         except (AuthenticationError, KeyringError, OSError):
@@ -498,6 +526,18 @@ class Credentials:
     async def logout(self) -> None:
         connection = self._connection()
         try:
+            has_key = await anyio.to_thread.run_sync(
+                lambda: provider_key.read_key(self._store(), connection.key) is not None
+            )
+        except KeyringError as exc:
+            raise keyring_unavailable() from exc
+        if has_key:
+            try:
+                await self.release_provider_key()
+            except AuthenticationError as exc:
+                if exc.status == 503:
+                    raise
+        try:
             await anyio.to_thread.run_sync(self._logout, connection)
         except (KeyringError, ValidationError, LockTimeout) as exc:
             raise keyring_unavailable() from exc
@@ -527,10 +567,12 @@ class Credentials:
                 except AuthenticationError as exc:
                     if exc.status == 503:
                         raise
+            store = self._store()
             try:
-                self._store().delete_password(SERVICE, connection.key)
+                store.delete_password(SERVICE, connection.key)
             except PasswordDeleteError:
                 pass
+            provider_key.remove_key(store, connection.key)
             (root / "connection.json").unlink(missing_ok=True)
 
 
@@ -569,7 +611,9 @@ def _revoke_replaced(current: Connection, previous: Connection, grant: Grant) ->
         pass
     if previous.key != current.key:
         try:
-            native_keyring().delete_password(SERVICE, previous.key)
+            store = native_keyring()
+            store.delete_password(SERVICE, previous.key)
+            provider_key.remove_key(store, previous.key)
         except KeyringError:
             pass
 
@@ -706,8 +750,8 @@ def login(*, no_browser: bool = False, cancelled: threading.Event | None = None)
             expires_at=time.time() + float(tokens["expires_in"]),
         )
         root = private_auth_directory()
-        replaced = _saved_grant()
         with FileLock(root / f"{connection.key}.lock", timeout=30):
+            replaced = _saved_grant()
             native_keyring().set_password(SERVICE, connection.key, grant.model_dump_json())
             _write_public(root / "connection.json", asdict(connection))
         if replaced is not None:

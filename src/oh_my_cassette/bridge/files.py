@@ -9,10 +9,13 @@ policy, never widen it. An artifact goes up in one PUT, or in parts whose URLs t
 from __future__ import annotations
 
 import copy
+import errno
 import hashlib
 import ipaddress
 import json
+import logging
 import mimetypes
+import os
 import shutil
 import socket
 import tempfile
@@ -27,6 +30,7 @@ import httpx
 import mcp_types as types
 from mcp.shared.exceptions import MCPError
 
+from oh_my_cassette import provider_key
 from oh_my_cassette.bridge.errors import (
     BridgeError,
     backoff_seconds,
@@ -62,6 +66,9 @@ UPLOAD_CONCURRENCY = 4  # PUTs a call keeps in flight across its files, artifact
 PART_ATTEMPTS = 4  # sends of one part before a transient failure is reported
 PART_URL_MAX_AGE_SEC = 600.0  # a part URL signed longer ago than this is signed again before use
 ABANDON_TIMEOUT_S = 15.0  # how long telling the backend of unsent uploads may hold up the failure
+
+log = logging.getLogger(__name__)
+
 
 # Media types the platform tables often miss.
 for _ext, _mime in {
@@ -112,12 +119,20 @@ SIGNATURES: Mapping[str, Callable[[bytes], bool]] = {
 }
 
 
+def _open_local(path: Path):
+    """Open a resolved local file for binary reading, refusing any symlink swapped into its place."""
+    if path.is_symlink():
+        raise OSError(errno.ELOOP, "Refusing to read through symlink", str(path))
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    return os.fdopen(os.open(path, flags), "rb")
+
+
 def looks_like(path: Path, mime: str) -> bool:
     """Whether the file begins like the kind of media its name says it is; kinds without signatures pass."""
     test = SIGNATURES.get(mime.split("/")[0])
     if test is None:
         return True
-    with path.open("rb") as handle:
+    with _open_local(path) as handle:
         return test(handle.read(16))
 
 
@@ -138,10 +153,18 @@ def _loopback(host: str | None) -> bool:
 # with an address from it and send the connection on to the name it was asked for; refusing it would refuse every
 # transfer on such a network, while letting it through reaches no host of this machine's own network.
 FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+NAT64_WELL_KNOWN = ipaddress.ip_network("64:ff9b::/96")
+NAT64_LOCAL = ipaddress.ip_network("64:ff9b:1::/48")
 
 
 def _public(address: str) -> bool:
     ip = ipaddress.ip_address(address.split("%")[0])
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return ip.ipv4_mapped.is_global or ip.ipv4_mapped in FAKE_IP_NETWORK
+        if ip in NAT64_WELL_KNOWN or ip in NAT64_LOCAL:
+            embedded = ipaddress.IPv4Address(ip.packed[-4:])
+            return embedded.is_global or embedded in FAKE_IP_NETWORK
     return ip.is_global or ip in FAKE_IP_NETWORK
 
 
@@ -150,11 +173,13 @@ def transfer_guard(endpoint: str) -> Callable[[httpx.Request], Awaitable[None]]:
     the endpoint's origin or to HTTPS on a host whose every address is public (or a proxy's fake-ip address), so
     the URLs a backend hands out cannot point this machine at its own network. A loopback endpoint (a local
     backend) is trusted with loopback storage too."""
-    local = _loopback(urlsplit(endpoint).hostname)
+    endpoint_url = urlsplit(endpoint)
+    local = _loopback(endpoint_url.hostname)
+    trusted_origin = endpoint_url.scheme == "https" or local
 
     async def check(request: httpx.Request) -> None:
         url = str(request.url)
-        if same_origin(url, endpoint) or (local and _loopback(request.url.host)):
+        if (trusted_origin and same_origin(url, endpoint)) or (local and _loopback(request.url.host)):
             return
         where = f"{request.url.scheme}://{request.url.host}"
         if request.url.scheme != "https":
@@ -179,7 +204,7 @@ def transfer_guard(endpoint: str) -> Callable[[httpx.Request], Awaitable[None]]:
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
+    with _open_local(path) as handle:
         while chunk := handle.read(CHUNK):
             digest.update(chunk)
     return digest.hexdigest()
@@ -733,8 +758,8 @@ class LocalFiles:
         with anyio.move_on_after(ABANDON_TIMEOUT_S):
             try:
                 await self._upstream.call_tool(complete.name, {"uploadIds": upload_ids, "abandoned": True})
-            except Exception:  # noqa: BLE001 (best effort: the transfer's own failure is reported)
-                pass
+            except Exception:
+                log.debug("could not abandon uploads", exc_info=True)
 
     @staticmethod
     def _targets(tool_name: str, file: UploadFile, puts: Any) -> dict[str, PutTarget]:
@@ -752,7 +777,7 @@ class LocalFiles:
                 raise BridgeError("bridge.contract_violation", f"{tool_name}: upload URLs must be http(s)")
             if not isinstance(headers, Mapping):
                 raise BridgeError("bridge.contract_violation", f"{tool_name}: put headers must be an object")
-            if refused := sorted(str(k) for k in headers if not _signed_header(str(k))):
+            if refused := refused_put_headers(headers):
                 raise BridgeError(
                     "bridge.contract_violation",
                     f"{tool_name}: put header {refused[0]} is not one a backend may set",
@@ -992,6 +1017,7 @@ class LocalFiles:
 # and proxy credentials of this machine, none of which a signed upload needs.
 REFUSED_PUT_HEADERS = frozenset(
     {
+        "authorization",
         "host",
         "cookie",
         "connection",
@@ -1004,6 +1030,7 @@ REFUSED_PUT_HEADERS = frozenset(
         "expect",
         "forwarded",
         "proxy-authorization",
+        provider_key.HEADER,
     }
 )
 
@@ -1013,13 +1040,17 @@ def _signed_header(name: str) -> bool:
     return name not in REFUSED_PUT_HEADERS and not name.startswith(("proxy-", "x-forwarded-"))
 
 
+def refused_put_headers(headers: Mapping[Any, Any]) -> list[str]:
+    return sorted(str(k) for k in headers if not _signed_header(str(k)))
+
+
 def _whole(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
 async def _read(path: Path, start: int, length: int, sent: Callable[[int], None]) -> AsyncIterator[bytes]:
     """`length` bytes of `path` from `start`, counted as they go."""
-    async with await anyio.open_file(path, "rb") as handle:
+    async with anyio.wrap_file(_open_local(path)) as handle:
         await handle.seek(start)
         left = length
         while left > 0 and (chunk := await handle.read(min(CHUNK, left))):

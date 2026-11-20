@@ -562,3 +562,11 @@ def test_an_unresolvable_authentication_host_is_named(environment, monkeypatch):
         auth.discover("https://cassette.test/mcp")
     assert caught.value.status == 503
     assert "cassette.test" in str(caught.value) and "cannot resolve" in str(caught.value)
+
+
+def test_cleartext_non_loopback_endpoints_never_receive_credentials():
+    insecure = "http://cassette.test/mcp"
+    credentials = auth.Credentials(insecure, explicit_token="secret-token")
+    with pytest.raises(auth.AuthenticationError) as caught:
+        anyio.run(credentials.headers, insecure)
+    assert caught.value.status == 403 and "HTTPS" in str(caught.value)

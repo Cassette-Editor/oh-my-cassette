@@ -488,6 +488,11 @@ async def test_a_host_started_in_the_home_folder_reads_only_the_folders_named_fo
     monkeypatch.setenv("CASSETTE_WORKSPACE", str(home))  # chosen on purpose, it is the workspace
     assert not (await cover(BridgeSettings.from_env(cwd=home))).is_error
 
+    monkeypatch.delenv("CASSETTE_WORKSPACE")
+    # A directory above HOME (e.g. /Users or /home) or the system temp root is also too wide by default.
+    assert not BridgeSettings.from_env(cwd=home.parent).workspace_readable
+    assert not BridgeSettings.from_env(cwd=Path(shutil.os.environ.get("TMPDIR") or "/tmp")).workspace_readable
+
 
 @pytest.mark.parametrize(
     "url, refusal",
@@ -500,6 +505,9 @@ async def test_a_host_started_in_the_home_folder_reads_only_the_folders_named_fo
         ("https://10.1.2.3/object", "public"),
         ("https://169.254.169.254/latest/meta-data", "public"),
         ("https://localhost/object", "public"),
+        ("https://[64:ff9b::127.0.0.1]/object", "public"),
+        ("https://[64:ff9b::10.0.0.1]/object", "public"),
+        ("https://[64:ff9b::93.184.216.34]/object", None),
         ("https://198.18.0.7/object", None),  # a fake-ip proxy's answer (the RFC 2544 benchmarking range)
         ("https://198.19.255.254/object", None),
     ],
@@ -524,7 +532,7 @@ async def test_a_fake_ip_answer_passes_but_not_beside_a_private_address(monkeypa
     monkeypatch.setattr(files.anyio, "getaddrinfo", resolve)
     check = transfer_guard("https://mcp.example.com/mcp")
     await check(httpx.Request("PUT", "https://store.example/bucket/key"))
-    with pytest.raises(BridgeError, match="192.168.1.10") as caught:
+    with pytest.raises(BridgeError, match=r"192\.168\.1\.10") as caught:
         await check(httpx.Request("PUT", "https://mixed.example/bucket/key"))
     assert caught.value.code == "bridge.private_address" and not caught.value.retryable
 
@@ -534,10 +542,22 @@ async def test_a_local_backend_may_hand_out_loopback_storage_only():
     await check(httpx.Request("PUT", "http://127.0.0.1:9000/bucket/key"))
     with pytest.raises(BridgeError):
         await check(httpx.Request("PUT", "http://10.0.0.7/bucket/key"))
+    insecure = transfer_guard("http://mcp.example.com/mcp")
+    with pytest.raises(BridgeError, match="HTTPS"):
+        await insecure(httpx.Request("PUT", "http://mcp.example.com/uploads/1"))
 
 
 @pytest.mark.parametrize(
-    "header", ["Host", "Cookie", "Transfer-Encoding", "Proxy-Authorization", "X-Forwarded-For"]
+    "header",
+    [
+        "Host",
+        "Cookie",
+        "Authorization",
+        "x-cassette-provider-key",
+        "Transfer-Encoding",
+        "Proxy-Authorization",
+        "X-Forwarded-For",
+    ],
 )
 def test_put_targets_may_not_set_routing_or_cookie_headers(header):
     artifact = files.UploadArtifact(files.ARTIFACT_ORIGINAL, Path("slide.png"), 10, "0" * 64, "image/png")
@@ -553,3 +573,17 @@ def test_put_targets_may_not_set_routing_or_cookie_headers(header):
     with pytest.raises(BridgeError, match=header) as caught:
         files.LocalFiles._targets("upload.begin", file, [{**put, "headers": {header: "x"}}])
     assert caught.value.code == "bridge.contract_violation"
+
+
+async def test_a_source_replaced_with_a_symlink_before_read_is_refused(tmp_path):
+    outside = tmp_path / "secret.txt"
+    outside.write_bytes(b"secret-bytes-0123456789")
+    link = tmp_path / "swapped.png"
+    link.symlink_to(outside)
+    with pytest.raises(OSError):
+        files.looks_like(link, "image/png")
+    with pytest.raises(OSError):
+        await files.sha256_file(link)
+    with pytest.raises(OSError):
+        async for _ in files._read(link, 0, 5, lambda _: None):
+            pass

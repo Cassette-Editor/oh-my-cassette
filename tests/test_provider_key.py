@@ -177,3 +177,37 @@ async def test_a_key_is_never_sent_to_another_origin_or_with_a_token_override(ke
     assert await credentials.provider_key_headers("https://elsewhere.test/mcp") == {}
     override = auth.Credentials(selected.resource, explicit_token="token", keyring=store)
     assert await override.provider_key_headers("https://cassette.test/mcp") == {}
+
+
+def test_logout_releases_and_forgets_the_saved_key(keyring_home, monkeypatch):
+    root, store = keyring_home
+    selected = connection()
+    auth._write_public(root / "connection.json", asdict(selected))
+    grant = auth.Grant(
+        access_token="access", refresh_token="refresh", expires_at=4_102_444_800, subject=selected.subject
+    )
+    store.set_password(auth.SERVICE, selected.key, grant.model_dump_json())
+    provider_key.save_key(store, selected.key, KEY)
+    events: list[str] = []
+
+    async def release(_credentials):
+        events.append("release_key")
+
+    def handler(request):
+        events.append(f"revoke:{request.url.path}")
+        return auth.httpx.Response(200)
+
+    monkeypatch.setattr(auth.Credentials, "release_provider_key", release)
+    real_client = auth.httpx.Client
+    monkeypatch.setattr(
+        auth.httpx,
+        "Client",
+        lambda **kwargs: real_client(transport=auth.httpx.MockTransport(handler), **kwargs),
+    )
+    with pytest.raises(SystemExit) as exited:
+        cli.main(["logout"])
+    assert exited.value.code == 0
+    assert events == ["release_key", "revoke:/revoke"]
+    assert (provider_key.SERVICE, selected.key) not in store.values
+    assert (auth.SERVICE, selected.key) not in store.values
+    assert not (root / "connection.json").exists()

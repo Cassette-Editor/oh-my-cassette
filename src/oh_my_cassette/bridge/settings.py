@@ -34,6 +34,17 @@ def _env_path(name: str) -> Path | None:
     return Path(raw).expanduser().resolve() if raw else None
 
 
+def _broad_workspace(workspace: Path) -> bool:
+    """True when `workspace` is a filesystem root, `HOME`, an ancestor of `HOME`, or a system temp root."""
+    if workspace == Path(workspace.anchor):
+        return True
+    if Path.home().resolve().is_relative_to(workspace):
+        return True
+    if Path(tempfile.gettempdir()).resolve().is_relative_to(workspace):
+        return True
+    return os.name == "posix" and Path("/tmp").resolve().is_relative_to(workspace)  # noqa: S108
+
+
 @dataclass(frozen=True)
 class BridgeSettings:
     mcp_url: str
@@ -76,7 +87,7 @@ class BridgeSettings:
     def from_env(cls, cwd: str | os.PathLike[str] | None = None) -> BridgeSettings:
         explicit = _env("CASSETTE_WORKSPACE")
         workspace = Path(explicit or cwd or os.getcwd()).expanduser().resolve()
-        broad = workspace in (Path(workspace.anchor), Path.home().resolve())
+        broad = _broad_workspace(workspace)
         roots = tuple(
             Path(item).expanduser()
             for item in (_env("CASSETTE_ALLOWED_ROOTS") or "").split(os.pathsep)

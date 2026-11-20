@@ -20,8 +20,9 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
 
 from oh_my_cassette import __version__
-from oh_my_cassette.bridge.files import same_origin, transfer_guard
-from oh_my_cassette.bridge.upstream import describe, protocol_refusal, require_modern
+from oh_my_cassette.auth import AuthenticationError, secure_url
+from oh_my_cassette.bridge.files import refused_put_headers, same_origin, transfer_guard
+from oh_my_cassette.bridge.upstream import MAX_TOOL_PAGES, describe, protocol_refusal, require_modern
 from oh_my_cassette.contract import (
     ARTIFACT_ORIGINAL,
     BRIDGE_ROLES,
@@ -69,12 +70,17 @@ class _Report:
 async def _all_tools(client: Client) -> list[types.Tool]:
     tools: list[types.Tool] = []
     cursor: str | None = None
-    while True:
+    seen: set[str] = set()
+    for _ in range(MAX_TOOL_PAGES):
         page = await client.list_tools(cursor=cursor)
         tools.extend(page.tools)
         cursor = page.next_cursor
         if not cursor:
             return tools
+        if cursor in seen:
+            raise ContractError("tools/list pagination cursor repeated")
+        seen.add(cursor)
+    raise ContractError(f"tools/list exceeded {MAX_TOOL_PAGES} pages")
 
 
 def _check_tools(report: _Report, tools: list[types.Tool]) -> tuple[list[types.Tool], dict[str, types.Tool]]:
@@ -227,7 +233,12 @@ async def _upload_round_trip(
     if not isinstance(put.get("url"), str) or not put["url"].startswith(("http://", "https://")):
         report.add("fail", "upload round trip", f"{begin.name} returned a put without an http(s) url")
         return
-    headers = {str(k): str(v) for k, v in (put.get("headers") or {}).items()}
+    raw_headers = put.get("headers") or {}
+    if not isinstance(raw_headers, dict) or (refused := refused_put_headers(raw_headers)):
+        what = refused[0] if isinstance(raw_headers, dict) else "non-object headers"
+        report.add("fail", "upload round trip", f"{begin.name} returned disallowed put header: {what}")
+        return
+    headers = {str(k): str(v) for k, v in raw_headers.items()}
     headers["Content-Length"] = str(len(PROBE_PNG))
     if token and same_origin(put["url"], url):
         headers.setdefault("Authorization", f"Bearer {token}")
@@ -270,6 +281,11 @@ async def run_checks(
         elif response.status_code == 404:
             missing.append(404)
 
+    try:
+        secure_url(url)
+    except AuthenticationError as exc:
+        report.add("fail", "transport", str(exc))
+        return report.checks
     http = create_mcp_http_client(headers=headers, timeout=httpx2.Timeout(timeout, read=timeout * 4))
     http.event_hooks = {"response": [on_response]}
     try:
