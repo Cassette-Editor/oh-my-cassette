@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import socket
+import tempfile
 from pathlib import Path
 
 import httpx
@@ -471,6 +472,7 @@ async def test_a_host_started_in_the_home_folder_reads_only_the_folders_named_fo
     for name in ("CASSETTE_WORKSPACE", "CASSETTE_ALLOWED_ROOTS", "CASSETTE_DOWNLOAD_DIR"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # what Path.home() reads on Windows
     monkeypatch.setenv("CASSETTE_MCP_URL", remote.url)
     monkeypatch.setenv("CASSETTE_AUTH_TOKEN", REFERENCE_TOKEN)
     monkeypatch.setenv("CASSETTE_TEMP_DIR", str(tmp_path / "bridge-temp"))
@@ -491,7 +493,7 @@ async def test_a_host_started_in_the_home_folder_reads_only_the_folders_named_fo
     monkeypatch.delenv("CASSETTE_WORKSPACE")
     # A directory above HOME (e.g. /Users or /home) or the system temp root is also too wide by default.
     assert not BridgeSettings.from_env(cwd=home.parent).workspace_readable
-    assert not BridgeSettings.from_env(cwd=Path(shutil.os.environ.get("TMPDIR") or "/tmp")).workspace_readable
+    assert not BridgeSettings.from_env(cwd=Path(tempfile.gettempdir())).workspace_readable
 
 
 @pytest.mark.parametrize(

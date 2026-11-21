@@ -1,4 +1,5 @@
 import hashlib
+import os
 import socket
 import threading
 import time
@@ -97,7 +98,8 @@ def test_credentials_rotate_once_under_competing_clients_and_never_write_tokens_
     assert tokens == ["new-secret"] * 6
     assert len(calls) == 1
     assert all("secret" not in file.read_text() for file in root.glob("*.json"))
-    assert (root / "connection.json").stat().st_mode & 0o777 == 0o600
+    if os.name == "posix":  # Windows keeps no POSIX permission bits; the profile's ACL guards the file there
+        assert (root / "connection.json").stat().st_mode & 0o777 == 0o600
 
 
 def test_credentials_are_isolated_by_account_and_directory(environment):
@@ -322,6 +324,7 @@ def test_login_interruption_closes_callback_and_saves_no_grant(environment, monk
     assert not (root / "connection.json").exists()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
 def test_the_auth_directory_is_kept_to_its_owner(environment):
     root, _ = environment
     root.chmod(0o755)
