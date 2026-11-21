@@ -75,8 +75,8 @@ ask Cassette.
 | You want to | Do this |
 |---|---|
 | Limit what can be read | Keep media in the workspace, or grant narrow `CASSETTE_ALLOWED_ROOTS` — never your whole home directory |
-| Remove your own OpenAI key | `uvx oh-my-cassette==0.7.4 key remove` — asks Cassette to release its in-memory copy, then deletes the keyring entry |
-| Sign this machine out | `uvx oh-my-cassette==0.7.4 logout` — releases any saved OpenAI key, revokes the grant, and deletes the keyring entries |
+| Remove your own OpenAI key | `uvx oh-my-cassette==0.7.5 key remove` — asks Cassette to release its in-memory copy, then deletes the keyring entry |
+| Sign this machine out | `uvx oh-my-cassette==0.7.5 logout` — releases any saved OpenAI key, revokes the grant, and deletes the keyring entries |
 | Remove everything local | Sign out, delete `~/.config/oh-my-cassette`, and uninstall the plugin |
 | Delete a cloud project now | Delete it in Cassette, or leave it idle for three days |
 
